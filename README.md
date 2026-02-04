@@ -27,7 +27,23 @@ Two parts:
 - [x] Persist VM bundles across app restarts (start existing VM without reinstall)
 - [x] Delete VM (stop + remove bundle)
 
-### Phase 2: HTTP REST API (next)
+### Phase 1.5: Host-to-Guest Command Execution PoC (next)
+Establish a vsock + JSON channel to execute commands inside the VM from the host.
+
+**Host side (this app):**
+- [ ] Add `VZVirtioSocketDeviceConfiguration` to VM config
+- [ ] Connect to guest agent on vsock port 9001
+- [ ] Send JSON command `{"command": "...", "args": [...]}`
+- [ ] Receive JSON response `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+- [ ] Add "Run Command" UI to test it
+
+**Guest agent (runs inside the VM):**
+- [ ] Small Swift CLI tool that listens on vsock port 9001
+- [ ] Reads JSON commands, executes via `Process`, returns JSON output
+- [ ] Build as standalone binary, manually install into VM
+- [ ] Set up as launchd agent for auto-start
+
+### Phase 2: HTTP REST API
 - [ ] Add FlyingFox HTTP server dependency
 - [ ] Expose API on `http://localhost:9090`
 - [ ] `GET /health` — health check
