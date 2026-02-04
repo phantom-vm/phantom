@@ -5,7 +5,7 @@ A macOS app that manages macOS virtual machines using Apple's Virtualization.fra
 ## Architecture
 
 Two parts:
-* **Daemon app** (this repo) — SwiftUI macOS app that exposes a JSON REST API for VM lifecycle management
+* **Daemon app** (this repo) — SwiftUI macOS app that exposes a JSON API over TCP for VM lifecycle management
 * **CLI tool** (`../phantom-cli`) — Bun-based CLI that calls the daemon's API
 
 ## MVP CLI Commands
@@ -43,22 +43,23 @@ Establish a vsock + JSON channel to execute commands inside the VM from the host
 - [ ] Build as standalone binary, manually install into VM
 - [ ] Set up as launchd agent for auto-start
 
-### Phase 2: HTTP REST API
-- [ ] Add FlyingFox HTTP server dependency
-- [ ] Expose API on `http://localhost:9090`
-- [ ] `GET /health` — health check
-- [ ] `GET /images` — list downloaded images
-- [ ] `POST /images/pull` — download latest image
-- [ ] `GET /vms` — list running VMs
-- [ ] `POST /vms` — create & start VM
-- [ ] `DELETE /vms/:id` — stop VM
+### Phase 2: TCP JSON API (Network.framework)
+Zero-dependency TCP server on localhost using Apple's Network.framework. Newline-delimited JSON protocol.
 
-### Phase 3: CLI Tool
+- [ ] Create `TCPServer` using `NWListener` on `localhost:9090`
+- [ ] Define JSON-RPC-style request/response protocol:
+  - Request: `{"method": "images.list"}` / `{"method": "vms.create", "params": {"imageId": "..."}}`
+  - Response: `{"result": {...}}` / `{"error": "..."}`
+- [ ] Implement handlers: `health`, `images.list`, `images.pull`, `vms.list`, `vms.create`, `vms.stop`
+- [ ] Start server on app launch alongside VM manager
+
+### Phase 3: CLI Tool (Bun)
 - [ ] Scaffold Bun project at `../phantom-cli`
-- [ ] Implement CLI commands that call the REST API
+- [ ] TCP client using `Bun.connect()` to `localhost:9090`
+- [ ] Implement CLI commands that send JSON requests and print results
 
 ## Tech Stack
 
 - Swift, SwiftUI, Virtualization.framework
-- FlyingFox (lightweight async HTTP server, zero dependencies)
+- Network.framework (TCP server, zero dependencies)
 - Storage: `~/Library/Application Support/phantom/`
