@@ -27,20 +27,21 @@ Two parts:
 - [x] Persist VM bundles across app restarts (start existing VM without reinstall)
 - [x] Delete VM (stop + remove bundle)
 
-### Phase 1.5: Host-to-Guest Command Execution PoC (next)
+### Phase 1.5: Host-to-Guest Command Execution PoC (done)
 Establish a vsock + JSON channel to execute commands inside the VM from the host.
 
 **Host side (this app):**
-- [ ] Add `VZVirtioSocketDeviceConfiguration` to VM config
-- [ ] Connect to guest agent on vsock port 9001
-- [ ] Send JSON command `{"command": "...", "args": [...]}`
-- [ ] Receive JSON response `{"stdout": "...", "stderr": "...", "exitCode": 0}`
-- [ ] Add "Run Command" UI to test it
+- [x] Add `VZVirtioSocketDeviceConfiguration` to VM config
+- [x] Connect to guest agent on vsock port 9001
+- [x] Send JSON command `{"command": "...", "args": [...]}`
+- [x] Receive JSON response `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+- [x] Add "Run Command" UI to test it
+- [x] Shared directory via `VZVirtioFileSystemDeviceConfiguration` for file transfer
 
 **Guest agent (runs inside the VM):**
-- [ ] Small Swift CLI tool that listens on vsock port 9001
-- [ ] Reads JSON commands, executes via `Process`, returns JSON output
-- [ ] Build as standalone binary, manually install into VM
+- [x] Small Swift CLI tool that listens on vsock port 9001
+- [x] Reads JSON commands, executes via `Process`, returns JSON output
+- [x] Build as standalone binary, manually install into VM
 - [ ] Set up as launchd agent for auto-start
 
 ### Phase 2: TCP JSON API (Network.framework)

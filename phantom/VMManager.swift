@@ -334,6 +334,87 @@ class VMManager {
         }
     }
 
+    // MARK: - Guest Command Execution
+
+    struct ExecRequest: Codable {
+        let command: String
+        let args: [String]?
+    }
+
+    struct ExecResponse: Codable {
+        let stdout: String
+        let stderr: String
+        let exitCode: Int32
+    }
+
+    private(set) var lastExecResult: ExecResponse?
+
+    func executeCommand(_ command: String, args: [String]? = nil) async {
+        guard vmState == .running, let vm = virtualMachine else {
+            log("Cannot execute command: VM not running")
+            return
+        }
+
+        guard let socketDevice = vm.socketDevices.first as? VZVirtioSocketDevice else {
+            log("Cannot execute command: no vsock device")
+            return
+        }
+
+        log("Executing: \(command) \(args?.joined(separator: " ") ?? "")")
+
+        do {
+            let connection = try await socketDevice.connect(toPort: 9001)
+            let fd = connection.fileDescriptor
+
+            let request = ExecRequest(command: command, args: args)
+            var requestData = try JSONEncoder().encode(request)
+            requestData.append(0x0A) // newline delimiter
+
+            requestData.withUnsafeBytes { ptr in
+                _ = write(fd, ptr.baseAddress!, ptr.count)
+            }
+
+            // Read response (newline-delimited JSON)
+            let responseData = try await readLine(from: fd)
+
+            let response = try JSONDecoder().decode(ExecResponse.self, from: responseData)
+            lastExecResult = response
+
+            if !response.stdout.isEmpty {
+                log("stdout: \(response.stdout.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
+            }
+            if !response.stderr.isEmpty {
+                log("stderr: \(response.stderr.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
+            }
+            log("Exit code: \(response.exitCode)")
+
+            connection.close()
+        } catch {
+            log("Exec failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func readLine(from fd: Int32) async throws -> Data {
+        return try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global().async {
+                var buffer = Data()
+                var byte: UInt8 = 0
+                while true {
+                    let n = read(fd, &byte, 1)
+                    if n <= 0 {
+                        cont.resume(throwing: PhantomError.connectionClosed)
+                        return
+                    }
+                    if byte == 0x0A {
+                        cont.resume(returning: buffer)
+                        return
+                    }
+                    buffer.append(byte)
+                }
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func ensureDirectories() {
@@ -406,6 +487,17 @@ class VMManager {
 
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
+        // Vsock for host-guest communication
+        config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+
+        // Shared directory (host → guest)
+        let sharedDir = baseDir.appendingPathComponent("shared", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
+        let share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: sharedDir, readOnly: false))
+        let fsConfig = VZVirtioFileSystemDeviceConfiguration(tag: "phantom-shared")
+        fsConfig.share = share
+        config.directorySharingDevices = [fsConfig]
+
         return config
     }
 
@@ -443,12 +535,14 @@ enum PhantomError: LocalizedError {
     case unsupportedHardware
     case diskCreationFailed
     case vmBundleCorrupted
+    case connectionClosed
 
     var errorDescription: String? {
         switch self {
         case .unsupportedHardware: "This Mac doesn't support the restore image's hardware requirements"
         case .diskCreationFailed: "Failed to create disk image"
         case .vmBundleCorrupted: "VM bundle is missing required files"
+        case .connectionClosed: "Connection to guest agent closed"
         }
     }
 }

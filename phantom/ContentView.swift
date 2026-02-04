@@ -4,6 +4,7 @@ import Virtualization
 struct ContentView: View {
     @Bindable var vm: VMManager
     @Environment(\.openWindow) private var openWindow
+    @State private var commandText = ""
 
     var body: some View {
         HSplitView {
@@ -77,6 +78,41 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // Exec section
+                if vm.vmState == .running {
+                    GroupBox("Run Command") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                TextField("Command", text: $commandText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit { runCommand() }
+                                Button("Run") { runCommand() }
+                                    .disabled(commandText.isEmpty)
+                            }
+
+                            if let result = vm.lastExecResult {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if !result.stdout.isEmpty {
+                                        Text(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .textSelection(.enabled)
+                                    }
+                                    if !result.stderr.isEmpty {
+                                        Text(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.red)
+                                            .textSelection(.enabled)
+                                    }
+                                    Text("Exit: \(result.exitCode)")
+                                        .font(.caption)
+                                        .foregroundStyle(result.exitCode == 0 ? .green : .red)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 Spacer()
@@ -155,6 +191,12 @@ struct ContentView: View {
     }
 
     // MARK: - Computed
+
+    private func runCommand() {
+        let cmd = commandText
+        commandText = ""
+        Task { await vm.executeCommand(cmd) }
+    }
 
     private var canDownload: Bool {
         vm.imageState == .none || {
