@@ -5,6 +5,7 @@ struct ContentView: View {
     @Bindable var vm: VMManager
     @Environment(\.openWindow) private var openWindow
     @State private var commandText = ""
+    @State private var selectedVMId: String?
 
     var body: some View {
         HSplitView {
@@ -14,12 +15,12 @@ struct ContentView: View {
                     .font(.title2.bold())
 
                 // Image section
-                GroupBox("Restore Image") {
+                GroupBox("IPSW Images") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             imageStatusView
                             Spacer()
-                            Button("Download Image") {
+                            Button("Download") {
                                 Task { await vm.downloadImage() }
                             }
                             .disabled(!canDownload)
@@ -38,43 +39,52 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // VM section
-                GroupBox("Virtual Machine") {
+                // VM list section
+                GroupBox("Virtual Machines") {
                     VStack(alignment: .leading, spacing: 8) {
+                        let vms = vm.listVMs()
+
+                        if vms.isEmpty {
+                            Text("No VMs")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ScrollView {
+                                VStack(spacing: 4) {
+                                    ForEach(vms, id: \.id) { vmInfo in
+                                        VMRow(
+                                            vmInfo: vmInfo,
+                                            isSelected: selectedVMId == vmInfo.id,
+                                            isCurrentVM: vm.currentBundlePath?.lastPathComponent == vmInfo.id,
+                                            vmState: vm.currentBundlePath?.lastPathComponent == vmInfo.id ? vm.vmState : nil,
+                                            onSelect: { selectedVMId = vmInfo.id },
+                                            onStart: {
+                                                selectedVMId = vmInfo.id
+                                                Task { await vm.startVM(vmId: vmInfo.id) }
+                                            },
+                                            onStop: {
+                                                Task { await vm.stopVM() }
+                                            },
+                                            onDelete: {
+                                                Task { await vm.deleteVM(vmId: vmInfo.id) }
+                                            },
+                                            onShowDisplay: {
+                                                openWindow(id: "vm-display")
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 200)
+                        }
+
+                        Divider()
+
                         HStack {
-                            vmStatusView
-                            Spacer()
-
-                            if vm.vmState == .running {
-                                Button("Show Display") {
-                                    openWindow(id: "vm-display")
-                                }
-                                Button("Stop") {
-                                    Task { await vm.stopVM() }
-                                }
-                            } else if vm.hasExistingVM {
-                                Button("Start VM") {
-                                    Task { await vm.startExistingVM() }
-                                }
-                                .disabled(vm.vmState == .creating)
-                            } else {
-                                Button("Create & Start VM") {
-                                    Task { await vm.createAndStartVM() }
-                                }
-                                .disabled(!canCreateVM)
+                            Button("Create from IPSW") {
+                                Task { await vm.createAndStartVM() }
                             }
-                        }
-
-                        if case .installing(let progress) = vm.vmState {
-                            ProgressView(value: progress)
-                            Text("Installing: \(Int(progress * 100))%")
-                                .font(.caption.monospacedDigit())
-                        }
-
-                        if canDeleteVM {
-                            Button("Delete VM", role: .destructive) {
-                                Task { await vm.deleteVM() }
-                            }
+                            .disabled(!canCreateVM)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -167,29 +177,6 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var vmStatusView: some View {
-        switch vm.vmState {
-        case .none:
-            Label("No VM", systemImage: "desktopcomputer")
-        case .creating:
-            Label("Creating...", systemImage: "gear")
-        case .installing:
-            Label("Installing macOS...", systemImage: "arrow.triangle.2.circlepath")
-        case .running:
-            Label("Running", systemImage: "play.circle.fill")
-                .foregroundStyle(.green)
-        case .stopping:
-            Label("Stopping...", systemImage: "stop.circle")
-        case .stopped:
-            Label("Stopped", systemImage: "stop.circle.fill")
-                .foregroundStyle(.orange)
-        case .error(let msg):
-            Label(msg, systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
-        }
-    }
-
     // MARK: - Computed
 
     private func runCommand() {
@@ -214,12 +201,87 @@ struct ContentView: View {
         }
         return false
     }
+}
 
-    private var canDeleteVM: Bool {
-        vm.vmState == .stopped || vm.vmState == .running || {
-            if case .error = vm.vmState { return true }
-            return false
-        }()
+// MARK: - VM Row
+
+struct VMRow: View {
+    let vmInfo: VMInfo
+    let isSelected: Bool
+    let isCurrentVM: Bool
+    let vmState: VMManager.VMState?
+    let onSelect: () -> Void
+    let onStart: () -> Void
+    let onStop: () -> Void
+    let onDelete: () -> Void
+    let onShowDisplay: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(vmInfo.id)
+                    .font(.system(.body, design: .monospaced))
+                if let vmState = vmState {
+                    vmStatusLabel(vmState)
+                        .font(.caption)
+                } else {
+                    Text(vmInfo.state)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if isCurrentVM {
+                if vmState == .running {
+                    Button("Display") { onShowDisplay() }
+                        .buttonStyle(.bordered)
+                    Button("Stop") { onStop() }
+                        .buttonStyle(.bordered)
+                } else if vmState == .stopped {
+                    Button("Start") { onStart() }
+                        .buttonStyle(.bordered)
+                } else if case .installing(let progress) = vmState {
+                    ProgressView(value: progress)
+                        .frame(width: 60)
+                }
+            } else if vmInfo.state == "stopped" {
+                Button("Start") { onStart() }
+                    .buttonStyle(.bordered)
+            }
+
+            Button("Delete", role: .destructive) { onDelete() }
+                .buttonStyle(.bordered)
+        }
+        .padding(8)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+    }
+
+    @ViewBuilder
+    private func vmStatusLabel(_ state: VMManager.VMState) -> some View {
+        switch state {
+        case .none:
+            Label("None", systemImage: "circle")
+        case .creating:
+            Label("Creating...", systemImage: "gear")
+        case .installing:
+            Label("Installing...", systemImage: "arrow.triangle.2.circlepath")
+        case .running:
+            Label("Running", systemImage: "play.circle.fill")
+                .foregroundStyle(.green)
+        case .stopping:
+            Label("Stopping...", systemImage: "stop.circle")
+        case .stopped:
+            Label("Stopped", systemImage: "stop.circle.fill")
+                .foregroundStyle(.orange)
+        case .error(let msg):
+            Label(msg, systemImage: "xmark.circle.fill")
+                .foregroundStyle(.red)
+        }
     }
 }
 

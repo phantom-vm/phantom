@@ -334,6 +334,46 @@ class VMManager {
         }
     }
 
+    func startVM(vmId: String) async {
+        // Stop current VM if running
+        if vmState == .running {
+            await stopVM()
+        }
+
+        // Set the bundle path to the specified VM
+        let bundlePath = vmsDir.appendingPathComponent(vmId)
+        guard FileManager.default.fileExists(atPath: bundlePath.path) else {
+            log("VM not found: \(vmId)")
+            vmState = .error("VM not found: \(vmId)")
+            return
+        }
+
+        currentBundlePath = bundlePath
+        await startExistingVM()
+    }
+
+    func deleteVM(vmId: String) async {
+        // If deleting the current VM, use the existing deleteVM logic
+        if currentBundlePath?.lastPathComponent == vmId {
+            await deleteVM()
+            return
+        }
+
+        // Delete a different VM
+        let bundlePath = vmsDir.appendingPathComponent(vmId)
+        guard FileManager.default.fileExists(atPath: bundlePath.path) else {
+            log("VM not found: \(vmId)")
+            return
+        }
+
+        do {
+            try FileManager.default.removeItem(at: bundlePath)
+            log("Deleted VM bundle: \(vmId)")
+        } catch {
+            log("Failed to delete VM: \(error.localizedDescription)")
+        }
+    }
+
     func cloneVM(sourceVmId: String) async throws -> String {
         // Find source VM bundle
         let sourceBundle = vmsDir.appendingPathComponent(sourceVmId)
