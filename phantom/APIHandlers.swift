@@ -121,19 +121,18 @@ struct APIHandlers {
             throw APIHandlerError.missingParam("vmId")
         }
 
-        // Check if specified VM is the current running VM
-        guard let currentPath = vmManager.currentBundlePath,
-              currentPath.lastPathComponent == vmId else {
+        // Check if VM exists
+        guard let instance = vmManager.vmInstances[vmId] else {
             throw APIHandlerError.vmNotFound(vmId)
         }
 
         // Check if VM is actually running
-        guard case .running = vmManager.vmState else {
+        guard case .running = instance.state else {
             throw APIHandlerError.vmNotRunning(vmId)
         }
 
         // Stop the VM
-        await vmManager.stopVM()
+        await vmManager.stopVM(vmId: vmId)
 
         return AnyCodable([
             "status": "stopped",

@@ -28,11 +28,14 @@ struct phantomApp: App {
                 }
         }
         Window("VM Display", id: "vm-display") {
-            if let virtualMachine = vm.virtualMachine, vm.vmState == .running {
+            if let vmId = vm.displayedVMId,
+               let instance = vm.vmInstances[vmId],
+               case .running = instance.state,
+               let virtualMachine = instance.virtualMachine {
                 VMDisplayView(virtualMachine: virtualMachine)
                     .frame(minWidth: 1024, minHeight: 768)
             } else {
-                Text("No VM running")
+                Text("No VM selected or VM not running")
                     .frame(width: 400, height: 300)
             }
         }

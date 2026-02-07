@@ -36,9 +36,17 @@ class VMManager {
     }
 
     private(set) var imageState: ImageState = .none
-    private(set) var vmState: VMState = .none
     private(set) var imageInfo: String = ""
     private(set) var logs: [String] = []
+
+    // MARK: - VM Instance
+
+    struct VMInstance {
+        let vmId: String
+        let bundlePath: URL
+        var state: VMState
+        var virtualMachine: VZVirtualMachine?
+    }
 
     // MARK: - Private
 
@@ -50,10 +58,10 @@ class VMManager {
     private var imagesDir: URL { baseDir.appendingPathComponent("images", isDirectory: true) }
     private var vmsDir: URL { baseDir.appendingPathComponent("vms", isDirectory: true) }
 
-    private(set) var virtualMachine: VZVirtualMachine?
+    private(set) var vmInstances: [String: VMInstance] = [:]
     private var downloadTask: URLSessionDownloadTask?
     private var downloadDelegate: DownloadDelegate?
-    private(set) var currentBundlePath: URL?
+    private(set) var displayedVMId: String? = nil
 
     /// Whether an existing installed VM bundle was found on disk
     private(set) var hasExistingVM: Bool = false
@@ -61,7 +69,7 @@ class VMManager {
     init() {
         ensureDirectories()
         checkExistingImage()
-        checkExistingVM()
+        loadExistingVMs()
     }
 
     // MARK: - Public API
@@ -128,14 +136,20 @@ class VMManager {
         }
     }
 
-    func createAndStartVM() async {
+    func createAndStartVM(vmId: String? = nil) async {
         guard case .downloaded(let ipswPath) = imageState else { return }
-        guard vmState == .none || vmState == .stopped || {
-            if case .error = vmState { return true }
-            return false
-        }() else { return }
 
-        vmState = .creating
+        let generatedId = vmId ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
+
+        // Create VM instance entry
+        let bundlePath = vmsDir.appendingPathComponent(generatedId, isDirectory: true)
+        vmInstances[generatedId] = VMInstance(
+            vmId: generatedId,
+            bundlePath: bundlePath,
+            state: .creating,
+            virtualMachine: nil
+        )
+
         log("Loading restore image from \(ipswPath.lastPathComponent)...")
 
         do {
@@ -149,12 +163,9 @@ class VMManager {
                 throw PhantomError.unsupportedHardware
             }
 
-            let vmID = UUID().uuidString.prefix(8).lowercased()
-            let bundlePath = vmsDir.appendingPathComponent("vm-\(vmID)", isDirectory: true)
             try FileManager.default.createDirectory(at: bundlePath, withIntermediateDirectories: true)
-            currentBundlePath = bundlePath
 
-            log("Creating VM bundle at \(bundlePath.lastPathComponent)...")
+            log("Creating VM bundle at \(generatedId)...")
 
             // Disk image — 64GB sparse
             let diskPath = bundlePath.appendingPathComponent("disk.img")
@@ -190,16 +201,16 @@ class VMManager {
 
             // Create and install
             let vm = VZVirtualMachine(configuration: config)
-            self.virtualMachine = vm
+            vmInstances[generatedId]?.virtualMachine = vm
 
             log("Installing macOS (this will take a while)...")
-            vmState = .installing(progress: 0)
+            vmInstances[generatedId]?.state = .installing(progress: 0)
 
             let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipswPath)
 
-            let observation = installer.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
+            let observation = installer.progress.observe(\.fractionCompleted) { [weak self, generatedId] progress, _ in
                 Task { @MainActor in
-                    self?.vmState = .installing(progress: progress.fractionCompleted)
+                    self?.vmInstances[generatedId]?.state = .installing(progress: progress.fractionCompleted)
                     if Int(progress.fractionCompleted * 100) % 10 == 0 {
                         self?.log("Installation progress: \(Int(progress.fractionCompleted * 100))%")
                     }
@@ -225,28 +236,35 @@ class VMManager {
                 log("Starting VM...")
                 try await vm.start()
             }
-            vmState = .running
-            log("VM is running")
+            vmInstances[generatedId]?.state = .running
+            log("VM \(generatedId) is running")
 
         } catch {
             log("VM error: \(error.localizedDescription)")
-            vmState = .error(error.localizedDescription)
+            vmInstances[generatedId]?.state = .error(error.localizedDescription)
         }
     }
 
     /// Start an existing VM from a previously installed bundle (no reinstall needed)
-    func startExistingVM() async {
-        guard let bundlePath = currentBundlePath else {
-            log("No existing VM bundle found")
+    private func startExistingVM(vmId: String) async {
+        guard let instance = vmInstances[vmId] else {
+            log("VM not found: \(vmId)")
             return
         }
-        guard vmState == .none || vmState == .stopped || {
-            if case .error = vmState { return true }
-            return false
-        }() else { return }
 
-        vmState = .creating
-        log("Loading existing VM from \(bundlePath.lastPathComponent)...")
+        let bundlePath = instance.bundlePath
+
+        // Only start if VM is in stopped, none, or error state
+        switch instance.state {
+        case .none, .stopped, .error:
+            break
+        default:
+            log("VM \(vmId) cannot be started in current state: \(instance.state.apiString)")
+            return
+        }
+
+        vmInstances[vmId]?.state = .creating
+        log("Loading existing VM from \(vmId)...")
 
         do {
             let hwPath = bundlePath.appendingPathComponent("HardwareModel")
@@ -282,93 +300,80 @@ class VMManager {
             log("VM configuration validated")
 
             let vm = VZVirtualMachine(configuration: config)
-            self.virtualMachine = vm
+            vmInstances[vmId]?.virtualMachine = vm
 
             log("Starting VM...")
             try await vm.start()
-            vmState = .running
-            log("VM is running")
+            vmInstances[vmId]?.state = .running
+            log("VM \(vmId) is running")
 
         } catch {
             log("VM error: \(error.localizedDescription)")
-            vmState = .error(error.localizedDescription)
+            vmInstances[vmId]?.state = .error(error.localizedDescription)
         }
     }
 
-    func stopVM() async {
-        guard vmState == .running, let vm = virtualMachine else { return }
+    func stopVM(vmId: String) async {
+        guard let instance = vmInstances[vmId],
+              case .running = instance.state,
+              let vm = instance.virtualMachine else { return }
 
-        vmState = .stopping
-        log("Stopping VM...")
+        vmInstances[vmId]?.state = .stopping
+        log("Stopping VM \(vmId)...")
 
         do {
             try await vm.stop()
-            vmState = .stopped
-            virtualMachine = nil
-            log("VM stopped")
+            vmInstances[vmId]?.state = .stopped
+            vmInstances[vmId]?.virtualMachine = nil
+            log("VM \(vmId) stopped")
         } catch {
             log("Failed to stop VM: \(error.localizedDescription)")
-            vmState = .error(error.localizedDescription)
-        }
-    }
-
-    func deleteVM() async {
-        if vmState == .running {
-            await stopVM()
-        }
-
-        guard let bundlePath = currentBundlePath else {
-            log("No VM bundle to delete")
-            return
-        }
-
-        do {
-            try FileManager.default.removeItem(at: bundlePath)
-            log("Deleted VM bundle: \(bundlePath.lastPathComponent)")
-            currentBundlePath = nil
-            virtualMachine = nil
-            hasExistingVM = false
-            vmState = .none
-        } catch {
-            log("Failed to delete VM: \(error.localizedDescription)")
+            vmInstances[vmId]?.state = .error(error.localizedDescription)
         }
     }
 
     func startVM(vmId: String) async {
-        // Stop current VM if running
-        if vmState == .running {
-            await stopVM()
+        // Ensure VM exists in dictionary
+        if vmInstances[vmId] == nil {
+            let bundlePath = vmsDir.appendingPathComponent(vmId)
+            guard FileManager.default.fileExists(atPath: bundlePath.path) else {
+                log("VM not found: \(vmId)")
+                return
+            }
+            // Add to dictionary
+            vmInstances[vmId] = VMInstance(
+                vmId: vmId,
+                bundlePath: bundlePath,
+                state: .stopped,
+                virtualMachine: nil
+            )
         }
 
-        // Set the bundle path to the specified VM
-        let bundlePath = vmsDir.appendingPathComponent(vmId)
-        guard FileManager.default.fileExists(atPath: bundlePath.path) else {
-            log("VM not found: \(vmId)")
-            vmState = .error("VM not found: \(vmId)")
-            return
-        }
+        await startExistingVM(vmId: vmId)
+    }
 
-        currentBundlePath = bundlePath
-        await startExistingVM()
+    func setDisplayedVM(vmId: String?) {
+        displayedVMId = vmId
     }
 
     func deleteVM(vmId: String) async {
-        // If deleting the current VM, use the existing deleteVM logic
-        if currentBundlePath?.lastPathComponent == vmId {
-            await deleteVM()
-            return
+        // Stop VM if running
+        if let instance = vmInstances[vmId], case .running = instance.state {
+            await stopVM(vmId: vmId)
         }
 
-        // Delete a different VM
-        let bundlePath = vmsDir.appendingPathComponent(vmId)
-        guard FileManager.default.fileExists(atPath: bundlePath.path) else {
+        guard let instance = vmInstances[vmId] else {
             log("VM not found: \(vmId)")
             return
         }
 
         do {
-            try FileManager.default.removeItem(at: bundlePath)
+            try FileManager.default.removeItem(at: instance.bundlePath)
             log("Deleted VM bundle: \(vmId)")
+            vmInstances.removeValue(forKey: vmId)
+
+            // Update hasExistingVM flag
+            hasExistingVM = !vmInstances.isEmpty
         } catch {
             log("Failed to delete VM: \(error.localizedDescription)")
         }
@@ -442,8 +447,10 @@ class VMManager {
 
     private(set) var lastExecResult: ExecResponse?
 
-    func executeCommand(_ command: String, args: [String]? = nil) async {
-        guard vmState == .running, let vm = virtualMachine else {
+    func executeCommand(_ command: String, args: [String]? = nil, vmId: String) async {
+        guard let instance = vmInstances[vmId],
+              case .running = instance.state,
+              let vm = instance.virtualMachine else {
             log("Cannot execute command: VM not running")
             return
         }
@@ -453,7 +460,7 @@ class VMManager {
             return
         }
 
-        log("Executing: \(command) \(args?.joined(separator: " ") ?? "")")
+        log("Executing on \(vmId): \(command) \(args?.joined(separator: " ") ?? "")")
 
         do {
             let connection = try await socketDevice.connect(toPort: 9001)
@@ -523,25 +530,31 @@ class VMManager {
         log("Found existing image: \(ipsw.lastPathComponent)")
     }
 
-    private func checkExistingVM() {
+    private func loadExistingVMs() {
         guard let entries = try? FileManager.default.contentsOfDirectory(at: vmsDir, includingPropertiesForKeys: nil) else { return }
-        // Find first VM bundle that has all required files (installed successfully)
+
         for entry in entries {
             let diskPath = entry.appendingPathComponent("disk.img")
             let hwPath = entry.appendingPathComponent("HardwareModel")
             let idPath = entry.appendingPathComponent("MachineIdentifier")
             let auxPath = entry.appendingPathComponent("AuxiliaryStorage")
+
             if FileManager.default.fileExists(atPath: diskPath.path),
                FileManager.default.fileExists(atPath: hwPath.path),
                FileManager.default.fileExists(atPath: idPath.path),
                FileManager.default.fileExists(atPath: auxPath.path) {
-                currentBundlePath = entry
-                hasExistingVM = true
-                vmState = .stopped
-                log("Found existing VM: \(entry.lastPathComponent)")
-                return
+                let vmId = entry.lastPathComponent
+                vmInstances[vmId] = VMInstance(
+                    vmId: vmId,
+                    bundlePath: entry,
+                    state: .stopped,
+                    virtualMachine: nil
+                )
+                log("Found existing VM: \(vmId)")
             }
         }
+
+        hasExistingVM = !vmInstances.isEmpty
     }
 
     private func buildVMConfiguration(
@@ -645,32 +658,13 @@ class VMManager {
     }
 
     func listVMs() -> [VMInfo] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: vmsDir,
-            includingPropertiesForKeys: nil
-        ) else {
-            return []
-        }
-
-        return entries.compactMap { entry in
-            let diskPath = entry.appendingPathComponent("disk.img")
-            guard FileManager.default.fileExists(atPath: diskPath.path) else {
-                return nil
-            }
-
-            let state: String
-            if entry == currentBundlePath {
-                state = vmState.apiString
-            } else {
-                state = "stopped"
-            }
-
-            return VMInfo(
-                id: entry.lastPathComponent,
-                path: entry.path,
-                state: state
+        return vmInstances.values.map { instance in
+            VMInfo(
+                id: instance.vmId,
+                path: instance.bundlePath.path,
+                state: instance.state.apiString
             )
-        }
+        }.sorted { $0.id < $1.id }
     }
 }
 

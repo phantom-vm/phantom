@@ -55,20 +55,20 @@ struct ContentView: View {
                                         VMRow(
                                             vmInfo: vmInfo,
                                             isSelected: selectedVMId == vmInfo.id,
-                                            isCurrentVM: vm.currentBundlePath?.lastPathComponent == vmInfo.id,
-                                            vmState: vm.currentBundlePath?.lastPathComponent == vmInfo.id ? vm.vmState : nil,
+                                            vmInstance: vm.vmInstances[vmInfo.id],
                                             onSelect: { selectedVMId = vmInfo.id },
                                             onStart: {
                                                 selectedVMId = vmInfo.id
                                                 Task { await vm.startVM(vmId: vmInfo.id) }
                                             },
                                             onStop: {
-                                                Task { await vm.stopVM() }
+                                                Task { await vm.stopVM(vmId: vmInfo.id) }
                                             },
                                             onDelete: {
                                                 Task { await vm.deleteVM(vmId: vmInfo.id) }
                                             },
                                             onShowDisplay: {
+                                                vm.setDisplayedVM(vmId: vmInfo.id)
                                                 openWindow(id: "vm-display")
                                             }
                                         )
@@ -91,8 +91,10 @@ struct ContentView: View {
                 }
 
                 // Exec section
-                if vm.vmState == .running {
-                    GroupBox("Run Command") {
+                if let selectedVMId = selectedVMId,
+                   let instance = vm.vmInstances[selectedVMId],
+                   case .running = instance.state {
+                    GroupBox("Run Command on \(selectedVMId)") {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 TextField("Command", text: $commandText)
@@ -180,9 +182,10 @@ struct ContentView: View {
     // MARK: - Computed
 
     private func runCommand() {
+        guard let vmId = selectedVMId else { return }
         let cmd = commandText
         commandText = ""
-        Task { await vm.executeCommand(cmd) }
+        Task { await vm.executeCommand(cmd, vmId: vmId) }
     }
 
     private var canDownload: Bool {
@@ -194,10 +197,7 @@ struct ContentView: View {
 
     private var canCreateVM: Bool {
         if case .downloaded = vm.imageState {
-            return vm.vmState == .none || vm.vmState == .stopped || {
-                if case .error = vm.vmState { return true }
-                return false
-            }()
+            return true
         }
         return false
     }
@@ -208,8 +208,7 @@ struct ContentView: View {
 struct VMRow: View {
     let vmInfo: VMInfo
     let isSelected: Bool
-    let isCurrentVM: Bool
-    let vmState: VMManager.VMState?
+    let vmInstance: VMManager.VMInstance?
     let onSelect: () -> Void
     let onStart: () -> Void
     let onStop: () -> Void
@@ -221,8 +220,8 @@ struct VMRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(vmInfo.id)
                     .font(.system(.body, design: .monospaced))
-                if let vmState = vmState {
-                    vmStatusLabel(vmState)
+                if let vmInstance = vmInstance {
+                    vmStatusLabel(vmInstance.state)
                         .font(.caption)
                 } else {
                     Text(vmInfo.state)
@@ -233,22 +232,19 @@ struct VMRow: View {
 
             Spacer()
 
-            if isCurrentVM {
-                if vmState == .running {
+            if let vmInstance = vmInstance {
+                if vmInstance.state == .running {
                     Button("Display") { onShowDisplay() }
                         .buttonStyle(.bordered)
                     Button("Stop") { onStop() }
                         .buttonStyle(.bordered)
-                } else if vmState == .stopped {
+                } else if vmInstance.state == .stopped {
                     Button("Start") { onStart() }
                         .buttonStyle(.bordered)
-                } else if case .installing(let progress) = vmState {
+                } else if case .installing(let progress) = vmInstance.state {
                     ProgressView(value: progress)
                         .frame(width: 60)
                 }
-            } else if vmInfo.state == "stopped" {
-                Button("Start") { onStart() }
-                    .buttonStyle(.bordered)
             }
 
             Button("Delete", role: .destructive) { onDelete() }
