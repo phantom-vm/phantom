@@ -527,6 +527,74 @@ class VMManager {
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logs.append("[\(timestamp)] \(message)")
     }
+
+    // MARK: - API Support
+
+    func listImages() -> [ImageInfo] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: imagesDir,
+            includingPropertiesForKeys: [.fileSizeKey]
+        ) else {
+            return []
+        }
+
+        return files.filter { $0.pathExtension == "ipsw" }.compactMap { url in
+            guard let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey]),
+                  let size = resourceValues.fileSize else {
+                return nil
+            }
+            return ImageInfo(
+                id: url.deletingPathExtension().lastPathComponent,
+                path: url.path,
+                size: size
+            )
+        }
+    }
+
+    func listVMs() -> [VMInfo] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: vmsDir,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+
+        return entries.compactMap { entry in
+            let diskPath = entry.appendingPathComponent("disk.img")
+            guard FileManager.default.fileExists(atPath: diskPath.path) else {
+                return nil
+            }
+
+            let state: String
+            if entry == currentBundlePath {
+                state = vmState.apiString
+            } else {
+                state = "stopped"
+            }
+
+            return VMInfo(
+                id: entry.lastPathComponent,
+                path: entry.path,
+                state: state
+            )
+        }
+    }
+}
+
+// MARK: - VMState API Extension
+
+extension VMManager.VMState {
+    var apiString: String {
+        switch self {
+        case .none: return "none"
+        case .creating: return "creating"
+        case .installing(let progress): return "installing(\(Int(progress * 100))%)"
+        case .running: return "running"
+        case .stopping: return "stopping"
+        case .stopped: return "stopped"
+        case .error(let message): return "error: \(message)"
+        }
+    }
 }
 
 // MARK: - Errors
