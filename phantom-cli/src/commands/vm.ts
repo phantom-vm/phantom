@@ -65,3 +65,25 @@ export async function vmStop(vmId: string) {
 
   console.log(`VM ${vmId} stopped`);
 }
+
+export async function vmDelete(vmId: string) {
+  if (!vmId) {
+    console.error("Error: VM_ID required");
+    console.error("Usage: phantom delete <VM_ID>");
+    process.exit(1);
+  }
+
+  console.log(`Deleting VM ${vmId}...`);
+
+  const response = await sendRequest({
+    method: "vms.delete",
+    params: { vmId },
+  });
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(`VM ${vmId} deleted`);
+}

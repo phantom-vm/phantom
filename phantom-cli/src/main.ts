@@ -1,5 +1,5 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
-import { vmList, vmStop } from "./commands/vm";
+import { vmList, vmStop, vmDelete } from "./commands/vm";
 import { vmCreate } from "./commands/create";
 import { health } from "./commands/health";
 import { route } from "./router";
@@ -21,6 +21,9 @@ const commands = {
   },
   stop: {
     handler: vmStop as (arg?: string) => Promise<void>,
+  },
+  delete: {
+    handler: vmDelete as (arg?: string) => Promise<void>,
   },
   health: {
     handler: health as (arg?: string) => Promise<void>,
@@ -49,8 +52,9 @@ Commands:
   ipsw list                       List available IPSW images
   create --from-ipsw <IPSW_ID>    Create VM from IPSW image
   create --from-vm <VM_ID>        Clone existing VM
-  list                            Show running VMs
+  list                            Show all VMs
   stop <VM_ID>                    Stop a running VM
+  delete <VM_ID>                  Delete a VM
   health                          Check daemon status
 
 Examples:
@@ -60,6 +64,7 @@ Examples:
   phantom create --from-vm my-template-vm
   phantom list
   phantom stop vm-abc123
+  phantom delete vm-abc123
 `);
 }
 

@@ -34,6 +34,8 @@ struct APIHandlers {
             return try await handleVmsCreate(params: request.params)
         case "vms.stop":
             return try await handleVmsStop(params: request.params)
+        case "vms.delete":
+            return try await handleVmsDelete(params: request.params)
         default:
             throw APIHandlerError.unknownMethod(request.method)
         }
@@ -143,6 +145,20 @@ struct APIHandlers {
 
         return AnyCodable([
             "status": "stopped",
+            "vmId": vmId
+        ])
+    }
+
+    private func handleVmsDelete(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+
+        // Delete the VM
+        await vmManager.deleteVM(vmId: vmId)
+
+        return AnyCodable([
+            "status": "deleted",
             "vmId": vmId
         ])
     }
