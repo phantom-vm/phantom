@@ -25,9 +25,9 @@ struct APIHandlers {
         case "health":
             return try await handleHealth()
         case "ipsw.list":
-            return try await handleImagesList()
+            return try await handleIpswList()
         case "ipsw.pull":
-            return try await handleImagesPull()
+            return try await handleIpswPull()
         case "vms.list":
             return try await handleVmsList()
         case "vms.create":
@@ -45,14 +45,14 @@ struct APIHandlers {
         AnyCodable(["status": "ok", "version": "1.0.0"])
     }
 
-    private func handleImagesList() async throws -> AnyCodable {
+    private func handleIpswList() async throws -> AnyCodable {
         let images = vmManager.listImages()
         return AnyCodable(["images": images.map { image in
             ["id": image.id, "path": image.path, "size": image.size]
         }])
     }
 
-    private func handleImagesPull() async throws -> AnyCodable {
+    private func handleIpswPull() async throws -> AnyCodable {
         // Trigger download - happens async in background
         await vmManager.downloadImage()
 
