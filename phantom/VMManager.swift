@@ -490,7 +490,7 @@ class VMManager {
         // Vsock for host-guest communication
         config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
 
-        // Shared directory (host → guest)
+        // Shared directory (host → guest) - common across all VMs
         let sharedDir = baseDir.appendingPathComponent("shared", isDirectory: true)
         try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
         let share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: sharedDir, readOnly: false))

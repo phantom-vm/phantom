@@ -42,7 +42,7 @@ Establish a vsock + JSON channel to execute commands inside the VM from the host
 - [x] Small Swift CLI tool that listens on vsock port 9001
 - [x] Reads JSON commands, executes via `Process`, returns JSON output
 - [x] Build as standalone binary, manually install into VM
-- [ ] Set up as launchd agent for auto-start
+- [x] Set up as launchd agent for auto-start
 
 ### Phase 2: TCP JSON API (Network.framework)
 Zero-dependency TCP server on localhost using Apple's Network.framework. Newline-delimited JSON protocol.
