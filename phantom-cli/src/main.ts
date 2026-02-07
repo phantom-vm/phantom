@@ -12,10 +12,8 @@ const commands = {
       pull: imagePull,
     },
   },
-  vm: {
-    subcommands: {
-      list: vmList,
-    },
+  list: {
+    handler: vmList as (arg?: string) => Promise<void>,
   },
   run: {
     handler: vmRun as (arg?: string) => Promise<void>,
@@ -48,7 +46,7 @@ Usage:
 Commands:
   image pull          Download macOS restore image from Apple
   image list          List available images
-  vm list             Show running VMs
+  list                Show running VMs
   run <IMAGE>         Create and start a new VM from image
   stop <VM_ID>        Stop a running VM
   health              Check daemon status
@@ -56,7 +54,7 @@ Commands:
 Examples:
   phantom image pull
   phantom image list
-  phantom vm list
+  phantom list
   phantom run 24C61
   phantom stop vm-abc123
 `);
