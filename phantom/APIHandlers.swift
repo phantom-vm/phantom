@@ -71,14 +71,12 @@ struct APIHandlers {
     }
 
     private func handleVmsCreate(params: [String: AnyCodable]?) async throws -> AnyCodable {
-        guard let imageId = params?["imageId"]?.value as? String else {
-            throw APIHandlerError.missingParam("imageId")
-        }
+        let imageId = params?["imageId"]?.value as? String
+        let sourceVmId = params?["sourceVmId"]?.value as? String
 
-        // Verify image exists
-        let images = vmManager.listImages()
-        guard images.contains(where: { $0.id == imageId }) else {
-            throw APIHandlerError.imageNotFound(imageId)
+        // Must have exactly one source
+        guard (imageId != nil) != (sourceVmId != nil) else {
+            throw APIHandlerError.invalidParams("Must specify either 'imageId' or 'sourceVmId', but not both")
         }
 
         // Check if already creating/installing/running
@@ -89,13 +87,36 @@ struct APIHandlers {
             break
         }
 
-        // Start VM creation (async operation)
-        await vmManager.createAndStartVM()
+        // Create from IPSW image
+        if let imageId = imageId {
+            // Verify image exists
+            let images = vmManager.listImages()
+            guard images.contains(where: { $0.id == imageId }) else {
+                throw APIHandlerError.imageNotFound(imageId)
+            }
 
-        return AnyCodable([
-            "status": "started",
-            "message": "VM creation started"
-        ])
+            // Start VM creation (async operation)
+            await vmManager.createAndStartVM()
+
+            return AnyCodable([
+                "status": "started",
+                "message": "VM creation from IPSW started"
+            ])
+        }
+
+        // Clone from existing VM
+        if let sourceVmId = sourceVmId {
+            // Verify source VM exists
+            let vms = vmManager.listVMs()
+            guard vms.contains(where: { $0.id == sourceVmId }) else {
+                throw APIHandlerError.vmNotFound(sourceVmId)
+            }
+
+            // TODO: Implement VM cloning logic
+            throw APIHandlerError.notImplemented("VM cloning not yet implemented")
+        }
+
+        throw APIHandlerError.invalidParams("Invalid parameters")
     }
 
     private func handleVmsStop(params: [String: AnyCodable]?) async throws -> AnyCodable {
@@ -129,19 +150,23 @@ struct APIHandlers {
 enum APIHandlerError: LocalizedError {
     case unknownMethod(String)
     case missingParam(String)
+    case invalidParams(String)
     case imageNotFound(String)
     case vmNotFound(String)
     case vmNotRunning(String)
     case vmAlreadyExists(String)
+    case notImplemented(String)
 
     var code: String {
         switch self {
         case .unknownMethod: return "unknown_method"
         case .missingParam: return "missing_param"
+        case .invalidParams: return "invalid_params"
         case .imageNotFound: return "image_not_found"
         case .vmNotFound: return "vm_not_found"
         case .vmNotRunning: return "vm_not_running"
         case .vmAlreadyExists: return "vm_already_exists"
+        case .notImplemented: return "not_implemented"
         }
     }
 
@@ -151,6 +176,8 @@ enum APIHandlerError: LocalizedError {
             return "Unknown method: \(method)"
         case .missingParam(let param):
             return "Missing required parameter: \(param)"
+        case .invalidParams(let message):
+            return message
         case .imageNotFound(let id):
             return "Image not found: \(id)"
         case .vmNotFound(let id):
@@ -158,6 +185,8 @@ enum APIHandlerError: LocalizedError {
         case .vmNotRunning(let id):
             return "VM is not running: \(id)"
         case .vmAlreadyExists(let message):
+            return message
+        case .notImplemented(let message):
             return message
         }
     }

@@ -29,41 +29,26 @@ export async function vmCreate(...args: string[]) {
     process.exit(1);
   }
 
-  // Create from IPSW
-  if (fromIpsw) {
-    console.log(`Creating VM from IPSW ${fromIpsw}...`);
+  // Build params based on source
+  const params: { imageId?: string; sourceVmId?: string } = fromIpsw
+    ? { imageId: fromIpsw }
+    : { sourceVmId: fromVm };
 
-    const response = await sendRequest({
-      method: "vms.create",
-      params: { imageId: fromIpsw },
-    });
+  const sourceType = fromIpsw ? "IPSW" : "VM";
+  const sourceId = fromIpsw || fromVm;
 
-    if (response.error) {
-      console.error(`Error: ${response.error.message}`);
-      process.exit(1);
-    }
+  console.log(`Creating VM from ${sourceType} ${sourceId}...`);
 
-    console.log(response.result?.message || "VM creation started");
-    console.log("\nNote: VM creation happens in the background. Use 'phantom list' to check status.");
-    return;
+  const response = await sendRequest({
+    method: "vms.create",
+    params,
+  });
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
   }
 
-  // Clone from VM
-  if (fromVm) {
-    console.log(`Cloning VM ${fromVm}...`);
-
-    const response = await sendRequest({
-      method: "vms.clone",
-      params: { vmId: fromVm },
-    });
-
-    if (response.error) {
-      console.error(`Error: ${response.error.message}`);
-      process.exit(1);
-    }
-
-    console.log(response.result?.message || "VM cloning started");
-    console.log("\nNote: VM cloning happens in the background. Use 'phantom list' to check status.");
-    return;
-  }
+  console.log(response.result?.message || "VM creation started");
+  console.log("\nNote: VM creation happens in the background. Use 'phantom list' to check status.");
 }
