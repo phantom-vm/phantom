@@ -24,9 +24,9 @@ struct APIHandlers {
         switch request.method {
         case "health":
             return try await handleHealth()
-        case "images.list":
+        case "ipsw.list":
             return try await handleImagesList()
-        case "images.pull":
+        case "ipsw.pull":
             return try await handleImagesPull()
         case "vms.list":
             return try await handleVmsList()

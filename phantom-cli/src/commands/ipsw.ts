@@ -1,7 +1,7 @@
 import { sendRequest, type Image } from "../lib/api";
 
 export async function ipswList() {
-  const response = await sendRequest({ method: "images.list" });
+  const response = await sendRequest({ method: "ipsw.list" });
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);
@@ -25,7 +25,7 @@ export async function ipswList() {
 export async function ipswPull() {
   console.log("Starting IPSW download...");
 
-  const response = await sendRequest({ method: "images.pull" });
+  const response = await sendRequest({ method: "ipsw.pull" });
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);
