@@ -10,15 +10,28 @@ Run and manage macOS virtual machines on your Mac from the command line.
 
 ## Roadmap
 
-### VM Cloning (Planned)
+### VM Creation (Planned)
 
-Fast VM cloning using APFS copy-on-write:
+Create VMs from IPSW images or clone existing VMs:
 
 ```bash
-phantom clone <source-vm> <new-vm>
+# Create from IPSW image
+phantom create --from-ipsw <ipsw-id>
+
+# Clone from existing VM (uses APFS copy-on-write)
+phantom create --from-vm <vm-id>
+```
+
+**IPSW Management:**
+```bash
+phantom ipsw pull          # Download macOS restore image from Apple
+phantom ipsw list          # List available IPSW images
 ```
 
 **Implementation:**
+- Rename `image` commands to `ipsw` throughout CLI
+- Replace `run <IMAGE>` with `create --from-ipsw <ipsw-id>`
+- Add `create --from-vm <vm-id>` for cloning functionality
 - Copy VM bundle files (disk.img, AuxiliaryStorage, HardwareModel)
 - Regenerate MachineIdentifier for unique VM identity
 - Leverage APFS CoW - clones don't claim space until disk writes occur
@@ -33,7 +46,7 @@ phantom clone <source-vm> <new-vm>
 Run temporary VMs that auto-delete after use:
 
 ```bash
-phantom run --rm <template-vm> <command>
+phantom create --from-vm <template-vm> --rm -- <command>
 ```
 
 **How it works:**
@@ -41,4 +54,4 @@ phantom run --rm <template-vm> <command>
 - Perfect for CI/CD, testing, one-off tasks
 - Like `docker run --rm` but for full macOS VMs
 
-**Requires:** VM cloning implementation
+**Requires:** VM creation implementation
