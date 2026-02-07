@@ -60,7 +60,8 @@ phantom/
 **State Management**:
 - Uses `@Observable` macro for reactive state
 - All state mutations happen on `@MainActor`
-- Observable properties: `imageState`, `vmState`, `logs`, etc.
+- Tracks multiple VMs via `vmInstances` dictionary
+- Observable properties: `imageState`, `vmInstances`, `logs`, etc.
 
 **Initialization Flow**:
 1. App launches → `phantomApp.body` renders
@@ -507,13 +508,27 @@ enum APIHandlerError: LocalizedError {
 @MainActor
 @Observable
 class VMManager {
+    struct VMInstance {
+        let vmId: String
+        let bundlePath: URL
+        var state: VMState
+        var virtualMachine: VZVirtualMachine?
+    }
+
     private(set) var imageState: ImageState = .none
-    private(set) var vmState: VMState = .none
-    private(set) var currentBundlePath: URL?
+    private(set) var vmInstances: [String: VMInstance] = [:]
+    private(set) var displayedVMId: String? = nil
     private(set) var hasExistingVM: Bool = false
     private(set) var logs: [String] = []
 }
 ```
+
+**Multi-VM Architecture**:
+- Each VM tracked independently via `VMInstance` in `vmInstances` dictionary
+- Key is VM ID (e.g., "vm-abc123")
+- Each instance maintains its own state, virtual machine reference, and bundle path
+- Multiple VMs can exist simultaneously, but typically only one runs at a time
+- `displayedVMId` tracks which VM's display window should be shown
 
 **State Transitions**:
 
@@ -548,10 +563,26 @@ var body: some View {
         ProgressView(value: progress)
     }
 
+    // Display all VMs
+    ForEach(vm.listVMs(), id: \.id) { vmInfo in
+        let instance = vm.vmInstances[vmInfo.id]
+        HStack {
+            Text(vmInfo.id)
+            if let instance = instance {
+                Text(instance.state.apiString)
+                if instance.state == .running {
+                    Button("Stop") {
+                        Task { await vm.stopVM(vmId: vmInfo.id) }
+                    }
+                }
+            }
+        }
+    }
+
     Button("Create VM") {
         Task { await vm.createAndStartVM() }
     }
-    .disabled(vm.vmState != .none)
+    .disabled(!canCreateVM)
 }
 ```
 
@@ -619,11 +650,15 @@ var body: some View {
 
 **Trade-off**: All API requests serialize through main thread. Future enhancement: Move heavy computation to background.
 
-### Single VM at a Time
+### Multi-VM State Management
 
-**Rationale**: Simplifies MVP implementation. One running VM per daemon instance.
+**Implementation**: VMManager tracks multiple VMs via `vmInstances` dictionary. Each VM has independent state.
 
-**Trade-off**: Can't manage multiple VMs concurrently. Future enhancement: Multi-VM support.
+**Rationale**: Enables managing multiple VMs concurrently - create, clone, list, and control multiple VMs from single daemon.
+
+**Trade-off**: Increased state complexity, but enables essential VM management workflows like cloning and fleet management.
+
+**Note**: While multiple VMs can exist, typically only one runs at a time due to resource constraints.
 
 ---
 
