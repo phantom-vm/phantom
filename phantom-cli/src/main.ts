@@ -1,22 +1,23 @@
-import { imageList, imagePull } from "./commands/image";
-import { vmList, vmRun, vmStop } from "./commands/vm";
+import { ipswList, ipswPull } from "./commands/ipsw";
+import { vmList, vmStop } from "./commands/vm";
+import { vmCreate } from "./commands/create";
 import { health } from "./commands/health";
 import { route } from "./router";
 
 // MARK: - Command Registry
 
 const commands = {
-  image: {
+  ipsw: {
     subcommands: {
-      list: imageList,
-      pull: imagePull,
+      list: ipswList,
+      pull: ipswPull,
     },
+  },
+  create: {
+    multiArgHandler: vmCreate,
   },
   list: {
     handler: vmList as (arg?: string) => Promise<void>,
-  },
-  run: {
-    handler: vmRun as (arg?: string) => Promise<void>,
   },
   stop: {
     handler: vmStop as (arg?: string) => Promise<void>,
@@ -44,18 +45,20 @@ Usage:
   phantom <command> [options]
 
 Commands:
-  image pull          Download macOS restore image from Apple
-  image list          List available images
-  list                Show running VMs
-  run <IMAGE>         Create and start a new VM from image
-  stop <VM_ID>        Stop a running VM
-  health              Check daemon status
+  ipsw pull                       Download macOS restore image from Apple
+  ipsw list                       List available IPSW images
+  create --from-ipsw <IPSW_ID>    Create VM from IPSW image
+  create --from-vm <VM_ID>        Clone existing VM
+  list                            Show running VMs
+  stop <VM_ID>                    Stop a running VM
+  health                          Check daemon status
 
 Examples:
-  phantom image pull
-  phantom image list
+  phantom ipsw pull
+  phantom ipsw list
+  phantom create --from-ipsw 24C61
+  phantom create --from-vm my-template-vm
   phantom list
-  phantom run 24C61
   phantom stop vm-abc123
 `);
 }

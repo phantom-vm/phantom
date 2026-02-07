@@ -1,4 +1,5 @@
 type CommandHandler = (arg?: string) => Promise<void> | void;
+type MultiArgCommandHandler = (...args: string[]) => Promise<void> | void;
 
 interface SubcommandConfig {
   [subcommand: string]: () => Promise<void>;
@@ -6,6 +7,7 @@ interface SubcommandConfig {
 
 interface CommandConfig {
   handler?: CommandHandler;
+  multiArgHandler?: MultiArgCommandHandler;
   subcommands?: SubcommandConfig;
 }
 
@@ -47,7 +49,13 @@ export async function route(registry: CommandRegistry, args: string[]) {
     return;
   }
 
-  // Handle direct commands
+  // Handle direct commands with multiple args
+  if (config.multiArgHandler) {
+    await config.multiArgHandler(...args.slice(1));
+    return;
+  }
+
+  // Handle direct commands with single arg
   if (config.handler) {
     await config.handler(subcommand);
     return;
