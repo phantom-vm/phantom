@@ -81,14 +81,6 @@ struct APIHandlers {
             throw APIHandlerError.invalidParams("Must specify either 'imageId' or 'sourceVmId', but not both")
         }
 
-        // Check if already creating/installing/running
-        switch vmManager.vmState {
-        case .creating, .installing, .running:
-            throw APIHandlerError.vmAlreadyExists("A VM is already running or being created")
-        default:
-            break
-        }
-
         // Create from IPSW image
         if let imageId = imageId {
             // Verify image exists
