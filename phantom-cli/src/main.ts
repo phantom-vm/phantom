@@ -1,5 +1,3 @@
-#!/usr/bin/env bun
-
 // MARK: - Types
 
 interface APIRequest {
@@ -148,7 +146,7 @@ async function vmRun(imageId: string) {
   }
 
   console.log(response.result?.message || "VM creation started");
-  console.log("\nNote: VM creation happens in the background. Use 'phantom ps' to check status.");
+  console.log("\nNote: VM creation happens in the background. Use 'phantom vm list' to check status.");
 }
 
 async function vmStop(vmId: string) {
@@ -194,7 +192,7 @@ Usage:
 Commands:
   image pull          Download macOS restore image from Apple
   image list          List available images
-  ps                  Show running VMs
+  vm list             Show running VMs
   run <IMAGE>         Create and start a new VM from image
   stop <VM_ID>        Stop a running VM
   health              Check daemon status
@@ -202,8 +200,8 @@ Commands:
 Examples:
   phantom image pull
   phantom image list
+  phantom vm list
   phantom run 24C61
-  phantom ps
   phantom stop vm-abc123
 `);
 }
@@ -232,8 +230,14 @@ async function main() {
         console.error("Available: list, pull");
         process.exit(1);
       }
-    } else if (command === "ps") {
-      await vmList();
+    } else if (command === "vm") {
+      if (subcommand === "list") {
+        await vmList();
+      } else {
+        console.error(`Unknown vm subcommand: ${subcommand}`);
+        console.error("Available: list");
+        process.exit(1);
+      }
     } else if (command === "run") {
       await vmRun(subcommand || "");
     } else if (command === "stop") {
