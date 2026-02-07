@@ -55,10 +55,19 @@ Zero-dependency TCP server on localhost using Apple's Network.framework. Newline
 - [x] Implement handlers: `health`, `images.list`, `images.pull`, `vms.list`, `vms.create`, `vms.stop`
 - [x] Start server on app launch alongside VM manager
 
-### Phase 3: CLI Tool (Bun)
-- [ ] Scaffold Bun project at `./phantom-cli`
-- [ ] TCP client using `Bun.connect()` to `localhost:9090`
-- [ ] Implement CLI commands that send JSON requests and print results
+### Phase 3: CLI Tool (Bun) (done)
+- [x] Scaffold Bun project at `./phantom-cli`
+- [x] TCP client using `Bun.connect()` to `localhost:9090`
+- [x] Implement CLI commands that send JSON requests and print results
+
+Usage:
+```bash
+cd phantom-cli
+bun run src/main.ts image list
+bun run src/main.ts ps
+bun run src/main.ts run <IMAGE>
+bun run src/main.ts stop <VM_ID>
+```
 
 ## Tech Stack
 
