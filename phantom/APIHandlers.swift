@@ -106,14 +106,17 @@ struct APIHandlers {
 
         // Clone from existing VM
         if let sourceVmId = sourceVmId {
-            // Verify source VM exists
-            let vms = vmManager.listVMs()
-            guard vms.contains(where: { $0.id == sourceVmId }) else {
-                throw APIHandlerError.vmNotFound(sourceVmId)
+            // Clone the VM (async operation)
+            do {
+                let newVmId = try await vmManager.cloneVM(sourceVmId: sourceVmId)
+                return AnyCodable([
+                    "status": "success",
+                    "message": "VM cloned successfully",
+                    "vmId": newVmId
+                ])
+            } catch {
+                throw APIHandlerError.cloneFailed(error.localizedDescription)
             }
-
-            // TODO: Implement VM cloning logic
-            throw APIHandlerError.notImplemented("VM cloning not yet implemented")
         }
 
         throw APIHandlerError.invalidParams("Invalid parameters")
@@ -155,7 +158,7 @@ enum APIHandlerError: LocalizedError {
     case vmNotFound(String)
     case vmNotRunning(String)
     case vmAlreadyExists(String)
-    case notImplemented(String)
+    case cloneFailed(String)
 
     var code: String {
         switch self {
@@ -166,7 +169,7 @@ enum APIHandlerError: LocalizedError {
         case .vmNotFound: return "vm_not_found"
         case .vmNotRunning: return "vm_not_running"
         case .vmAlreadyExists: return "vm_already_exists"
-        case .notImplemented: return "not_implemented"
+        case .cloneFailed: return "clone_failed"
         }
     }
 
@@ -186,7 +189,7 @@ enum APIHandlerError: LocalizedError {
             return "VM is not running: \(id)"
         case .vmAlreadyExists(let message):
             return message
-        case .notImplemented(let message):
+        case .cloneFailed(let message):
             return message
         }
     }

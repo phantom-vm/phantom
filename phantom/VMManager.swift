@@ -334,6 +334,59 @@ class VMManager {
         }
     }
 
+    func cloneVM(sourceVmId: String) async throws -> String {
+        // Find source VM bundle
+        let sourceBundle = vmsDir.appendingPathComponent(sourceVmId)
+        guard FileManager.default.fileExists(atPath: sourceBundle.path) else {
+            throw PhantomError.vmNotFound(sourceVmId)
+        }
+
+        // Verify source VM has all required files
+        let sourceDiskPath = sourceBundle.appendingPathComponent("disk.img")
+        let sourceHwPath = sourceBundle.appendingPathComponent("HardwareModel")
+        let sourceAuxPath = sourceBundle.appendingPathComponent("AuxiliaryStorage")
+
+        guard FileManager.default.fileExists(atPath: sourceDiskPath.path),
+              FileManager.default.fileExists(atPath: sourceHwPath.path),
+              FileManager.default.fileExists(atPath: sourceAuxPath.path) else {
+            throw PhantomError.vmBundleCorrupted
+        }
+
+        // Create new VM bundle
+        let cloneId = UUID().uuidString.prefix(8).lowercased()
+        let cloneBundle = vmsDir.appendingPathComponent("vm-\(cloneId)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cloneBundle, withIntermediateDirectories: true)
+
+        log("Cloning VM \(sourceVmId) to vm-\(cloneId)...")
+
+        // Clone disk image using APFS copy-on-write (clonefile syscall)
+        let cloneDiskPath = cloneBundle.appendingPathComponent("disk.img")
+        let cloneResult = clonefile(sourceDiskPath.path, cloneDiskPath.path, 0)
+        guard cloneResult == 0 else {
+            try? FileManager.default.removeItem(at: cloneBundle)
+            throw PhantomError.cloneFailed("Failed to clone disk image")
+        }
+        log("Cloned disk image (APFS CoW)")
+
+        // Copy AuxiliaryStorage
+        let cloneAuxPath = cloneBundle.appendingPathComponent("AuxiliaryStorage")
+        try FileManager.default.copyItem(at: sourceAuxPath, to: cloneAuxPath)
+        log("Copied auxiliary storage")
+
+        // Copy HardwareModel
+        let cloneHwPath = cloneBundle.appendingPathComponent("HardwareModel")
+        try FileManager.default.copyItem(at: sourceHwPath, to: cloneHwPath)
+
+        // Generate new MachineIdentifier (required for unique VM identity)
+        let newMachineIdentifier = VZMacMachineIdentifier()
+        let cloneIdPath = cloneBundle.appendingPathComponent("MachineIdentifier")
+        try newMachineIdentifier.dataRepresentation.write(to: cloneIdPath)
+        log("Generated new machine identifier")
+
+        log("Clone complete: vm-\(cloneId)")
+        return "vm-\(cloneId)"
+    }
+
     // MARK: - Guest Command Execution
 
     struct ExecRequest: Codable {
@@ -603,6 +656,8 @@ enum PhantomError: LocalizedError {
     case unsupportedHardware
     case diskCreationFailed
     case vmBundleCorrupted
+    case vmNotFound(String)
+    case cloneFailed(String)
     case connectionClosed
 
     var errorDescription: String? {
@@ -610,6 +665,8 @@ enum PhantomError: LocalizedError {
         case .unsupportedHardware: "This Mac doesn't support the restore image's hardware requirements"
         case .diskCreationFailed: "Failed to create disk image"
         case .vmBundleCorrupted: "VM bundle is missing required files"
+        case .vmNotFound(let id): "VM not found: \(id)"
+        case .cloneFailed(let message): message
         case .connectionClosed: "Connection to guest agent closed"
         }
     }
