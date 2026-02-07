@@ -43,6 +43,7 @@ Establish a vsock + JSON channel to execute commands inside the VM from the host
 - [x] Reads JSON commands, executes via `Process`, returns JSON output
 - [x] Build as standalone binary, manually install into VM
 - [x] Set up as launchd agent for auto-start (see [phantom-agent/README.md](phantom-agent/README.md))
+  - Note: Host-side setup script could be moved to phantom CLI in the future
 
 ### Phase 2: TCP JSON API (Network.framework)
 Zero-dependency TCP server on localhost using Apple's Network.framework. Newline-delimited JSON protocol.
