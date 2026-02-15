@@ -11,7 +11,7 @@ export async function vmList() {
   const vms = response.result?.vms as VM[] || [];
 
   if (vms.length === 0) {
-    console.log("No VMs. Run 'phantom run <IMAGE>' to create one.");
+    console.log("No VMs. Run 'phantom create --from-ipsw <IPSW_ID>' to create one.");
     return;
   }
 
@@ -21,18 +21,18 @@ export async function vmList() {
   }
 }
 
-export async function vmRun(imageId: string) {
-  if (!imageId) {
-    console.error("Error: IMAGE required");
-    console.error("Usage: phantom run <IMAGE>");
+export async function vmRun(ipswId: string) {
+  if (!ipswId) {
+    console.error("Error: IPSW_ID required");
+    console.error("Usage: phantom run <IPSW_ID>");
     process.exit(1);
   }
 
-  console.log(`Creating VM from image ${imageId}...`);
+  console.log(`Creating VM from IPSW ${ipswId}...`);
 
   const response = await sendRequest({
     method: "vms.create",
-    params: { imageId },
+    params: { ipswId },
   });
 
   if (response.error) {

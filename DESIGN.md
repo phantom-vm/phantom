@@ -51,17 +51,20 @@ The daemon is a standard macOS SwiftUI application with three main subsystems:
 phantom/
 ├── phantomApp.swift      # App entry point, initializes TCPServer
 ├── ContentView.swift     # SwiftUI GUI
-├── VMManager.swift       # VM lifecycle management
-├── TCPServer.swift       # Network.framework TCP server
 ├── APIHandlers.swift     # API request routing
-└── APIModels.swift       # JSON protocol definitions
+├── APIModels.swift       # JSON protocol definitions
+└── Libs/
+    ├── VMManager.swift   # VM lifecycle management
+    ├── IPSWManager.swift # IPSW download and listing
+    └── TCPServer.swift   # Network.framework TCP server
 ```
 
 **State Management**:
 - Uses `@Observable` macro for reactive state
 - All state mutations happen on `@MainActor`
-- Tracks multiple VMs via `vmInstances` dictionary
-- Observable properties: `imageState`, `vmInstances`, `logs`, etc.
+- `IPSWManager` owns IPSW download state, referenced by `VMManager.ipswManager`
+- `VMManager` tracks multiple VMs via `vmInstances` dictionary
+- Observable properties: `ipswManager.state`, `vmInstances`, `logs`, etc.
 
 **Initialization Flow**:
 1. App launches → `phantomApp.body` renders
@@ -300,7 +303,7 @@ CLI                     Daemon                  VM
 {
   "method": "vms.create",
   "params": {
-    "imageId": "25C56"
+    "ipswId": "25C56"
   }
 }
 ```
@@ -319,8 +322,8 @@ Or on error:
 ```json
 {
   "error": {
-    "code": "image_not_found",
-    "message": "Image not found: 25C56"
+    "code": "ipsw_not_found",
+    "message": "IPSW not found: 25C56"
   }
 }
 ```
@@ -356,18 +359,18 @@ Or on error:
 - **Purpose**: Check daemon status
 - **Response**: `{"status": "ok", "version": "1.0.0"}`
 
-### images.list
+### ipsw.list
 - **Purpose**: List downloaded IPSW files
 - **Implementation**: Scans `~/Library/Application Support/phantom/ipsws/`
-- **Response**: `{"images": [{"id": "25C56", "path": "...", "size": 17000000000}]}`
+- **Response**: `{"ipsws": [{"id": "25C56", "path": "...", "size": 17000000000}]}`
 
-### images.pull
-- **Purpose**: Download macOS restore image
+### ipsw.pull
+- **Purpose**: Download macOS restore IPSW
 - **Implementation**:
   - Fetches `VZMacOSRestoreImage.latestSupported`
   - Downloads via URLSession with progress tracking
   - Returns immediately (async operation)
-- **Response**: `{"status": "started", "message": "Image download started"}`
+- **Response**: `{"status": "started", "message": "IPSW download started"}`
 
 ### ipsw.status
 - **Purpose**: Poll current IPSW download state
@@ -379,10 +382,10 @@ Or on error:
 - **Response**: `{"vms": [{"id": "vm-abc", "path": "...", "state": "running"}]}`
 
 ### vms.create
-- **Params**: `imageId` (string)
+- **Params**: `ipswId` (string)
 - **Purpose**: Create and start new VM
 - **Implementation**:
-  - Validates image exists
+  - Validates IPSW exists
   - Creates VM bundle directory
   - Creates disk image
   - Installs macOS
@@ -450,7 +453,7 @@ try await withCheckedThrowingContinuation { cont in
 **MainActor dispatch** for state updates:
 ```swift
 Task { @MainActor in
-    self?.imageState = .downloading(progress: progress)
+    self?.state = .downloading(progress: progress)
 }
 ```
 
@@ -536,7 +539,7 @@ enum PhantomError: LocalizedError {
 enum APIHandlerError: LocalizedError {
     case unknownMethod(String)
     case missingParam(String)
-    case imageNotFound(String)
+    case ipswNotFound(String)
     case vmNotFound(String)
     case vmNotRunning(String)
     case vmAlreadyExists(String)
@@ -560,6 +563,17 @@ enum APIHandlerError: LocalizedError {
 ```swift
 @MainActor
 @Observable
+class IPSWManager {
+    private(set) var state: State = .none  // .none | .fetching | .downloading | .downloaded | .error
+    private(set) var info: String = ""
+
+    func download() async { ... }
+    func list() -> [IPSWInfo] { ... }
+    var downloadedPath: URL? { ... }
+}
+
+@MainActor
+@Observable
 class VMManager {
     struct VMInstance {
         let vmId: String
@@ -568,7 +582,7 @@ class VMManager {
         var virtualMachine: VZVirtualMachine?
     }
 
-    private(set) var imageState: ImageState = .none
+    let ipswManager: IPSWManager
     private(set) var vmInstances: [String: VMInstance] = [:]
     private(set) var displayedVMId: String? = nil
     private(set) var hasExistingVM: Bool = false
@@ -585,7 +599,7 @@ class VMManager {
 
 **State Transitions**:
 
-**Image Download**:
+**IPSW Download**:
 ```
 .none → .fetching → .downloading(0.0) → ... → .downloading(1.0) → .downloaded
                                    ↓
@@ -612,7 +626,7 @@ SwiftUI views automatically update when observable state changes:
 @Bindable var vm: VMManager
 
 var body: some View {
-    if case .downloading(let progress) = vm.imageState {
+    if case .downloading(let progress) = vm.ipswManager.state {
         ProgressView(value: progress)
     }
 
@@ -722,12 +736,14 @@ var body: some View {
 ```
 phantom/
 ├── phantom/                   # Daemon app
-│   ├── phantomApp.swift      # Entry point (40 lines)
-│   ├── ContentView.swift     # GUI (200 lines)
-│   ├── VMManager.swift       # VM management (600 lines)
-│   ├── TCPServer.swift       # Network server (200 lines)
-│   ├── APIHandlers.swift     # Request handlers (170 lines)
-│   └── APIModels.swift       # Protocol structures (90 lines)
+│   ├── phantomApp.swift      # Entry point
+│   ├── ContentView.swift     # SwiftUI GUI
+│   ├── APIHandlers.swift     # API request routing
+│   ├── APIModels.swift       # JSON protocol definitions
+│   └── Libs/
+│       ├── VMManager.swift   # VM lifecycle management
+│       ├── IPSWManager.swift # IPSW download and listing
+│       └── TCPServer.swift   # Network.framework TCP server
 │
 ├── phantom-agent/            # Guest agent
 │   └── Sources/main.swift   # vsock server (180 lines)

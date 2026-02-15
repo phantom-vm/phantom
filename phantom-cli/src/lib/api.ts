@@ -13,7 +13,7 @@ export interface APIResponse {
   };
 }
 
-export interface Image {
+export interface IPSW {
   id: string;
   path: string;
   size: number;

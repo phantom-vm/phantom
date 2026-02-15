@@ -1,4 +1,4 @@
-import { sendRequest, type Image } from "../lib/api";
+import { sendRequest, type IPSW } from "../lib/api";
 
 export async function ipswList() {
   const response = await sendRequest({ method: "ipsw.list" });
@@ -8,17 +8,17 @@ export async function ipswList() {
     process.exit(1);
   }
 
-  const images = (response.result?.images as Image[]) || [];
+  const ipsws = (response.result?.ipsws as IPSW[]) || [];
 
-  if (images.length === 0) {
-    console.log("No IPSW images available. Run 'phantom ipsw pull' to download one.");
+  if (ipsws.length === 0) {
+    console.log("No IPSWs available. Run 'phantom ipsw pull' to download one.");
     return;
   }
 
-  console.log("IPSW IMAGES");
-  for (const image of images) {
-    const sizeGB = (image.size / 1024 / 1024 / 1024).toFixed(2);
-    console.log(`${image.id.padEnd(20)} ${sizeGB}GB`);
+  console.log("IPSWS");
+  for (const ipsw of ipsws) {
+    const sizeGB = (ipsw.size / 1024 / 1024 / 1024).toFixed(2);
+    console.log(`${ipsw.id.padEnd(20)} ${sizeGB}GB`);
   }
 }
 
@@ -26,7 +26,7 @@ export async function ipswPull() {
   // Check if already downloaded
   const preCheck = await sendRequest({ method: "ipsw.status" });
   if (preCheck.result?.state === "downloaded") {
-    console.log("IPSW image already downloaded. Use 'phantom ipsw list' to see it.");
+    console.log("IPSW already downloaded. Use 'phantom ipsw list' to see it.");
     return;
   }
 
@@ -54,7 +54,7 @@ export async function ipswPull() {
     switch (state) {
       case "fetching":
         if (lastPct === -1) {
-          process.stderr.write("Fetching image info...\n");
+          process.stderr.write("Fetching IPSW info...\n");
           lastPct = 0;
         }
         break;

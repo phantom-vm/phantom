@@ -59,8 +59,8 @@ export async function vmCreate(...args: string[]) {
   }
 
   // Regular create
-  const params: { imageId?: string; sourceVmId?: string } = fromIpsw
-    ? { imageId: fromIpsw }
+  const params: { ipswId?: string; sourceVmId?: string } = fromIpsw
+    ? { ipswId: fromIpsw }
     : { sourceVmId: fromVm };
 
   const sourceType = fromIpsw ? "IPSW" : "VM";

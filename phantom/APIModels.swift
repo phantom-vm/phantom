@@ -24,7 +24,7 @@ struct APIError: Codable {
 
 // MARK: - Response Models
 
-struct ImageInfo: Codable {
+struct IPSWInfo: Codable {
     let id: String
     let path: String
     let size: Int

@@ -7,16 +7,8 @@
       "layers" : [
         {
           "glass" : false,
-          "hidden" : false,
           "image-name" : "c46d9f44-8ea6-405d-8ec5-1a95bbb82ef0.png",
-          "name" : "c46d9f44-8ea6-405d-8ec5-1a95bbb82ef0",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
+          "name" : "c46d9f44-8ea6-405d-8ec5-1a95bbb82ef0"
         }
       ],
       "shadow" : {

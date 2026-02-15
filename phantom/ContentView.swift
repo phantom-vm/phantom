@@ -19,22 +19,22 @@ struct ContentView: View {
                 GroupBox("IPSW Images") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            imageStatusView
+                            ipswStatusView
                             Spacer()
                             Button("Download") {
-                                Task { await vm.downloadImage() }
+                                Task { await vm.ipswManager.download() }
                             }
                             .disabled(!canDownload)
                         }
 
-                        if case .downloading(let progress) = vm.imageState {
+                        if case .downloading(let progress) = vm.ipswManager.state {
                             ProgressView(value: progress)
                             Text("\(Int(progress * 100))%")
                                 .font(.caption.monospacedDigit())
                         }
 
-                        if !vm.imageInfo.isEmpty {
-                            Text(vm.imageInfo).font(.caption).foregroundStyle(.secondary)
+                        if !vm.ipswManager.info.isEmpty {
+                            Text(vm.ipswManager.info).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,8 +163,8 @@ struct ContentView: View {
     // MARK: - Status Views
 
     @ViewBuilder
-    private var imageStatusView: some View {
-        switch vm.imageState {
+    private var ipswStatusView: some View {
+        switch vm.ipswManager.state {
         case .none:
             Label("No image", systemImage: "arrow.down.circle")
         case .fetching:
@@ -190,14 +190,14 @@ struct ContentView: View {
     }
 
     private var canDownload: Bool {
-        vm.imageState == .none || {
-            if case .error = vm.imageState { return true }
+        vm.ipswManager.state == .none || {
+            if case .error = vm.ipswManager.state { return true }
             return false
         }()
     }
 
     private var canCreateVM: Bool {
-        if case .downloaded = vm.imageState {
+        if case .downloaded = vm.ipswManager.state {
             return true
         }
         return false

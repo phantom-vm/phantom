@@ -51,9 +51,9 @@ Usage:
   phantom <command> [options]
 
 Commands:
-  ipsw pull                       Download macOS restore image from Apple
-  ipsw list                       List available IPSW images
-  create --from-ipsw <IPSW_ID>    Create VM from IPSW image
+  ipsw pull                       Download macOS restore IPSW from Apple
+  ipsw list                       List available IPSWs
+  create --from-ipsw <IPSW_ID>    Create VM from IPSW
   create --from-vm <VM_ID>        Clone existing VM
   create --from-vm <VM_ID> --rm -- <cmd>
                                   Run ephemeral VM (clone, run, delete)

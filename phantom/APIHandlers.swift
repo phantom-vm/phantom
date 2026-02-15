@@ -54,25 +54,25 @@ struct APIHandlers {
     }
 
     private func handleIpswList() async throws -> AnyCodable {
-        let images = vmManager.listImages()
-        return AnyCodable(["images": images.map { image in
-            ["id": image.id, "path": image.path, "size": image.size]
+        let ipsws = vmManager.ipswManager.list()
+        return AnyCodable(["ipsws": ipsws.map { ipsw in
+            ["id": ipsw.id, "path": ipsw.path, "size": ipsw.size]
         }])
     }
 
     private func handleIpswPull() async throws -> AnyCodable {
         // Trigger download - happens async in background
-        await vmManager.downloadImage()
+        await vmManager.ipswManager.download()
 
         // Return current state
         return AnyCodable([
             "status": "started",
-            "message": "Image download started"
+            "message": "IPSW download started"
         ])
     }
 
     private func handleIpswStatus() async throws -> AnyCodable {
-        switch vmManager.imageState {
+        switch vmManager.ipswManager.state {
         case .none:
             return AnyCodable(["state": "none"])
         case .fetching:
@@ -94,20 +94,20 @@ struct APIHandlers {
     }
 
     private func handleVmsCreate(params: [String: AnyCodable]?) async throws -> AnyCodable {
-        let imageId = params?["imageId"]?.value as? String
+        let ipswId = params?["ipswId"]?.value as? String
         let sourceVmId = params?["sourceVmId"]?.value as? String
 
         // Must have exactly one source
-        guard (imageId != nil) != (sourceVmId != nil) else {
-            throw APIHandlerError.invalidParams("Must specify either 'imageId' or 'sourceVmId', but not both")
+        guard (ipswId != nil) != (sourceVmId != nil) else {
+            throw APIHandlerError.invalidParams("Must specify either 'ipswId' or 'sourceVmId', but not both")
         }
 
-        // Create from IPSW image
-        if let imageId = imageId {
-            // Verify image exists
-            let images = vmManager.listImages()
-            guard images.contains(where: { $0.id == imageId }) else {
-                throw APIHandlerError.imageNotFound(imageId)
+        // Create from IPSW
+        if let ipswId = ipswId {
+            // Verify IPSW exists
+            let ipsws = vmManager.ipswManager.list()
+            guard ipsws.contains(where: { $0.id == ipswId }) else {
+                throw APIHandlerError.ipswNotFound(ipswId)
             }
 
             // Start VM creation (async operation)
@@ -226,7 +226,7 @@ enum APIHandlerError: LocalizedError {
     case unknownMethod(String)
     case missingParam(String)
     case invalidParams(String)
-    case imageNotFound(String)
+    case ipswNotFound(String)
     case vmNotFound(String)
     case vmNotRunning(String)
     case vmAlreadyExists(String)
@@ -237,7 +237,7 @@ enum APIHandlerError: LocalizedError {
         case .unknownMethod: return "unknown_method"
         case .missingParam: return "missing_param"
         case .invalidParams: return "invalid_params"
-        case .imageNotFound: return "image_not_found"
+        case .ipswNotFound: return "ipsw_not_found"
         case .vmNotFound: return "vm_not_found"
         case .vmNotRunning: return "vm_not_running"
         case .vmAlreadyExists: return "vm_already_exists"
@@ -253,8 +253,8 @@ enum APIHandlerError: LocalizedError {
             return "Missing required parameter: \(param)"
         case .invalidParams(let message):
             return message
-        case .imageNotFound(let id):
-            return "Image not found: \(id)"
+        case .ipswNotFound(let id):
+            return "IPSW not found: \(id)"
         case .vmNotFound(let id):
             return "VM not found: \(id)"
         case .vmNotRunning(let id):

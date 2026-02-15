@@ -7,24 +7,6 @@ class VMManager {
 
     // MARK: - State
 
-    enum ImageState: Equatable {
-        case none
-        case fetching
-        case downloading(progress: Double)
-        case downloaded(path: URL)
-        case error(String)
-
-        static func == (lhs: ImageState, rhs: ImageState) -> Bool {
-            switch (lhs, rhs) {
-            case (.none, .none), (.fetching, .fetching): return true
-            case (.downloading(let a), .downloading(let b)): return a == b
-            case (.downloaded(let a), .downloaded(let b)): return a == b
-            case (.error(let a), .error(let b)): return a == b
-            default: return false
-            }
-        }
-    }
-
     enum VMState: Equatable {
         case none
         case creating
@@ -35,8 +17,6 @@ class VMManager {
         case error(String)
     }
 
-    private(set) var imageState: ImageState = .none
-    private(set) var imageInfo: String = ""
     private(set) var logs: [String] = []
 
     // MARK: - VM Instance
@@ -55,89 +35,30 @@ class VMManager {
         return appSupport.appendingPathComponent("phantom", isDirectory: true)
     }()
 
-    private var imagesDir: URL { baseDir.appendingPathComponent("ipsws", isDirectory: true) }
     private var vmsDir: URL { baseDir.appendingPathComponent("vms", isDirectory: true) }
 
+    let ipswManager: IPSWManager
+
     private(set) var vmInstances: [String: VMInstance] = [:]
-    private var downloadTask: URLSessionDownloadTask?
-    private var downloadDelegate: DownloadDelegate?
     private(set) var displayedVMId: String? = nil
 
     /// Whether an existing installed VM bundle was found on disk
     private(set) var hasExistingVM: Bool = false
 
     init() {
+        let ipswsDir = baseDir.appendingPathComponent("ipsws", isDirectory: true)
+        var logFunc: ((String) -> Void)!
+        ipswManager = IPSWManager(ipswsDir: ipswsDir, log: { msg in logFunc(msg) })
+        logFunc = { [weak self] msg in self?.log(msg) }
         ensureDirectories()
-        checkExistingImage()
+        ipswManager.loadExisting()
         loadExistingVMs()
     }
 
     // MARK: - Public API
 
-    func downloadImage() async {
-        guard imageState == .none || {
-            if case .error = imageState { return true }
-            return false
-        }() else { return }
-
-        log("Fetching latest macOS restore image info...")
-        imageState = .fetching
-
-        do {
-            let restoreImage = try await VZMacOSRestoreImage.latestSupported
-            let buildVersion = restoreImage.buildVersion
-            let url = restoreImage.url
-
-            log("Found: macOS build \(buildVersion)")
-            log("Download URL: \(url)")
-            imageInfo = "macOS build \(buildVersion)"
-
-            let destination = imagesDir.appendingPathComponent("\(buildVersion).ipsw")
-
-            if FileManager.default.fileExists(atPath: destination.path) {
-                log("Image already downloaded at \(destination.path)")
-                imageState = .downloaded(path: destination)
-                return
-            }
-
-            log("Starting download...")
-            imageState = .downloading(progress: 0)
-
-            let delegate = DownloadDelegate(
-                destination: destination,
-                onProgress: { [weak self] progress in
-                    Task { @MainActor in
-                        self?.imageState = .downloading(progress: progress)
-                    }
-                },
-                onComplete: { [weak self] result in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        switch result {
-                        case .success(let path):
-                            self.log("Image saved to \(path.path)")
-                            self.imageState = .downloaded(path: path)
-                        case .failure(let error):
-                            self.log("Download failed: \(error.localizedDescription)")
-                            self.imageState = .error(error.localizedDescription)
-                        }
-                    }
-                }
-            )
-            self.downloadDelegate = delegate
-
-            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-            let task = session.downloadTask(with: url)
-            self.downloadTask = task
-            task.resume()
-        } catch {
-            log("Failed to fetch image info: \(error.localizedDescription)")
-            imageState = .error(error.localizedDescription)
-        }
-    }
-
     func createAndStartVM(vmId: String? = nil) async {
-        guard case .downloaded(let ipswPath) = imageState else { return }
+        guard let ipswPath = ipswManager.downloadedPath else { return }
 
         let generatedId = vmId ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
 
@@ -528,16 +449,7 @@ class VMManager {
     // MARK: - Helpers
 
     private func ensureDirectories() {
-        try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: vmsDir, withIntermediateDirectories: true)
-    }
-
-    private func checkExistingImage() {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: imagesDir, includingPropertiesForKeys: nil),
-              let ipsw = files.first(where: { $0.pathExtension == "ipsw" }) else { return }
-        imageState = .downloaded(path: ipsw)
-        imageInfo = ipsw.deletingPathExtension().lastPathComponent
-        log("Found existing image: \(ipsw.lastPathComponent)")
     }
 
     private func loadExistingVMs() {
@@ -646,27 +558,6 @@ class VMManager {
 
     // MARK: - API Support
 
-    func listImages() -> [ImageInfo] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: imagesDir,
-            includingPropertiesForKeys: [.fileSizeKey]
-        ) else {
-            return []
-        }
-
-        return files.filter { $0.pathExtension == "ipsw" }.compactMap { url in
-            guard let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey]),
-                  let size = resourceValues.fileSize else {
-                return nil
-            }
-            return ImageInfo(
-                id: url.deletingPathExtension().lastPathComponent,
-                path: url.path,
-                size: size
-            )
-        }
-    }
-
     func listVMs() -> [VMInfo] {
         return vmInstances.values.map { instance in
             VMInfo(
@@ -720,46 +611,3 @@ enum PhantomError: LocalizedError {
     }
 }
 
-// MARK: - Download Delegate
-
-private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
-    let destination: URL
-    let onProgress: (Double) -> Void
-    let onComplete: (Result<URL, Error>) -> Void
-
-    init(destination: URL, onProgress: @escaping (Double) -> Void, onComplete: @escaping (Result<URL, Error>) -> Void) {
-        self.destination = destination
-        self.onProgress = onProgress
-        self.onComplete = onComplete
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        do {
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.moveItem(at: location, to: destination)
-            onComplete(.success(destination))
-        } catch {
-            onComplete(.failure(error))
-        }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error {
-            onComplete(.failure(error))
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        onProgress(progress)
-    }
-}
