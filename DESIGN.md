@@ -253,7 +253,7 @@ CLI                     Daemon                  VM
 ```
 ~/Library/Application Support/phantom/
 │
-├── images/                    # Downloaded IPSW files
+├── ipsws/                    # Downloaded IPSW files
 │   ├── 25C56.ipsw            # macOS restore image (14-18GB)
 │   └── 24C61.ipsw
 │
@@ -358,7 +358,7 @@ Or on error:
 
 ### images.list
 - **Purpose**: List downloaded IPSW files
-- **Implementation**: Scans `~/Library/Application Support/phantom/images/`
+- **Implementation**: Scans `~/Library/Application Support/phantom/ipsws/`
 - **Response**: `{"images": [{"id": "25C56", "path": "...", "size": 17000000000}]}`
 
 ### images.pull
@@ -368,6 +368,10 @@ Or on error:
   - Downloads via URLSession with progress tracking
   - Returns immediately (async operation)
 - **Response**: `{"status": "started", "message": "Image download started"}`
+
+### ipsw.status
+- **Purpose**: Poll current IPSW download state
+- **Response**: `{"state": "none|fetching|downloading|downloaded|error", "progress": 0.5, "message": "..."}`
 
 ### vms.list
 - **Purpose**: List all VM bundles
@@ -736,7 +740,7 @@ phantom/
 
 ```
 ~/Library/Application Support/phantom/
-├── images/          # IPSW files
+├── ipsws/          # IPSW files
 ├── vms/            # VM bundles
 └── shared/         # Guest agent files
 ```

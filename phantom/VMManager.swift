@@ -55,7 +55,7 @@ class VMManager {
         return appSupport.appendingPathComponent("phantom", isDirectory: true)
     }()
 
-    private var imagesDir: URL { baseDir.appendingPathComponent("images", isDirectory: true) }
+    private var imagesDir: URL { baseDir.appendingPathComponent("ipsws", isDirectory: true) }
     private var vmsDir: URL { baseDir.appendingPathComponent("vms", isDirectory: true) }
 
     private(set) var vmInstances: [String: VMInstance] = [:]

@@ -28,6 +28,8 @@ struct APIHandlers {
             return try await handleIpswList()
         case "ipsw.pull":
             return try await handleIpswPull()
+        case "ipsw.status":
+            return try await handleIpswStatus()
         case "vms.list":
             return try await handleVmsList()
         case "vms.create":
@@ -67,6 +69,21 @@ struct APIHandlers {
             "status": "started",
             "message": "Image download started"
         ])
+    }
+
+    private func handleIpswStatus() async throws -> AnyCodable {
+        switch vmManager.imageState {
+        case .none:
+            return AnyCodable(["state": "none"])
+        case .fetching:
+            return AnyCodable(["state": "fetching"])
+        case .downloading(let progress):
+            return AnyCodable(["state": "downloading", "progress": progress] as [String: Any])
+        case .downloaded:
+            return AnyCodable(["state": "downloaded"])
+        case .error(let message):
+            return AnyCodable(["state": "error", "message": message] as [String: Any])
+        }
     }
 
     private func handleVmsList() async throws -> AnyCodable {

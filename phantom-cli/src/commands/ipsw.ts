@@ -8,7 +8,7 @@ export async function ipswList() {
     process.exit(1);
   }
 
-  const images = response.result?.images as Image[] || [];
+  const images = (response.result?.images as Image[]) || [];
 
   if (images.length === 0) {
     console.log("No IPSW images available. Run 'phantom ipsw pull' to download one.");
@@ -23,8 +23,14 @@ export async function ipswList() {
 }
 
 export async function ipswPull() {
-  console.log("Starting IPSW download...");
+  // Check if already downloaded
+  const preCheck = await sendRequest({ method: "ipsw.status" });
+  if (preCheck.result?.state === "downloaded") {
+    console.log("IPSW image already downloaded. Use 'phantom ipsw list' to see it.");
+    return;
+  }
 
+  // Trigger the download
   const response = await sendRequest({ method: "ipsw.pull" });
 
   if (response.error) {
@@ -32,6 +38,51 @@ export async function ipswPull() {
     process.exit(1);
   }
 
-  console.log(response.result?.message || "Download started");
-  console.log("\nNote: Download happens in the background. Use 'phantom ipsw list' to check when it's available.");
+  // Poll for progress
+  let lastPct = -1;
+  while (true) {
+    await Bun.sleep(1000);
+
+    const status = await sendRequest({ method: "ipsw.status" });
+    if (status.error) {
+      console.error(`Error: ${status.error.message}`);
+      process.exit(1);
+    }
+
+    const { state, progress, message } = status.result ?? {};
+
+    switch (state) {
+      case "fetching":
+        if (lastPct === -1) {
+          process.stderr.write("Fetching image info...\n");
+          lastPct = 0;
+        }
+        break;
+
+      case "downloading": {
+        const pct = Math.floor((progress ?? 0) * 100);
+        if (pct !== lastPct) {
+          process.stderr.write(`\rDownloading... ${pct}%`);
+          lastPct = pct;
+        }
+        break;
+      }
+
+      case "downloaded":
+        if (lastPct > 0) {
+          process.stderr.write("\rDownloading... 100%\n");
+        }
+        console.log("Download complete");
+        return;
+
+      case "error":
+        process.stderr.write("\n");
+        console.error(`Download failed: ${message}`);
+        process.exit(1);
+
+      case "none":
+        console.log("No download in progress");
+        return;
+    }
+  }
 }
