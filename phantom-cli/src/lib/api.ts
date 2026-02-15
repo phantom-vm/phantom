@@ -27,13 +27,25 @@ export interface VM {
 
 // MARK: - TCP Client
 
-export async function sendRequest(request: APIRequest): Promise<APIResponse> {
+export async function sendRequest(
+  request: APIRequest,
+  options?: { timeoutMs?: number }
+): Promise<APIResponse> {
+  const timeoutMs = options?.timeoutMs ?? 30_000;
   let buffer = "";
   let responseResolver: ((value: string) => void) | null = null;
+  let responseRejector: ((error: Error) => void) | null = null;
 
-  const responsePromise = new Promise<string>((resolve) => {
+  const responsePromise = new Promise<string>((resolve, reject) => {
     responseResolver = resolve;
+    responseRejector = reject;
   });
+
+  const timer = setTimeout(() => {
+    if (responseRejector) {
+      responseRejector(new Error("Request timed out"));
+    }
+  }, timeoutMs);
 
   await Bun.connect({
     hostname: "localhost",
@@ -46,6 +58,7 @@ export async function sendRequest(request: APIRequest): Promise<APIResponse> {
         const newlineIndex = buffer.indexOf("\n");
         if (newlineIndex !== -1) {
           const response = buffer.substring(0, newlineIndex);
+          clearTimeout(timer);
           if (responseResolver) {
             responseResolver(response);
           }
@@ -53,7 +66,10 @@ export async function sendRequest(request: APIRequest): Promise<APIResponse> {
         }
       },
       error(_socket, error) {
-        console.error("Connection error:", error);
+        clearTimeout(timer);
+        if (responseRejector) {
+          responseRejector(error);
+        }
       },
       open(_socket) {
         // Send request with newline delimiter

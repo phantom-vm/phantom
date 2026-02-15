@@ -1,5 +1,5 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
-import { vmList, vmStop, vmDelete } from "./commands/vm";
+import { vmList, vmStop, vmDelete, vmExec } from "./commands/vm";
 import { vmCreate } from "./commands/create";
 import { health } from "./commands/health";
 import { route } from "./router";
@@ -21,6 +21,9 @@ const commands = {
   },
   stop: {
     handler: vmStop as (arg?: string) => Promise<void>,
+  },
+  exec: {
+    multiArgHandler: vmExec,
   },
   delete: {
     handler: vmDelete as (arg?: string) => Promise<void>,
@@ -52,6 +55,9 @@ Commands:
   ipsw list                       List available IPSW images
   create --from-ipsw <IPSW_ID>    Create VM from IPSW image
   create --from-vm <VM_ID>        Clone existing VM
+  create --from-vm <VM_ID> --rm -- <cmd>
+                                  Run ephemeral VM (clone, run, delete)
+  exec <VM_ID> -- <command>       Execute command in running VM
   list                            Show all VMs
   stop <VM_ID>                    Stop a running VM
   delete <VM_ID>                  Delete a VM
@@ -62,6 +68,8 @@ Examples:
   phantom ipsw list
   phantom create --from-ipsw 24C61
   phantom create --from-vm my-template-vm
+  phantom create --from-vm my-template-vm --rm -- echo hello
+  phantom exec vm-abc123 -- ls -la
   phantom list
   phantom stop vm-abc123
   phantom delete vm-abc123

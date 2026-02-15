@@ -177,6 +177,37 @@ Daemon                    Guest Agent           Shell
   ├─────────────────────────▶│                    │
 ```
 
+### Ephemeral VM (--rm)
+
+```
+CLI                     Daemon                  VM
+ │                         │                    │
+ │  vms.create (clone)     │                    │
+ ├────────────────────────▶│                    │
+ │  {"vmId":"vm-xyz"}      │ APFS CoW clone     │
+ │◀────────────────────────┤                    │
+ │                         │                    │
+ │  vms.start              │                    │
+ ├────────────────────────▶│ Boot VM            │
+ │  {"status":"running"}   │───────────────────▶│
+ │◀────────────────────────┤                    │
+ │                         │                    │
+ │  vms.exec (waitForAgent)│                    │
+ ├────────────────────────▶│ Retry vsock until  │
+ │                         │ agent ready...     │
+ │                         │  {"command":"..."}  │
+ │                         ├───────────────────▶│
+ │                         │  {"stdout":"..."}   │
+ │  {"stdout":"...",       │◀───────────────────┤
+ │   "exitCode":0}         │                    │
+ │◀────────────────────────┤                    │
+ │                         │                    │
+ │  vms.delete             │                    │
+ ├────────────────────────▶│ Stop + rm bundle   │
+ │  {"status":"deleted"}   │                    │
+ │◀────────────────────────┤                    │
+```
+
 ### API Request Lifecycle
 
 ```
@@ -355,11 +386,29 @@ Or on error:
   - Returns immediately (async operation)
 - **Response**: `{"status": "started", "message": "VM creation started"}`
 
+### vms.start
+- **Params**: `vmId` (string)
+- **Purpose**: Start an existing stopped VM
+- **Implementation**: Loads VM bundle, builds config, calls `VZVirtualMachine.start()`
+- **Response**: `{"status": "running", "vmId": "vm-abc"}`
+
 ### vms.stop
 - **Params**: `vmId` (string)
 - **Purpose**: Stop running VM
 - **Implementation**: Calls `VZVirtualMachine.stop()`
 - **Response**: `{"status": "stopped", "vmId": "vm-abc"}`
+
+### vms.exec
+- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
+- **Purpose**: Execute command inside running VM via vsock
+- **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs).
+- **Response**: `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+
+### vms.delete
+- **Params**: `vmId` (string)
+- **Purpose**: Delete VM bundle from disk
+- **Implementation**: Stops VM if running, removes bundle directory
+- **Response**: `{"status": "deleted", "vmId": "vm-abc"}`
 
 ---
 

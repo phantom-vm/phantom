@@ -32,8 +32,12 @@ struct APIHandlers {
             return try await handleVmsList()
         case "vms.create":
             return try await handleVmsCreate(params: request.params)
+        case "vms.start":
+            return try await handleVmsStart(params: request.params)
         case "vms.stop":
             return try await handleVmsStop(params: request.params)
+        case "vms.exec":
+            return try await handleVmsExec(params: request.params)
         case "vms.delete":
             return try await handleVmsDelete(params: request.params)
         default:
@@ -114,6 +118,50 @@ struct APIHandlers {
         }
 
         throw APIHandlerError.invalidParams("Invalid parameters")
+    }
+
+    private func handleVmsStart(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+
+        await vmManager.startVM(vmId: vmId)
+
+        // Check if VM actually started
+        guard let instance = vmManager.vmInstances[vmId] else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+
+        if case .error(let message) = instance.state {
+            throw APIHandlerError.invalidParams("Failed to start VM: \(message)")
+        }
+
+        return AnyCodable([
+            "status": "running",
+            "vmId": vmId
+        ])
+    }
+
+    private func handleVmsExec(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+        guard let command = params?["command"]?.value as? String else {
+            throw APIHandlerError.missingParam("command")
+        }
+        let args = (params?["args"]?.value as? [String])
+        let waitForAgent = (params?["waitForAgent"]?.value as? Bool) ?? false
+
+        do {
+            let result = try await vmManager.executeCommand(command, args: args, vmId: vmId, waitForAgent: waitForAgent)
+            return AnyCodable([
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exitCode": Int(result.exitCode)
+            ])
+        } catch {
+            throw APIHandlerError.invalidParams("Exec failed: \(error.localizedDescription)")
+        }
     }
 
     private func handleVmsStop(params: [String: AnyCodable]?) async throws -> AnyCodable {

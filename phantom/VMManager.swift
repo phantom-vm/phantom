@@ -445,53 +445,63 @@ class VMManager {
         let exitCode: Int32
     }
 
-    private(set) var lastExecResult: ExecResponse?
-
-    func executeCommand(_ command: String, args: [String]? = nil, vmId: String) async {
+    func executeCommand(_ command: String, args: [String]? = nil, vmId: String, waitForAgent: Bool = false) async throws -> ExecResponse {
         guard let instance = vmInstances[vmId],
               case .running = instance.state,
               let vm = instance.virtualMachine else {
-            log("Cannot execute command: VM not running")
-            return
+            throw PhantomError.vmNotRunning(vmId)
         }
 
         guard let socketDevice = vm.socketDevices.first as? VZVirtioSocketDevice else {
-            log("Cannot execute command: no vsock device")
-            return
+            throw PhantomError.noSocketDevice
         }
 
         log("Executing on \(vmId): \(command) \(args?.joined(separator: " ") ?? "")")
 
-        do {
-            let connection = try await socketDevice.connect(toPort: 9001)
-            let fd = connection.fileDescriptor
+        // Retry connecting to guest agent (VM may still be booting)
+        let maxAttempts = waitForAgent ? 60 : 1
+        let retryInterval: UInt64 = 2_000_000_000 // 2 seconds
 
-            let request = ExecRequest(command: command, args: args)
-            var requestData = try JSONEncoder().encode(request)
-            requestData.append(0x0A) // newline delimiter
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            do {
+                let connection = try await socketDevice.connect(toPort: 9001)
+                let fd = connection.fileDescriptor
 
-            requestData.withUnsafeBytes { ptr in
-                _ = write(fd, ptr.baseAddress!, ptr.count)
+                let request = ExecRequest(command: command, args: args)
+                var requestData = try JSONEncoder().encode(request)
+                requestData.append(0x0A) // newline delimiter
+
+                requestData.withUnsafeBytes { ptr in
+                    _ = write(fd, ptr.baseAddress!, ptr.count)
+                }
+
+                // Read response (newline-delimited JSON)
+                let responseData = try await readLine(from: fd)
+                let response = try JSONDecoder().decode(ExecResponse.self, from: responseData)
+
+                if !response.stdout.isEmpty {
+                    log("stdout: \(response.stdout.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
+                }
+                if !response.stderr.isEmpty {
+                    log("stderr: \(response.stderr.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
+                }
+                log("Exit code: \(response.exitCode)")
+
+                connection.close()
+                return response
+            } catch {
+                lastError = error
+                if attempt < maxAttempts {
+                    if attempt == 1 {
+                        log("Waiting for guest agent...")
+                    }
+                    try await Task.sleep(nanoseconds: retryInterval)
+                }
             }
-
-            // Read response (newline-delimited JSON)
-            let responseData = try await readLine(from: fd)
-
-            let response = try JSONDecoder().decode(ExecResponse.self, from: responseData)
-            lastExecResult = response
-
-            if !response.stdout.isEmpty {
-                log("stdout: \(response.stdout.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
-            }
-            if !response.stderr.isEmpty {
-                log("stderr: \(response.stderr.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines))")
-            }
-            log("Exit code: \(response.exitCode)")
-
-            connection.close()
-        } catch {
-            log("Exec failed: \(error.localizedDescription)")
         }
+
+        throw lastError ?? PhantomError.connectionClosed
     }
 
     private func readLine(from fd: Int32) async throws -> Data {
@@ -692,6 +702,8 @@ enum PhantomError: LocalizedError {
     case vmBundleCorrupted
     case vmNotFound(String)
     case cloneFailed(String)
+    case vmNotRunning(String)
+    case noSocketDevice
     case connectionClosed
 
     var errorDescription: String? {
@@ -701,6 +713,8 @@ enum PhantomError: LocalizedError {
         case .vmBundleCorrupted: "VM bundle is missing required files"
         case .vmNotFound(let id): "VM not found: \(id)"
         case .cloneFailed(let message): message
+        case .vmNotRunning(let id): "VM is not running: \(id)"
+        case .noSocketDevice: "No vsock device available"
         case .connectionClosed: "Connection to guest agent closed"
         }
     }

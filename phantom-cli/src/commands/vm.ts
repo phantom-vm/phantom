@@ -44,6 +44,41 @@ export async function vmRun(imageId: string) {
   console.log("\nNote: VM creation happens in the background. Use 'phantom vm list' to check status.");
 }
 
+export async function vmExec(...args: string[]) {
+  // Parse: <vm-id> -- <command> [args...]
+  const dashDashIndex = args.indexOf("--");
+  if (dashDashIndex === -1 || dashDashIndex === 0) {
+    console.error("Usage: phantom exec <VM_ID> -- <command> [args...]");
+    process.exit(1);
+  }
+
+  const vmId = args[0];
+  const command = args.slice(dashDashIndex + 1).join(" ");
+
+  if (!command) {
+    console.error("Error: command required after --");
+    process.exit(1);
+  }
+
+  const response = await sendRequest(
+    {
+      method: "vms.exec",
+      params: { vmId, command },
+    },
+    { timeoutMs: 300_000 }
+  );
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  const { stdout, stderr, exitCode } = response.result;
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+  process.exit(exitCode);
+}
+
 export async function vmStop(vmId: string) {
   if (!vmId) {
     console.error("Error: VM_ID required");

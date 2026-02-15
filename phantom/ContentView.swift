@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var commandText = ""
     @State private var selectedVMId: String?
+    @State private var lastExecResult: VMManager.ExecResponse?
 
     var body: some View {
         HSplitView {
@@ -104,7 +105,7 @@ struct ContentView: View {
                                     .disabled(commandText.isEmpty)
                             }
 
-                            if let result = vm.lastExecResult {
+                            if let result = lastExecResult {
                                 VStack(alignment: .leading, spacing: 4) {
                                     if !result.stdout.isEmpty {
                                         Text(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -185,7 +186,7 @@ struct ContentView: View {
         guard let vmId = selectedVMId else { return }
         let cmd = commandText
         commandText = ""
-        Task { await vm.executeCommand(cmd, vmId: vmId) }
+        Task { lastExecResult = try? await vm.executeCommand(cmd, vmId: vmId) }
     }
 
     private var canDownload: Bool {
