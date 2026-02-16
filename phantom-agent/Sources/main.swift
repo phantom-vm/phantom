@@ -94,11 +94,14 @@ func executeCommandStreaming(_ request: ExecRequest, clientFd: Int32) {
     process.standardError = stderrPipe
 
     let encoder = JSONEncoder()
+    let writeQueue = DispatchQueue(label: "phantom-agent.write")
 
-    // Send a chunk over the connection
+    // Send a chunk over the connection (serialized to avoid interleaved writes)
     func sendChunk(_ chunk: StreamChunk) {
         if let data = try? encoder.encode(chunk) {
-            writeLine(data, to: clientFd)
+            writeQueue.sync {
+                writeLine(data, to: clientFd)
+            }
         }
     }
 

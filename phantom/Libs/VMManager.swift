@@ -494,16 +494,30 @@ class VMManager {
                                 buffer.append(byte)
                             }
 
-                            guard let chunk = try? decoder.decode(StreamChunk.self, from: buffer) else {
+                            // Try to decode as streaming chunk
+                            if let chunk = try? decoder.decode(StreamChunk.self, from: buffer) {
+                                if chunk.type == "exit" {
+                                    cont.resume(returning: chunk.exitCode ?? -1)
+                                    return
+                                }
+                                onChunk(chunk)
                                 continue
                             }
 
-                            if chunk.type == "exit" {
-                                cont.resume(returning: chunk.exitCode ?? -1)
+                            // Fallback: agent sent a batch ExecResponse (old agent without streaming)
+                            if let batch = try? decoder.decode(ExecResponse.self, from: buffer) {
+                                // Forward stdout/stderr as chunks, then exit
+                                if !batch.stderr.isEmpty {
+                                    onChunk(StreamChunk(type: "stderr", data: batch.stderr, exitCode: nil))
+                                }
+                                if !batch.stdout.isEmpty {
+                                    onChunk(StreamChunk(type: "stdout", data: batch.stdout, exitCode: nil))
+                                }
+                                cont.resume(returning: batch.exitCode)
                                 return
                             }
 
-                            onChunk(chunk)
+                            print("VMManager: failed to decode stream chunk: \(String(data: buffer, encoding: .utf8) ?? "<binary>")")
                         }
                     }
                 }
