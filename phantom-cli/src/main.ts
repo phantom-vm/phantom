@@ -57,6 +57,8 @@ Commands:
   create --from-vm <VM_ID>        Clone existing VM
   create --from-vm <VM_ID> --rm -- <cmd>
                                   Run ephemeral VM (clone, run, delete)
+  create --from-vm <VM_ID> --rm --mount <path> -- <cmd>
+                                  Ephemeral VM with host dir mounted at /Volumes/mount
   exec <VM_ID> -- <command>       Execute command in running VM
   list                            Show all VMs
   stop <VM_ID>                    Stop a running VM

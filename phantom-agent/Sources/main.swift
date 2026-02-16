@@ -5,12 +5,19 @@ import Foundation
 struct ExecRequest: Codable {
     let command: String
     let args: [String]?
+    let stream: Bool?
 }
 
 struct ExecResponse: Codable {
     let stdout: String
     let stderr: String
     let exitCode: Int32
+}
+
+struct StreamChunk: Codable {
+    let type: String  // "stdout", "stderr", "exit"
+    let data: String?
+    let exitCode: Int32?
 }
 
 // MARK: - Vsock Constants
@@ -65,6 +72,74 @@ func executeCommand(_ request: ExecRequest) -> ExecResponse {
             stderr: "Failed to launch process: \(error.localizedDescription)",
             exitCode: -1
         )
+    }
+}
+
+// MARK: - Streaming Command Execution
+
+func executeCommandStreaming(_ request: ExecRequest, clientFd: Int32) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+
+    var fullCommand = request.command
+    if let args = request.args, !args.isEmpty {
+        let escaped = args.map { "'\($0.replacingOccurrences(of: "'", with: "'\\''"))'" }
+        fullCommand += " " + escaped.joined(separator: " ")
+    }
+    process.arguments = ["-c", fullCommand]
+
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+
+    let encoder = JSONEncoder()
+
+    // Send a chunk over the connection
+    func sendChunk(_ chunk: StreamChunk) {
+        if let data = try? encoder.encode(chunk) {
+            writeLine(data, to: clientFd)
+        }
+    }
+
+    // Stream stdout
+    stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if !data.isEmpty, let str = String(data: data, encoding: .utf8) {
+            sendChunk(StreamChunk(type: "stdout", data: str, exitCode: nil))
+        }
+    }
+
+    // Stream stderr
+    stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+        let data = handle.availableData
+        if !data.isEmpty, let str = String(data: data, encoding: .utf8) {
+            sendChunk(StreamChunk(type: "stderr", data: str, exitCode: nil))
+        }
+    }
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+
+        // Clear handlers and flush remaining data
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+        // Read any remaining buffered data
+        let remainingStdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStdout.isEmpty, let str = String(data: remainingStdout, encoding: .utf8) {
+            sendChunk(StreamChunk(type: "stdout", data: str, exitCode: nil))
+        }
+        let remainingStderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        if !remainingStderr.isEmpty, let str = String(data: remainingStderr, encoding: .utf8) {
+            sendChunk(StreamChunk(type: "stderr", data: str, exitCode: nil))
+        }
+
+        sendChunk(StreamChunk(type: "exit", data: nil, exitCode: process.terminationStatus))
+    } catch {
+        sendChunk(StreamChunk(type: "stderr", data: "Failed to launch process: \(error.localizedDescription)", exitCode: nil))
+        sendChunk(StreamChunk(type: "exit", data: nil, exitCode: -1))
     }
 }
 
@@ -155,10 +230,15 @@ while true {
     while let lineData = readLine(from: clientFd) {
         do {
             let request = try decoder.decode(ExecRequest.self, from: lineData)
-            print("phantom-agent: executing '\(request.command)'")
-            let response = executeCommand(request)
-            let responseData = try encoder.encode(response)
-            writeLine(responseData, to: clientFd)
+            print("phantom-agent: executing '\(request.command)' (stream: \(request.stream ?? false))")
+
+            if request.stream == true {
+                executeCommandStreaming(request, clientFd: clientFd)
+            } else {
+                let response = executeCommand(request)
+                let responseData = try encoder.encode(response)
+                writeLine(responseData, to: clientFd)
+            }
         } catch {
             let errorResponse = ExecResponse(
                 stdout: "",

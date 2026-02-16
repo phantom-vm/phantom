@@ -1,10 +1,11 @@
-import { sendRequest } from "../lib/api";
+import { sendRequest, sendStreamingRequest } from "../lib/api";
 
 export async function vmCreate(...args: string[]) {
   // Parse flags
   let fromVm: string | undefined;
   let fromIpsw: string | undefined;
   let rm = false;
+  let mountPath: string | undefined;
   let commandArgs: string[] = [];
 
   // Split on -- separator
@@ -23,6 +24,9 @@ export async function vmCreate(...args: string[]) {
       i++;
     } else if (flagArgs[i] === "--rm") {
       rm = true;
+    } else if (flagArgs[i] === "--mount" && i + 1 < flagArgs.length) {
+      mountPath = flagArgs[i + 1];
+      i++;
     }
   }
 
@@ -52,9 +56,14 @@ export async function vmCreate(...args: string[]) {
     process.exit(1);
   }
 
+  if (mountPath && !rm) {
+    console.error("Error: --mount requires --rm (ephemeral mode)");
+    process.exit(1);
+  }
+
   // Ephemeral VM: clone → start → exec → delete
   if (rm && fromVm) {
-    await runEphemeral(fromVm, commandArgs);
+    await runEphemeral(fromVm, commandArgs, mountPath);
     return;
   }
 
@@ -84,8 +93,18 @@ export async function vmCreate(...args: string[]) {
   );
 }
 
-async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
-  const command = commandArgs.join(" ");
+async function runEphemeral(
+  sourceVmId: string,
+  commandArgs: string[],
+  mountPath?: string
+) {
+  let command = commandArgs.join(" ");
+
+  // If mounting, prepend mount commands
+  if (mountPath) {
+    const mountPoint = "/Volumes/mount";
+    command = `mkdir -p ${mountPoint} && mount_virtiofs mount ${mountPoint} && ${command}`;
+  }
 
   // 1. Clone
   console.error(`Cloning VM ${sourceVmId}...`);
@@ -105,10 +124,20 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
   // Ensure cleanup on exit
   let exitCode = 1;
   try {
-    // 2. Start
+    // 2. Start (with optional mount)
+    const startParams: Record<string, any> = { vmId };
+    if (mountPath) {
+      // Resolve to absolute path
+      const absolutePath = mountPath.startsWith("/")
+        ? mountPath
+        : `${process.cwd()}/${mountPath}`;
+      startParams.mounts = [{ hostPath: absolutePath, tag: "mount" }];
+      console.error(`Mounting ${absolutePath} → /Volumes/mount`);
+    }
+
     console.error(`Starting VM ${vmId}...`);
     const startResponse = await sendRequest(
-      { method: "vms.start", params: { vmId } },
+      { method: "vms.start", params: startParams },
       { timeoutMs: 120_000 }
     );
 
@@ -119,24 +148,18 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
 
     console.error(`VM ${vmId} running`);
 
-    // 3. Execute command (wait for agent to be ready)
+    // 3. Execute command with streaming output (wait for agent to be ready)
     console.error(`Executing: ${command}`);
-    const execResponse = await sendRequest(
+    const { exitCode: code } = await sendStreamingRequest(
       {
-        method: "vms.exec",
+        method: "vms.execStream",
         params: { vmId, command, waitForAgent: true },
       },
-      { timeoutMs: 300_000 }
+      (chunk) => {
+        if (chunk.type === "stdout" && chunk.data) process.stdout.write(chunk.data);
+        if (chunk.type === "stderr" && chunk.data) process.stderr.write(chunk.data);
+      }
     );
-
-    if (execResponse.error) {
-      console.error(`Error executing command: ${execResponse.error.message}`);
-      return;
-    }
-
-    const { stdout, stderr, exitCode: code } = execResponse.result;
-    if (stdout) process.stdout.write(stdout);
-    if (stderr) process.stderr.write(stderr);
     exitCode = code;
   } finally {
     // 4. Always delete

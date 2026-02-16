@@ -191,18 +191,20 @@ CLI                     Daemon                  VM
  │◀────────────────────────┤                    │
  │                         │                    │
  │  vms.start              │                    │
- ├────────────────────────▶│ Boot VM            │
+ │  + mounts (optional)    │ Boot VM            │
+ ├────────────────────────▶│ + VirtioFS mounts  │
  │  {"status":"running"}   │───────────────────▶│
  │◀────────────────────────┤                    │
  │                         │                    │
- │  vms.exec (waitForAgent)│                    │
+ │  vms.execStream         │                    │
  ├────────────────────────▶│ Retry vsock until  │
  │                         │ agent ready...     │
- │                         │  {"command":"..."}  │
+ │                         │  {"command":"...",   │
+ │                         │   "stream":true}    │
  │                         ├───────────────────▶│
- │                         │  {"stdout":"..."}   │
- │  {"stdout":"...",       │◀───────────────────┤
- │   "exitCode":0}         │                    │
+ │  {"type":"stdout",...}   │ ← streaming chunks │
+ │◀────────────────────────┤◀───────────────────┤
+ │  {"type":"done",...}     │                    │
  │◀────────────────────────┤                    │
  │                         │                    │
  │  vms.delete             │                    │
@@ -288,6 +290,12 @@ CLI                     Daemon                  VM
 - Mounted in guest: `mount_virtiofs phantom-shared /Volumes/phantom-shared`
 - Used for transferring phantom-agent to VMs
 
+**Per-VM Mounts**:
+- Additional host directories can be mounted into VMs via `mounts` parameter on `vms.start`
+- Each mount specifies a `hostPath` and `tag`
+- Mounted in guest: `mount_virtiofs <tag> /Volumes/<tag>`
+- Used for sharing project directories (e.g., for xcodebuild)
+
 ---
 
 ## Communication Protocols
@@ -334,21 +342,26 @@ Or on error:
 **Format**: Newline-delimited JSON
 **Pattern**: Multiple commands per connection
 
-**Request**:
+**Batch Request**:
 ```json
-{
-  "command": "ls",
-  "args": ["-la", "/tmp"]
-}
+{"command": "ls", "args": ["-la", "/tmp"]}
 ```
 
-**Response**:
+**Batch Response**:
 ```json
-{
-  "stdout": "total 0\ndrwx... .\n",
-  "stderr": "",
-  "exitCode": 0
-}
+{"stdout": "total 0\ndrwx... .\n", "stderr": "", "exitCode": 0}
+```
+
+**Streaming Request** (when `stream: true`):
+```json
+{"command": "xcodebuild ...", "stream": true}
+```
+
+**Streaming Response** (multiple lines):
+```
+{"type":"stdout","data":"Building for debugging...\n"}
+{"type":"stderr","data":"warning: ...\n"}
+{"type":"exit","exitCode":0}
 ```
 
 ---
@@ -394,9 +407,10 @@ Or on error:
 - **Response**: `{"status": "started", "message": "VM creation started"}`
 
 ### vms.start
-- **Params**: `vmId` (string)
-- **Purpose**: Start an existing stopped VM
-- **Implementation**: Loads VM bundle, builds config, calls `VZVirtualMachine.start()`
+- **Params**: `vmId` (string), `mounts` (array, optional)
+- **Purpose**: Start an existing stopped VM, optionally mounting host directories
+- **Mounts**: Each mount has `hostPath` (string) and `tag` (string). Mounted in guest via `mount_virtiofs <tag> /Volumes/<tag>`
+- **Implementation**: Loads VM bundle, builds config with VirtioFS mounts, calls `VZVirtualMachine.start()`
 - **Response**: `{"status": "running", "vmId": "vm-abc"}`
 
 ### vms.stop
@@ -410,6 +424,14 @@ Or on error:
 - **Purpose**: Execute command inside running VM via vsock
 - **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs).
 - **Response**: `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+
+### vms.execStream
+- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
+- **Purpose**: Execute command with streaming output. Connection stays open, sending chunks as they arrive.
+- **Protocol**: Newline-delimited JSON chunks:
+  - `{"type":"stdout","data":"..."}`
+  - `{"type":"stderr","data":"..."}`
+  - `{"type":"done","exitCode":0}` (final chunk, connection closes)
 
 ### vms.delete
 - **Params**: `vmId` (string)
@@ -511,6 +533,11 @@ VZVirtualMachineConfiguration {
         VZVirtioFileSystemDeviceConfiguration {
             tag: "phantom-shared"
             share: VZSingleDirectoryShare(directory: ~/phantom/shared)
+        },
+        // Additional per-VM mounts (from `mounts` parameter)
+        VZVirtioFileSystemDeviceConfiguration {
+            tag: "mount"  // custom tag
+            share: VZSingleDirectoryShare(directory: /path/on/host)
         }
     ]
 
@@ -699,11 +726,11 @@ var body: some View {
 
 **Trade-off**: Higher latency from connection overhead, but acceptable for infrequent CLI operations.
 
-### No Streaming Updates
+### Streaming for Command Execution
 
-**Rationale**: Stateless API is simpler. Long operations return immediately with "started" status.
+**Rationale**: Long-running commands (e.g., xcodebuild) need real-time output. The `vms.execStream` endpoint keeps the TCP connection open and sends newline-delimited JSON chunks. Other endpoints remain stateless (one request, one response).
 
-**Trade-off**: CLI must poll for status updates. Future enhancement: WebSocket for real-time updates.
+**Trade-off**: Streaming adds protocol complexity but only for the exec path. Non-streaming `vms.exec` is preserved for backward compatibility.
 
 ### Newline-Delimited JSON
 
@@ -749,7 +776,15 @@ phantom/
 │   └── Sources/main.swift   # vsock server (180 lines)
 │
 └── phantom-cli/              # CLI tool
-    └── src/main.ts          # CLI implementation (260 lines)
+    └── src/
+        ├── main.ts          # CLI entry point and command registry
+        ├── router.ts        # Command routing
+        ├── lib/api.ts       # TCP client (batch + streaming)
+        └── commands/
+            ├── create.ts    # VM creation + ephemeral flow
+            ├── vm.ts        # list, stop, delete, exec
+            ├── ipsw.ts      # IPSW management
+            └── health.ts    # Daemon health check
 ```
 
 ### Runtime Data

@@ -136,24 +136,35 @@ class TCPServer {
             let requestData = data.prefix(upTo: newlineIndex)
 
             Task { @MainActor in
-                let responseData = await self.processRequest(requestData)
-                self.sendResponse(responseData, to: connection)
+                await self.processRequest(requestData, connection: connection)
             }
         }
     }
 
-    private func processRequest(_ data: Data) async -> Data {
+    private func processRequest(_ data: Data, connection: NWConnection) async {
         guard let vmManager else {
-            return errorResponse(code: "server_error", message: "VM manager not available")
+            sendResponse(errorResponse(code: "server_error", message: "VM manager not available"), to: connection)
+            return
+        }
+
+        guard let request = try? JSONDecoder().decode(APIRequest.self, from: data) else {
+            sendResponse(errorResponse(code: "invalid_request", message: "Failed to decode JSON request"), to: connection)
+            return
+        }
+
+        // Streaming methods keep the connection open
+        if request.method == "vms.execStream" {
+            let handlers = APIHandlers(vmManager: vmManager)
+            await handlers.handleStream(request) { chunk in
+                self.sendChunk(chunk, to: connection)
+            }
+            connection.cancel()
+            return
         }
 
         let handlers = APIHandlers(vmManager: vmManager)
-
-        guard let request = try? JSONDecoder().decode(APIRequest.self, from: data) else {
-            return errorResponse(code: "invalid_request", message: "Failed to decode JSON request")
-        }
-
-        return await handlers.handle(request)
+        let responseData = await handlers.handle(request)
+        sendResponse(responseData, to: connection)
     }
 
     private func sendResponse(_ data: Data, to connection: NWConnection) {
@@ -167,6 +178,20 @@ class TCPServer {
             // Close connection after response (one request per connection)
             connection.cancel()
         })
+    }
+
+    private nonisolated func sendChunk(_ data: Data, to connection: NWConnection) {
+        var chunk = data
+        chunk.append(0x0A) // newline delimiter
+
+        let semaphore = DispatchSemaphore(value: 0)
+        connection.send(content: chunk, completion: .contentProcessed { error in
+            if let error {
+                print("TCPServer: chunk send error: \(error)")
+            }
+            semaphore.signal()
+        })
+        semaphore.wait()
     }
 
     private func errorResponse(code: String, message: String) -> Data {

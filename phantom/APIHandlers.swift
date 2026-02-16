@@ -4,6 +4,39 @@ import Foundation
 struct APIHandlers {
     let vmManager: VMManager
 
+    func handleStream(_ request: APIRequest, sendChunk: @escaping (Data) -> Void) async {
+        guard let vmId = request.params?["vmId"]?.value as? String else {
+            let error = try? JSONEncoder().encode(StreamDoneChunk(type: "done", exitCode: -1, error: "Missing vmId"))
+            if let error { sendChunk(error) }
+            return
+        }
+        guard let command = request.params?["command"]?.value as? String else {
+            let error = try? JSONEncoder().encode(StreamDoneChunk(type: "done", exitCode: -1, error: "Missing command"))
+            if let error { sendChunk(error) }
+            return
+        }
+        let args = request.params?["args"]?.value as? [String]
+        let waitForAgent = (request.params?["waitForAgent"]?.value as? Bool) ?? false
+
+        do {
+            let exitCode = try await vmManager.executeCommandStreaming(
+                command,
+                args: args,
+                vmId: vmId,
+                waitForAgent: waitForAgent
+            ) { chunk in
+                if let data = try? JSONEncoder().encode(chunk) {
+                    sendChunk(data)
+                }
+            }
+            let done = try JSONEncoder().encode(StreamDoneChunk(type: "done", exitCode: exitCode, error: nil))
+            sendChunk(done)
+        } catch {
+            let done = try? JSONEncoder().encode(StreamDoneChunk(type: "done", exitCode: -1, error: error.localizedDescription))
+            if let done { sendChunk(done) }
+        }
+    }
+
     func handle(_ request: APIRequest) async -> Data {
         do {
             let result = try await route(request)
@@ -142,7 +175,17 @@ struct APIHandlers {
             throw APIHandlerError.missingParam("vmId")
         }
 
-        await vmManager.startVM(vmId: vmId)
+        // Parse optional mounts
+        var mounts: [VMManager.MountConfig] = []
+        if let mountsArray = params?["mounts"]?.value as? [[String: Any]] {
+            for dict in mountsArray {
+                guard let hostPath = dict["hostPath"] as? String,
+                      let tag = dict["tag"] as? String else { continue }
+                mounts.append(VMManager.MountConfig(hostPath: hostPath, tag: tag))
+            }
+        }
+
+        await vmManager.startVM(vmId: vmId, mounts: mounts)
 
         // Check if VM actually started
         guard let instance = vmManager.vmInstances[vmId] else {
@@ -218,6 +261,14 @@ struct APIHandlers {
             "vmId": vmId
         ])
     }
+}
+
+// MARK: - Streaming Models
+
+struct StreamDoneChunk: Codable {
+    let type: String  // "done"
+    let exitCode: Int32
+    let error: String?
 }
 
 // MARK: - Errors

@@ -25,7 +25,76 @@ export interface VM {
   state: string;
 }
 
+// MARK: - Streaming Types
+
+export interface StreamChunk {
+  type: "stdout" | "stderr" | "done";
+  data?: string;
+  exitCode?: number;
+  error?: string;
+}
+
 // MARK: - TCP Client
+
+export async function sendStreamingRequest(
+  request: APIRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  options?: { timeoutMs?: number }
+): Promise<{ exitCode: number }> {
+  const timeoutMs = options?.timeoutMs ?? 3600_000; // 1 hour default for streaming
+  let buffer = "";
+  let resolver: ((value: { exitCode: number }) => void) | null = null;
+  let rejector: ((error: Error) => void) | null = null;
+
+  const promise = new Promise<{ exitCode: number }>((resolve, reject) => {
+    resolver = resolve;
+    rejector = reject;
+  });
+
+  const timer = setTimeout(() => {
+    if (rejector) rejector(new Error("Streaming request timed out"));
+  }, timeoutMs);
+
+  await Bun.connect({
+    hostname: "localhost",
+    port: 9090,
+    socket: {
+      data(_socket, data) {
+        buffer += new TextDecoder().decode(data);
+
+        // Process all complete lines
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.substring(0, newlineIndex);
+          buffer = buffer.substring(newlineIndex + 1);
+
+          try {
+            const chunk: StreamChunk = JSON.parse(line);
+            if (chunk.type === "done") {
+              clearTimeout(timer);
+              if (resolver) resolver({ exitCode: chunk.exitCode ?? -1 });
+              _socket.end();
+              return;
+            }
+            onChunk(chunk);
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      },
+      error(_socket, error) {
+        clearTimeout(timer);
+        if (rejector) rejector(error);
+      },
+      open(_socket) {
+        const requestJson = JSON.stringify(request) + "\n";
+        _socket.write(requestJson);
+      },
+    },
+  });
+
+  return promise;
+}
 
 export async function sendRequest(
   request: APIRequest,

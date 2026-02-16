@@ -28,6 +28,11 @@ class VMManager {
         var virtualMachine: VZVirtualMachine?
     }
 
+    struct MountConfig {
+        let hostPath: String
+        let tag: String
+    }
+
     // MARK: - Private
 
     private let baseDir: URL = {
@@ -167,7 +172,7 @@ class VMManager {
     }
 
     /// Start an existing VM from a previously installed bundle (no reinstall needed)
-    private func startExistingVM(vmId: String) async {
+    private func startExistingVM(vmId: String, mounts: [MountConfig] = []) async {
         guard let instance = vmInstances[vmId] else {
             log("VM not found: \(vmId)")
             return
@@ -214,7 +219,8 @@ class VMManager {
                 bundlePath: bundlePath,
                 hardwareModel: hardwareModel,
                 machineIdentifier: machineIdentifier,
-                auxiliaryStorage: auxiliaryStorage
+                auxiliaryStorage: auxiliaryStorage,
+                mounts: mounts
             )
 
             try config.validate()
@@ -253,7 +259,7 @@ class VMManager {
         }
     }
 
-    func startVM(vmId: String) async {
+    func startVM(vmId: String, mounts: [MountConfig] = []) async {
         // Ensure VM exists in dictionary
         if vmInstances[vmId] == nil {
             let bundlePath = vmsDir.appendingPathComponent(vmId)
@@ -270,7 +276,7 @@ class VMManager {
             )
         }
 
-        await startExistingVM(vmId: vmId)
+        await startExistingVM(vmId: vmId, mounts: mounts)
     }
 
     func setDisplayedVM(vmId: String?) {
@@ -358,6 +364,13 @@ class VMManager {
     struct ExecRequest: Codable {
         let command: String
         let args: [String]?
+        let stream: Bool?
+    }
+
+    struct StreamChunk: Codable {
+        let type: String  // "stdout", "stderr", "exit"
+        let data: String?
+        let exitCode: Int32?
     }
 
     struct ExecResponse: Codable {
@@ -389,7 +402,7 @@ class VMManager {
                 let connection = try await socketDevice.connect(toPort: 9001)
                 let fd = connection.fileDescriptor
 
-                let request = ExecRequest(command: command, args: args)
+                let request = ExecRequest(command: command, args: args, stream: nil)
                 var requestData = try JSONEncoder().encode(request)
                 requestData.append(0x0A) // newline delimiter
 
@@ -411,6 +424,93 @@ class VMManager {
 
                 connection.close()
                 return response
+            } catch {
+                lastError = error
+                if attempt < maxAttempts {
+                    if attempt == 1 {
+                        log("Waiting for guest agent...")
+                    }
+                    try await Task.sleep(nanoseconds: retryInterval)
+                }
+            }
+        }
+
+        throw lastError ?? PhantomError.connectionClosed
+    }
+
+    func executeCommandStreaming(
+        _ command: String,
+        args: [String]? = nil,
+        vmId: String,
+        waitForAgent: Bool = false,
+        onChunk: @escaping (StreamChunk) -> Void
+    ) async throws -> Int32 {
+        guard let instance = vmInstances[vmId],
+              case .running = instance.state,
+              let vm = instance.virtualMachine else {
+            throw PhantomError.vmNotRunning(vmId)
+        }
+
+        guard let socketDevice = vm.socketDevices.first as? VZVirtioSocketDevice else {
+            throw PhantomError.noSocketDevice
+        }
+
+        log("Executing (streaming) on \(vmId): \(command)")
+
+        let maxAttempts = waitForAgent ? 60 : 1
+        let retryInterval: UInt64 = 2_000_000_000
+
+        var lastError: Error?
+        for attempt in 1...maxAttempts {
+            do {
+                let connection = try await socketDevice.connect(toPort: 9001)
+                let fd = connection.fileDescriptor
+
+                let request = ExecRequest(command: command, args: args, stream: true)
+                var requestData = try JSONEncoder().encode(request)
+                requestData.append(0x0A)
+
+                requestData.withUnsafeBytes { ptr in
+                    _ = write(fd, ptr.baseAddress!, ptr.count)
+                }
+
+                // Read streaming chunks until we get an "exit" chunk
+                let exitCode: Int32 = try await withCheckedThrowingContinuation { cont in
+                    DispatchQueue.global().async {
+                        let decoder = JSONDecoder()
+                        while true {
+                            // Read one line
+                            var buffer = Data()
+                            var byte: UInt8 = 0
+                            while true {
+                                let n = read(fd, &byte, 1)
+                                if n <= 0 {
+                                    cont.resume(throwing: PhantomError.connectionClosed)
+                                    return
+                                }
+                                if byte == 0x0A {
+                                    break
+                                }
+                                buffer.append(byte)
+                            }
+
+                            guard let chunk = try? decoder.decode(StreamChunk.self, from: buffer) else {
+                                continue
+                            }
+
+                            if chunk.type == "exit" {
+                                cont.resume(returning: chunk.exitCode ?? -1)
+                                return
+                            }
+
+                            onChunk(chunk)
+                        }
+                    }
+                }
+
+                connection.close()
+                log("Streaming exec finished with exit code: \(exitCode)")
+                return exitCode
             } catch {
                 lastError = error
                 if attempt < maxAttempts {
@@ -483,7 +583,8 @@ class VMManager {
         bundlePath: URL,
         hardwareModel: VZMacHardwareModel,
         machineIdentifier: VZMacMachineIdentifier,
-        auxiliaryStorage: VZMacAuxiliaryStorage
+        auxiliaryStorage: VZMacAuxiliaryStorage,
+        mounts: [MountConfig] = []
     ) throws -> VZVirtualMachineConfiguration {
         let config = VZVirtualMachineConfiguration()
 
@@ -524,7 +625,23 @@ class VMManager {
         let share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: sharedDir, readOnly: false))
         let fsConfig = VZVirtioFileSystemDeviceConfiguration(tag: "phantom-shared")
         fsConfig.share = share
-        config.directorySharingDevices = [fsConfig]
+        var sharingDevices: [VZVirtioFileSystemDeviceConfiguration] = [fsConfig]
+
+        // Additional per-VM mounts
+        for mount in mounts {
+            let url = URL(fileURLWithPath: mount.hostPath)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw PhantomError.mountPathNotFound(mount.hostPath)
+            }
+            let dir = VZSharedDirectory(url: url, readOnly: false)
+            let mountShare = VZSingleDirectoryShare(directory: dir)
+            let mountConfig = VZVirtioFileSystemDeviceConfiguration(tag: mount.tag)
+            mountConfig.share = mountShare
+            sharingDevices.append(mountConfig)
+            log("Mounting \(mount.hostPath) as '\(mount.tag)'")
+        }
+
+        config.directorySharingDevices = sharingDevices
 
         return config
     }
@@ -596,6 +713,7 @@ enum PhantomError: LocalizedError {
     case vmNotRunning(String)
     case noSocketDevice
     case connectionClosed
+    case mountPathNotFound(String)
 
     var errorDescription: String? {
         switch self {
@@ -607,6 +725,7 @@ enum PhantomError: LocalizedError {
         case .vmNotRunning(let id): "VM is not running: \(id)"
         case .noSocketDevice: "No vsock device available"
         case .connectionClosed: "Connection to guest agent closed"
+        case .mountPathNotFound(let path): "Mount path not found: \(path)"
         }
     }
 }
