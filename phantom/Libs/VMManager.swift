@@ -134,11 +134,12 @@ class VMManager {
 
             let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: ipswPath)
 
-            let observation = installer.progress.observe(\.fractionCompleted) { [weak self, generatedId] progress, _ in
-                Task { @MainActor in
-                    self?.vmInstances[generatedId]?.state = .installing(progress: progress.fractionCompleted)
+            let observation = installer.progress.observe(\.fractionCompleted) { progress, _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.vmInstances[generatedId]?.state = .installing(progress: progress.fractionCompleted)
                     if Int(progress.fractionCompleted * 100) % 10 == 0 {
-                        self?.log("Installation progress: \(Int(progress.fractionCompleted * 100))%")
+                        self.log("Installation progress: \(Int(progress.fractionCompleted * 100))%")
                     }
                 }
             }
