@@ -433,6 +433,12 @@ Or on error:
   - `{"type":"stderr","data":"..."}`
   - `{"type":"done","exitCode":0}` (final chunk, connection closes)
 
+### vms.display
+- **Params**: `vmId` (string)
+- **Purpose**: Open VM display window in the daemon GUI
+- **Implementation**: Sets `displayedVMId` and increments `displayRequestCounter` on VMManager. ContentView observes the counter and calls `openWindow(id: "vm-display")`.
+- **Response**: `{"status": "ok", "vmId": "vm-abc"}`
+
 ### vms.delete
 - **Params**: `vmId` (string)
 - **Purpose**: Delete VM bundle from disk

@@ -158,6 +158,9 @@ struct ContentView: View {
             .frame(minWidth: 300)
         }
         .frame(minWidth: 700, minHeight: 400)
+        .onChange(of: vm.displayRequestCounter) {
+            openWindow(id: "vm-display")
+        }
     }
 
     // MARK: - Status Views

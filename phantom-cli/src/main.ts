@@ -1,5 +1,5 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
-import { vmList, vmStop, vmDelete, vmExec } from "./commands/vm";
+import { vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay } from "./commands/vm";
 import { vmCreate } from "./commands/create";
 import { health } from "./commands/health";
 import { route } from "./router";
@@ -19,11 +19,17 @@ const commands = {
   list: {
     handler: vmList as (arg?: string) => Promise<void>,
   },
+  start: {
+    handler: vmStart as (arg?: string) => Promise<void>,
+  },
   stop: {
     handler: vmStop as (arg?: string) => Promise<void>,
   },
   exec: {
     multiArgHandler: vmExec,
+  },
+  display: {
+    handler: vmDisplay as (arg?: string) => Promise<void>,
   },
   delete: {
     handler: vmDelete as (arg?: string) => Promise<void>,
@@ -60,7 +66,9 @@ Commands:
   create --from-vm <VM_ID> --rm --mount <path> -- <cmd>
                                   Ephemeral VM with host dir mounted at /Volumes/mount
   exec <VM_ID> -- <command>       Execute command in running VM
+  display <VM_ID>                 Open VM display window
   list                            Show all VMs
+  start <VM_ID>                   Start a stopped VM
   stop <VM_ID>                    Stop a running VM
   delete <VM_ID>                  Delete a VM
   health                          Check daemon status

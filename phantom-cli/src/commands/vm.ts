@@ -79,6 +79,28 @@ export async function vmExec(...args: string[]) {
   process.exit(exitCode);
 }
 
+export async function vmStart(vmId: string) {
+  if (!vmId) {
+    console.error("Error: VM_ID required");
+    console.error("Usage: phantom start <VM_ID>");
+    process.exit(1);
+  }
+
+  console.log(`Starting VM ${vmId}...`);
+
+  const response = await sendRequest(
+    { method: "vms.start", params: { vmId } },
+    { timeoutMs: 120_000 }
+  );
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(`VM ${vmId} running`);
+}
+
 export async function vmStop(vmId: string) {
   if (!vmId) {
     console.error("Error: VM_ID required");
@@ -99,6 +121,26 @@ export async function vmStop(vmId: string) {
   }
 
   console.log(`VM ${vmId} stopped`);
+}
+
+export async function vmDisplay(vmId: string) {
+  if (!vmId) {
+    console.error("Error: VM_ID required");
+    console.error("Usage: phantom display <VM_ID>");
+    process.exit(1);
+  }
+
+  const response = await sendRequest({
+    method: "vms.display",
+    params: { vmId },
+  });
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(`Display opened for VM ${vmId}`);
 }
 
 export async function vmDelete(vmId: string) {

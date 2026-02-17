@@ -46,6 +46,7 @@ class VMManager {
 
     private(set) var vmInstances: [String: VMInstance] = [:]
     private(set) var displayedVMId: String? = nil
+    private(set) var displayRequestCounter: Int = 0
 
     /// Whether an existing installed VM bundle was found on disk
     private(set) var hasExistingVM: Bool = false
@@ -282,6 +283,11 @@ class VMManager {
 
     func setDisplayedVM(vmId: String?) {
         displayedVMId = vmId
+    }
+
+    func requestDisplay(vmId: String) {
+        displayedVMId = vmId
+        displayRequestCounter += 1
     }
 
     func deleteVM(vmId: String) async {
