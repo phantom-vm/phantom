@@ -37,8 +37,8 @@ class TCPServer {
         let listener = try NWListener(using: params, on: nwPort)
         self.listener = listener
 
-        listener.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in
+        listener.stateUpdateHandler = { state in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch state {
                 case .ready:
@@ -56,9 +56,10 @@ class TCPServer {
             }
         }
 
-        listener.newConnectionHandler = { [weak self] connection in
-            Task { @MainActor in
-                self?.handleConnection(connection)
+        listener.newConnectionHandler = { connection in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.handleConnection(connection)
             }
         }
 
@@ -86,8 +87,8 @@ class TCPServer {
         let wrapper = ConnectionWrapper(connection: connection)
         activeConnections.insert(wrapper)
 
-        connection.stateUpdateHandler = { [weak self, weak wrapper] state in
-            Task { @MainActor in
+        connection.stateUpdateHandler = { state in
+            Task { @MainActor [weak self, weak wrapper] in
                 guard let self, let wrapper else { return }
                 switch state {
                 case .ready:
@@ -108,9 +109,7 @@ class TCPServer {
 
     private func receiveRequest(on connection: NWConnection) {
         // Read up to 64KB
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
             if let error {
                 print("TCPServer: receive error: \(error)")
                 connection.cancel()
@@ -126,7 +125,8 @@ class TCPServer {
             guard let newlineIndex = data.firstIndex(of: 0x0A) else {
                 // No newline yet - for simplicity, we'll just reject invalid requests
                 // Production code should buffer and keep reading
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     let errorData = self.errorResponse(code: "invalid_request", message: "Request must end with newline")
                     self.sendResponse(errorData, to: connection)
                 }
@@ -135,7 +135,8 @@ class TCPServer {
 
             let requestData = data.prefix(upTo: newlineIndex)
 
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 await self.processRequest(requestData, connection: connection)
             }
         }
