@@ -6,7 +6,8 @@
       "Bash(bun run:*)",
       "Bash(git add:*)",
       "Bash(git push:*)",
-      "Bash(xcodebuild:*)"
+      "Bash(xcodebuild:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
