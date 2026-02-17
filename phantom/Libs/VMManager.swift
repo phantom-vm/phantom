@@ -374,13 +374,13 @@ class VMManager {
         let stream: Bool?
     }
 
-    struct StreamChunk: Codable {
+    nonisolated struct StreamChunk: Codable, Sendable {
         let type: String  // "stdout", "stderr", "exit"
         let data: String?
         let exitCode: Int32?
     }
 
-    struct ExecResponse: Codable {
+    nonisolated struct ExecResponse: Codable, Sendable {
         let stdout: String
         let stderr: String
         let exitCode: Int32
