@@ -4,6 +4,7 @@ export async function vmCreate(...args: string[]) {
   // Parse flags
   let fromVm: string | undefined;
   let fromIpsw: string | undefined;
+  let fromImage: string | undefined;
   let rm = false;
   let mountPath: string | undefined;
   let commandArgs: string[] = [];
@@ -22,6 +23,9 @@ export async function vmCreate(...args: string[]) {
     } else if (flagArgs[i] === "--from-ipsw" && i + 1 < flagArgs.length) {
       fromIpsw = flagArgs[i + 1];
       i++;
+    } else if (flagArgs[i] === "--from-image" && i + 1 < flagArgs.length) {
+      fromImage = flagArgs[i + 1];
+      i++;
     } else if (flagArgs[i] === "--rm") {
       rm = true;
     } else if (flagArgs[i] === "--mount" && i + 1 < flagArgs.length) {
@@ -31,17 +35,23 @@ export async function vmCreate(...args: string[]) {
   }
 
   // Validate flags
-  if (!fromVm && !fromIpsw) {
-    console.error("Error: Must specify either --from-vm or --from-ipsw");
+  const sources = [fromVm, fromIpsw, fromImage].filter(Boolean);
+  if (sources.length === 0) {
+    console.error(
+      "Error: Must specify one of --from-vm, --from-ipsw, or --from-image"
+    );
     console.error("Usage:");
     console.error("  phantom create --from-ipsw <ipsw-id>");
     console.error("  phantom create --from-vm <vm-id>");
+    console.error("  phantom create --from-image <image-name>");
     console.error("  phantom create --from-vm <vm-id> --rm -- <command>");
     process.exit(1);
   }
 
-  if (fromVm && fromIpsw) {
-    console.error("Error: Cannot specify both --from-vm and --from-ipsw");
+  if (sources.length > 1) {
+    console.error(
+      "Error: Cannot specify multiple sources (--from-vm, --from-ipsw, --from-image)"
+    );
     process.exit(1);
   }
 
@@ -68,12 +78,15 @@ export async function vmCreate(...args: string[]) {
   }
 
   // Regular create
-  const params: { ipswId?: string; sourceVmId?: string } = fromIpsw
-    ? { ipswId: fromIpsw }
-    : { sourceVmId: fromVm };
+  const params: { ipswId?: string; sourceVmId?: string; fromImage?: string } =
+    fromIpsw
+      ? { ipswId: fromIpsw }
+      : fromImage
+        ? { fromImage }
+        : { sourceVmId: fromVm };
 
-  const sourceType = fromIpsw ? "IPSW" : "VM";
-  const sourceId = fromIpsw || fromVm;
+  const sourceType = fromIpsw ? "IPSW" : fromImage ? "image" : "VM";
+  const sourceId = fromIpsw || fromImage || fromVm;
 
   console.log(`Creating VM from ${sourceType} ${sourceId}...`);
 

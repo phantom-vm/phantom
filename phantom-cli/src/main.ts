@@ -2,6 +2,10 @@ import { ipswList, ipswPull } from "./commands/ipsw";
 import { vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay } from "./commands/vm";
 import { vmCreate } from "./commands/create";
 import { health } from "./commands/health";
+import { imageSave } from "./commands/save";
+import { imagesList, imagesDelete } from "./commands/images";
+import { imagePush } from "./commands/push";
+import { imagePull } from "./commands/pull";
 import { route } from "./router";
 
 // MARK: - Command Registry
@@ -34,6 +38,22 @@ const commands = {
   delete: {
     handler: vmDelete as (arg?: string) => Promise<void>,
   },
+  save: {
+    multiArgHandler: imageSave,
+  },
+  push: {
+    multiArgHandler: imagePush,
+  },
+  pull: {
+    multiArgHandler: imagePull,
+  },
+  images: {
+    subcommands: {
+      list: imagesList,
+      delete: imagesDelete,
+    },
+    handler: imagesList as (arg?: string) => Promise<void>,
+  },
   health: {
     handler: health as (arg?: string) => Promise<void>,
   },
@@ -61,10 +81,16 @@ Commands:
   ipsw list                       List available IPSWs
   create --from-ipsw <IPSW_ID>    Create VM from IPSW
   create --from-vm <VM_ID>        Clone existing VM
+  create --from-image <IMAGE>     Create VM from a saved image
   create --from-vm <VM_ID> --rm -- <cmd>
                                   Run ephemeral VM (clone, run, delete)
   create --from-vm <VM_ID> --rm --mount <path> -- <cmd>
                                   Ephemeral VM with host dir mounted at /Volumes/mount
+  save <VM_ID> <IMAGE_NAME>       Save VM as a local OCI image
+  images                          List saved images
+  images delete <IMAGE_NAME>      Delete a saved image
+  push <IMAGE> <REF>              Push image to OCI registry
+  pull <REF> [--name <NAME>]      Pull image from OCI registry
   exec <VM_ID> -- <command>       Execute command in running VM
   display <VM_ID>                 Open VM display window
   list                            Show all VMs
@@ -75,14 +101,15 @@ Commands:
 
 Examples:
   phantom ipsw pull
-  phantom ipsw list
   phantom create --from-ipsw 24C61
   phantom create --from-vm my-template-vm
-  phantom create --from-vm my-template-vm --rm -- echo hello
+  phantom save vm-abc123 macos-base
+  phantom images
+  phantom push macos-base ghcr.io/org/myvm:v1
+  phantom pull ghcr.io/org/myvm:v1 --name pulled-image
+  phantom create --from-image macos-base
   phantom exec vm-abc123 -- ls -la
   phantom list
-  phantom stop vm-abc123
-  phantom delete vm-abc123
 `);
 }
 

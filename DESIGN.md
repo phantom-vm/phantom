@@ -56,13 +56,21 @@ phantom/
 └── Libs/
     ├── VMManager.swift   # VM lifecycle management
     ├── IPSWManager.swift # IPSW download and listing
-    └── TCPServer.swift   # Network.framework TCP server
+    ├── TCPServer.swift   # Network.framework TCP server
+    └── OCI/
+        ├── OCITypes.swift          # Manifest, descriptor, media types, digest
+        ├── OCIReference.swift      # Registry reference parsing
+        ├── OCIAuth.swift           # Bearer/Basic auth + Docker config
+        ├── OCIRegistry.swift       # OCI Distribution API HTTP client
+        ├── OCIDiskLayerizer.swift  # Disk chunking + LZ4 compression
+        └── OCIImageManager.swift   # Image CRUD + push/pull orchestration
 ```
 
 **State Management**:
 - Uses `@Observable` macro for reactive state
 - All state mutations happen on `@MainActor`
 - `IPSWManager` owns IPSW download state, referenced by `VMManager.ipswManager`
+- `OCIImageManager` owns image operations state, referenced by `VMManager.imageManager`
 - `VMManager` tracks multiple VMs via `vmInstances` dictionary
 - Observable properties: `ipswManager.state`, `vmInstances`, `logs`, etc.
 
@@ -272,6 +280,18 @@ CLI                     Daemon                  VM
 │   └── vm-def456/
 │       └── ...
 │
+├── images/                   # Local OCI images
+│   ├── macos-base/
+│   │   ├── manifest.json     # OCI manifest (layers + digests)
+│   │   ├── config.json       # VM config (HardwareModel as base64)
+│   │   ├── nvram.bin         # AuxiliaryStorage
+│   │   └── disk/             # LZ4-compressed disk chunks
+│   │       ├── 000.lz4
+│   │       ├── 001.lz4
+│   │       └── ...
+│   └── macos-dev/
+│       └── ...
+│
 └── shared/                   # Mounted in all VMs
     ├── phantom-agent         # Guest agent binary
     ├── install.sh            # Installation script
@@ -395,16 +415,13 @@ Or on error:
 - **Response**: `{"vms": [{"id": "vm-abc", "path": "...", "state": "running"}]}`
 
 ### vms.create
-- **Params**: `ipswId` (string)
-- **Purpose**: Create and start new VM
+- **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string)
+- **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
 - **Implementation**:
-  - Validates IPSW exists
-  - Creates VM bundle directory
-  - Creates disk image
-  - Installs macOS
-  - Auto-starts VM
-  - Returns immediately (async operation)
-- **Response**: `{"status": "started", "message": "VM creation started"}`
+  - `ipswId`: Validates IPSW exists, creates VM bundle, installs macOS, auto-starts (async)
+  - `sourceVmId`: APFS CoW clone of existing VM bundle
+  - `fromImage`: Decompresses image chunks into new VM bundle, generates fresh MachineIdentifier
+- **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`
 
 ### vms.start
 - **Params**: `vmId` (string), `mounts` (array, optional)
@@ -444,6 +461,125 @@ Or on error:
 - **Purpose**: Delete VM bundle from disk
 - **Implementation**: Stops VM if running, removes bundle directory
 - **Response**: `{"status": "deleted", "vmId": "vm-abc"}`
+
+### images.save
+- **Params**: `vmId` (string), `name` (string)
+- **Purpose**: Save a stopped VM as a local OCI image
+- **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json.
+- **Response**: `{"status": "started", "message": "Saving VM '...' as image '...'"}`
+
+### images.list
+- **Purpose**: List locally saved OCI images
+- **Response**: `{"images": [{"name": "macos-base", "diskChunks": 5, "totalSize": 12345678, "createdAt": "2024-01-01T00:00:00Z"}]}`
+
+### images.delete
+- **Params**: `name` (string)
+- **Purpose**: Delete a local image
+- **Response**: `{"status": "deleted", "name": "macos-base"}`
+
+### images.push
+- **Params**: `name` (string), `reference` (string), `username` (string, optional), `password` (string, optional)
+- **Purpose**: Push a local image to an OCI-compatible registry
+- **Implementation**: Fire-and-forget. Checks blob existence on registry (skips if already present), uploads missing blobs, then pushes manifest with tag.
+- **Response**: `{"status": "started", "message": "Pushing image '...' to ..."}`
+
+### images.pull
+- **Params**: `reference` (string), `name` (string, optional), `username` (string, optional), `password` (string, optional)
+- **Purpose**: Pull an image from an OCI registry to local storage
+- **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory.
+- **Response**: `{"status": "started", "message": "Pulling image from ..."}`
+
+### images.status
+- **Purpose**: Poll current image operation state (saving, pushing, pulling)
+- **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
+
+---
+
+## OCI Image Architecture
+
+Phantom supports saving VMs as OCI-compatible images that can be pushed to and pulled from any OCI registry (Docker Hub, GHCR, etc.).
+
+### Media Types
+
+| Content | Media Type |
+|---------|-----------|
+| OCI Manifest | `application/vnd.oci.image.manifest.v1+json` |
+| OCI Config | `application/vnd.oci.image.config.v1+json` |
+| VM Config | `application/vnd.monk-studio.phantom.config.v1` |
+| NVRAM | `application/vnd.monk-studio.phantom.nvram.v1` |
+| Disk Chunk (LZ4) | `application/vnd.monk-studio.phantom.disk.v1` |
+
+### OCI Manifest Structure
+
+```json
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:...",
+    "size": 50
+  },
+  "layers": [
+    { "mediaType": "...phantom.config.v1", "digest": "sha256:...", "size": 456 },
+    { "mediaType": "...phantom.nvram.v1", "digest": "sha256:...", "size": 789 },
+    { "mediaType": "...phantom.disk.v1", "digest": "sha256:...", "size": 1024,
+      "annotations": { "vnd.monk-studio.phantom.uncompressed-size": "536870912" }
+    }
+  ]
+}
+```
+
+The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
+
+### Disk Layerization
+
+- Disk images are split into **512MB chunks**, each LZ4-compressed
+- Each chunk becomes one OCI layer with an `uncompressed-size` annotation
+- On restore: `ftruncate` creates a sparse disk, chunks are decompressed in order, all-zero chunks are skipped (stays sparse)
+- Concurrency: up to 4 concurrent compress/decompress operations
+
+### Image Flows
+
+**Save (VM → Local Image)**:
+1. Validate VM exists and is stopped
+2. Create `images/<name>/` directory
+3. Base64-encode HardwareModel into `config.json`
+4. Copy AuxiliaryStorage → `nvram.bin`
+5. Chunk `disk.img` → LZ4 compress → `disk/000.lz4`, `disk/001.lz4`, ...
+6. Compute SHA-256 digests, write `manifest.json`
+
+**Push (Local Image → Registry)**:
+1. Read local `manifest.json`
+2. For each layer: check if blob exists on registry (`HEAD`), upload if missing (`POST` + `PUT`)
+3. Push manifest with tag (`PUT`)
+
+**Pull (Registry → Local Image)**:
+1. Fetch manifest from registry (`GET`)
+2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`
+3. Save manifest locally
+
+**Create from Image (Local Image → VM)**:
+1. Read config JSON, decode base64 HardwareModel
+2. Create new VM bundle directory
+3. Write HardwareModel file
+4. Copy nvram.bin → AuxiliaryStorage
+5. Decompress disk chunks → reassemble `disk.img` (sparse, zero-skip)
+6. Generate fresh MachineIdentifier
+7. Register in `vmInstances`
+
+### Registry Authentication
+
+Auth follows the OCI Distribution Spec token flow:
+1. First request returns 401 with `WWW-Authenticate` header
+2. Parse header for Bearer realm, service, scope
+3. Fetch token from auth endpoint (with Basic credentials if available)
+4. Retry original request with `Authorization: Bearer <token>`
+
+**Credential sources** (in priority order):
+1. Explicit `--username`/`--password` flags
+2. Environment variables: `PHANTOM_REGISTRY_USERNAME`, `PHANTOM_REGISTRY_PASSWORD`
+3. `~/.docker/config.json` (auto-detected by registry hostname)
 
 ---
 
@@ -572,10 +708,12 @@ enum PhantomError: LocalizedError {
 enum APIHandlerError: LocalizedError {
     case unknownMethod(String)
     case missingParam(String)
+    case invalidParams(String)
     case ipswNotFound(String)
     case vmNotFound(String)
     case vmNotRunning(String)
     case vmAlreadyExists(String)
+    case cloneFailed(String)
 }
 ```
 
@@ -607,6 +745,21 @@ class IPSWManager {
 
 @MainActor
 @Observable
+class OCIImageManager {
+    private(set) var state: OperationState = .idle
+    // .idle | .saving(progress, message) | .pushing(progress, message)
+    // | .pulling(progress, message) | .completed(message) | .error(message)
+
+    func save(name:bundlePath:) async { ... }
+    func list() -> [ImageInfo] { ... }
+    func delete(name:) throws { ... }
+    func createVM(fromImage:vmsDir:) async throws -> (String, URL) { ... }
+    func push(name:reference:username:password:) async { ... }
+    func pull(reference:name:username:password:) async { ... }
+}
+
+@MainActor
+@Observable
 class VMManager {
     struct VMInstance {
         let vmId: String
@@ -616,6 +769,7 @@ class VMManager {
     }
 
     let ipswManager: IPSWManager
+    let imageManager: OCIImageManager
     private(set) var vmInstances: [String: VMInstance] = [:]
     private(set) var displayedVMId: String? = nil
     private(set) var hasExistingVM: Bool = false
@@ -720,7 +874,7 @@ var body: some View {
 - SwiftUI (GUI)
 - Foundation (core utilities)
 
-**Zero External Dependencies**: No third-party libraries, only Apple frameworks and Bun runtime.
+**Zero External Dependencies**: No third-party libraries, only Apple frameworks and Bun runtime. OCI support uses `Foundation.URLSession` for HTTP, `Compression` framework for LZ4, and `CommonCrypto` for SHA-256 digests.
 
 ---
 
@@ -776,7 +930,19 @@ phantom/
 │   └── Libs/
 │       ├── VMManager.swift   # VM lifecycle management
 │       ├── IPSWManager.swift # IPSW download and listing
-│       └── TCPServer.swift   # Network.framework TCP server
+│       ├── TCPServer.swift   # Network.framework TCP server
+│       └── OCI/
+│           ├── OCITypes.swift          # Manifest, descriptor, media types
+│           ├── OCIReference.swift      # Registry reference parsing
+│           ├── OCIAuth.swift           # Bearer/Basic auth + Docker config
+│           ├── OCIRegistry.swift       # OCI Distribution API client
+│           ├── OCIDiskLayerizer.swift  # Disk chunking + LZ4 compression
+│           └── OCIImageManager.swift   # Image CRUD + push/pull
+│
+├── phantomTests/             # Unit tests
+│   ├── OCIReferenceTests.swift
+│   ├── OCITypesTests.swift
+│   └── OCIDiskLayerizerTests.swift
 │
 ├── phantom-agent/            # Guest agent
 │   └── Sources/main.swift   # vsock server (180 lines)
@@ -790,6 +956,10 @@ phantom/
             ├── create.ts    # VM creation + ephemeral flow
             ├── vm.ts        # list, stop, delete, exec
             ├── ipsw.ts      # IPSW management
+            ├── save.ts      # Save VM as OCI image
+            ├── images.ts    # List/delete local images
+            ├── push.ts      # Push image to registry
+            ├── pull.ts      # Pull image from registry
             └── health.ts    # Daemon health check
 ```
 
@@ -799,6 +969,7 @@ phantom/
 ~/Library/Application Support/phantom/
 ├── ipsws/          # IPSW files
 ├── vms/            # VM bundles
+├── images/         # Local OCI images
 └── shared/         # Guest agent files
 ```
 

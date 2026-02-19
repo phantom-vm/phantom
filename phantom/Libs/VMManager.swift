@@ -43,6 +43,7 @@ class VMManager {
     private var vmsDir: URL { baseDir.appendingPathComponent("vms", isDirectory: true) }
 
     let ipswManager: IPSWManager
+    let imageManager: OCIImageManager
 
     private(set) var vmInstances: [String: VMInstance] = [:]
     private(set) var displayedVMId: String? = nil
@@ -53,8 +54,10 @@ class VMManager {
 
     init() {
         let ipswsDir = baseDir.appendingPathComponent("ipsws", isDirectory: true)
+        let imagesDir = baseDir.appendingPathComponent("images", isDirectory: true)
         var logFunc: ((String) -> Void)!
         ipswManager = IPSWManager(ipswsDir: ipswsDir, log: { msg in logFunc(msg) })
+        imageManager = OCIImageManager(imagesDir: imagesDir, log: { msg in logFunc(msg) })
         logFunc = { [weak self] msg in self?.log(msg) }
         ensureDirectories()
         ipswManager.loadExisting()
@@ -364,6 +367,20 @@ class VMManager {
 
         log("Clone complete: vm-\(cloneId)")
         return "vm-\(cloneId)"
+    }
+
+    // MARK: - Create from Image
+
+    func createVMFromImage(imageName: String) async throws -> String {
+        let result = try await imageManager.createVM(fromImage: imageName, vmsDir: vmsDir)
+        vmInstances[result.vmId] = VMInstance(
+            vmId: result.vmId,
+            bundlePath: result.bundlePath,
+            state: .stopped,
+            virtualMachine: nil
+        )
+        hasExistingVM = true
+        return result.vmId
     }
 
     // MARK: - Guest Command Execution

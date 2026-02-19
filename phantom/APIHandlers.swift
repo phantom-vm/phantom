@@ -77,6 +77,18 @@ struct APIHandlers {
             return try await handleVmsDelete(params: request.params)
         case "vms.display":
             return try await handleVmsDisplay(params: request.params)
+        case "images.save":
+            return try await handleImagesSave(params: request.params)
+        case "images.list":
+            return try await handleImagesList()
+        case "images.delete":
+            return try await handleImagesDelete(params: request.params)
+        case "images.status":
+            return try await handleImagesStatus()
+        case "images.push":
+            return try await handleImagesPush(params: request.params)
+        case "images.pull":
+            return try await handleImagesPull(params: request.params)
         default:
             throw APIHandlerError.unknownMethod(request.method)
         }
@@ -131,10 +143,26 @@ struct APIHandlers {
     private func handleVmsCreate(params: [String: AnyCodable]?) async throws -> AnyCodable {
         let ipswId = params?["ipswId"]?.value as? String
         let sourceVmId = params?["sourceVmId"]?.value as? String
+        let fromImage = params?["fromImage"]?.value as? String
 
         // Must have exactly one source
-        guard (ipswId != nil) != (sourceVmId != nil) else {
-            throw APIHandlerError.invalidParams("Must specify either 'ipswId' or 'sourceVmId', but not both")
+        let sources = [ipswId, sourceVmId, fromImage].compactMap { $0 }
+        guard sources.count == 1 else {
+            throw APIHandlerError.invalidParams("Must specify exactly one of 'ipswId', 'sourceVmId', or 'fromImage'")
+        }
+
+        // Create from image
+        if let fromImage = fromImage {
+            do {
+                let vmId = try await vmManager.createVMFromImage(imageName: fromImage)
+                return AnyCodable([
+                    "status": "success",
+                    "message": "VM created from image",
+                    "vmId": vmId
+                ])
+            } catch {
+                throw APIHandlerError.invalidParams("Failed to create VM from image: \(error.localizedDescription)")
+            }
         }
 
         // Create from IPSW
@@ -283,6 +311,118 @@ struct APIHandlers {
             "status": "ok",
             "vmId": vmId
         ])
+    }
+    // MARK: - Image Handlers
+
+    private func handleImagesSave(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+        guard let name = params?["name"]?.value as? String else {
+            throw APIHandlerError.missingParam("name")
+        }
+
+        // Verify VM exists and is stopped
+        guard let instance = vmManager.vmInstances[vmId] else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+        if case .running = instance.state {
+            throw APIHandlerError.invalidParams("VM must be stopped before saving as image")
+        }
+
+        // Start save (async operation)
+        Task {
+            await vmManager.imageManager.save(name: name, bundlePath: instance.bundlePath)
+        }
+
+        return AnyCodable([
+            "status": "started",
+            "message": "Saving VM '\(vmId)' as image '\(name)'"
+        ])
+    }
+
+    private func handleImagesList() async throws -> AnyCodable {
+        let images = vmManager.imageManager.list()
+        return AnyCodable(["images": images.map { img in
+            [
+                "name": img.name,
+                "diskChunks": img.diskChunks,
+                "totalSize": img.totalSize,
+                "createdAt": img.createdAt
+            ] as [String: Any]
+        }])
+    }
+
+    private func handleImagesDelete(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let name = params?["name"]?.value as? String else {
+            throw APIHandlerError.missingParam("name")
+        }
+
+        do {
+            try vmManager.imageManager.delete(name: name)
+            return AnyCodable(["status": "deleted", "name": name])
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
+    }
+
+    private func handleImagesPush(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let name = params?["name"]?.value as? String else {
+            throw APIHandlerError.missingParam("name")
+        }
+        guard let reference = params?["reference"]?.value as? String else {
+            throw APIHandlerError.missingParam("reference")
+        }
+        let username = params?["username"]?.value as? String
+        let password = params?["password"]?.value as? String
+
+        guard vmManager.imageManager.imageExists(name) else {
+            throw APIHandlerError.invalidParams("Image not found: \(name)")
+        }
+
+        Task {
+            await vmManager.imageManager.push(name: name, reference: reference, username: username, password: password)
+        }
+
+        return AnyCodable([
+            "status": "started",
+            "message": "Pushing image '\(name)' to \(reference)"
+        ])
+    }
+
+    private func handleImagesPull(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let reference = params?["reference"]?.value as? String else {
+            throw APIHandlerError.missingParam("reference")
+        }
+        let name = params?["name"]?.value as? String
+        let username = params?["username"]?.value as? String
+        let password = params?["password"]?.value as? String
+
+        Task {
+            await vmManager.imageManager.pull(reference: reference, name: name, username: username, password: password)
+        }
+
+        return AnyCodable([
+            "status": "started",
+            "message": "Pulling image from \(reference)"
+        ])
+    }
+
+    private func handleImagesStatus() async throws -> AnyCodable {
+        switch vmManager.imageManager.state {
+        case .idle:
+            return AnyCodable(["state": "idle"])
+        case .saving(let progress, let message):
+            return AnyCodable(["state": "saving", "progress": progress, "message": message] as [String: Any])
+        case .pushing(let progress, let message):
+            return AnyCodable(["state": "pushing", "progress": progress, "message": message] as [String: Any])
+        case .pulling(let progress, let message):
+            return AnyCodable(["state": "pulling", "progress": progress, "message": message] as [String: Any])
+        case .completed(let message):
+            return AnyCodable(["state": "completed", "message": message] as [String: Any])
+        case .error(let message):
+            return AnyCodable(["state": "error", "message": message] as [String: Any])
+        }
     }
 }
 

@@ -12,4 +12,3 @@ Run and manage macOS virtual machines on your Mac from the command line.
 
 _No items currently planned._
 
-Think about how the GUI would be like, mainly instruction I suppose.
