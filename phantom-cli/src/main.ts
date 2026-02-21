@@ -6,6 +6,7 @@ import { imageSave } from "./commands/save";
 import { imagesList, imagesDelete } from "./commands/images";
 import { imagePush } from "./commands/push";
 import { imagePull } from "./commands/pull";
+import { gitlabRunner } from "./commands/gitlab-runner";
 import { route } from "./router";
 
 // MARK: - Command Registry
@@ -54,6 +55,9 @@ const commands = {
     },
     handler: imagesList as (arg?: string) => Promise<void>,
   },
+  "gitlab-runner": {
+    multiArgHandler: gitlabRunner,
+  },
   health: {
     handler: health as (arg?: string) => Promise<void>,
   },
@@ -96,6 +100,10 @@ Commands:
   stop <VM_ID>                    Stop a running VM
   delete <VM_ID>                  Delete a VM
   health                          Check daemon status
+  gitlab-runner prepare           GitLab custom executor: provision ephemeral VM
+  gitlab-runner run <script> <stage>
+                                  GitLab custom executor: run CI step in VM
+  gitlab-runner cleanup           GitLab custom executor: delete ephemeral VM
 
 Examples:
   phantom ipsw pull
