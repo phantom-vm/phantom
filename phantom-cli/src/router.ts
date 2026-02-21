@@ -1,14 +1,12 @@
 type CommandHandler = (arg?: string) => Promise<void> | void;
 type MultiArgCommandHandler = (...args: string[]) => Promise<void> | void;
 
-interface SubcommandConfig {
-  [subcommand: string]: () => Promise<void>;
-}
-
 interface CommandConfig {
   handler?: CommandHandler;
   multiArgHandler?: MultiArgCommandHandler;
-  subcommands?: SubcommandConfig;
+  subcommands?: {
+    [subcommand: string]: CommandConfig;
+  };
 }
 
 interface CommandRegistry {
@@ -17,7 +15,7 @@ interface CommandRegistry {
 
 export async function route(registry: CommandRegistry, args: string[]) {
   const command = args[0];
-  const subcommand = args[1];
+  const rest = args.slice(1);
 
   if (!command) {
     console.error("No command provided");
@@ -34,30 +32,35 @@ export async function route(registry: CommandRegistry, args: string[]) {
 
   // Handle commands with subcommands
   if (config.subcommands) {
+    const subcommand = rest[0];
     if (!subcommand) {
+      if (config.handler) {
+        await config.handler(undefined);
+        return;
+      }
       console.error(`${command} requires a subcommand`);
       console.error(`Available: ${Object.keys(config.subcommands).join(", ")}`);
       process.exit(1);
     }
-    const handler = config.subcommands[subcommand];
-    if (!handler) {
+    const subConfig = config.subcommands[subcommand];
+    if (!subConfig) {
       console.error(`Unknown ${command} subcommand: ${subcommand}`);
       console.error(`Available: ${Object.keys(config.subcommands).join(", ")}`);
       process.exit(1);
     }
-    await handler();
+    await route({ [subcommand]: subConfig }, rest);
     return;
   }
 
   // Handle direct commands with multiple args
   if (config.multiArgHandler) {
-    await config.multiArgHandler(...args.slice(1));
+    await config.multiArgHandler(...rest);
     return;
   }
 
   // Handle direct commands with single arg
   if (config.handler) {
-    await config.handler(subcommand);
+    await config.handler(rest[0]);
     return;
   }
 
