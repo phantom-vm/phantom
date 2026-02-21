@@ -8,7 +8,8 @@ Phantom can serve as a [GitLab custom executor](https://docs.gitlab.com/runner/e
 GitLab Runner          phantom daemon         VM
       │                      │                 │
       │  prepare              │                 │
-      ├─────────────────────▶│ Clone base VM   │
+      ├─────────────────────▶│ Create VM from  │
+      │                      │ image           │
       │                      │ Start VM        │
       │                      │ Wait for agent  │
       │                      ├────────────────▶│
@@ -24,26 +25,24 @@ GitLab Runner          phantom daemon         VM
       │                      │                 │
 ```
 
-Each CI job gets a fresh VM cloned from your template via APFS copy-on-write — fast and storage-efficient.
+Each CI job gets a fresh VM created from a local image, guaranteeing a clean and reproducible environment.
 
 ## Prerequisites
 
 1. **Phantom daemon running** on the host Mac
 2. **GitLab Runner installed** on the same Mac (`brew install gitlab-runner`)
-3. **A template VM** with `phantom-agent` installed (see [manual.md](../manual.md))
+3. **A base image** with `phantom-agent` installed (see [manual.md](../manual.md))
 
 ## Setup
 
-### 1. Prepare a template VM
+### 1. Prepare a base image
 
-Create and configure a base VM that will be cloned for each CI job. It must have `phantom-agent` installed and running so Phantom can execute commands inside it.
-
-Note the VM ID — you'll need it in step 3.
+Build a VM with `phantom-agent` installed, save it as a local image, and optionally push it to a registry for reuse across machines:
 
 ```bash
-phantom list
-# VM ID                STATE
-# vm-abc123            stopped   ← use this as your template
+phantom image list
+# NAME                 SIZE
+# macos-sequoia-base   42.3 GB   ← use this as your base image
 ```
 
 ### 2. Register a GitLab Runner
@@ -76,10 +75,12 @@ Edit `~/.gitlab-runner/config.toml` and add the custom executor config to your r
     cleanup_exec_args = ["gitlab-runner", "cleanup"]
 
   [runners.env]
-    PHANTOM_BASE_VM = "vm-abc123"
+    PHANTOM_BASE_IMAGE = "macos-sequoia-base"
 ```
 
-Replace `vm-abc123` with your template VM's ID.
+Replace `macos-sequoia-base` with your local image name (`phantom image list`).
+
+> **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. This is slower than a VM clone but guarantees a clean, reproducible environment from a pinned image.
 
 ### 4. Start the runner
 
@@ -105,11 +106,11 @@ Each job's script is base64-encoded and piped directly into the VM over vsock, s
 
 ## Troubleshooting
 
-**`CUSTOM_ENV_PHANTOM_BASE_VM not set`**
-Add `PHANTOM_BASE_VM` to `[runners.env]` in `config.toml`.
+**`CUSTOM_ENV_PHANTOM_BASE_IMAGE not set`**
+Add `PHANTOM_BASE_IMAGE` to `[runners.env]` in `config.toml`.
 
-**`Clone failed` / `Start failed`**
-Check that the phantom daemon is running and the template VM ID is correct (`phantom list`).
+**`VM create failed` / `Start failed`**
+Check that the phantom daemon is running and the image name is correct (`phantom image list`).
 
 **`Agent unavailable`**
 The template VM must have `phantom-agent` installed and configured to start on boot. See [manual.md](../manual.md) for installation steps.

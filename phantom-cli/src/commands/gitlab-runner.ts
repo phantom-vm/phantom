@@ -20,20 +20,23 @@ function stateFilePath(jobId: string): string {
 
 async function prepare() {
   const jobId = getJobId();
-  const baseVm = process.env.CUSTOM_ENV_PHANTOM_BASE_VM;
-  if (!baseVm) {
-    console.error("[phantom] Error: CUSTOM_ENV_PHANTOM_BASE_VM not set");
+  const baseImage = process.env.CUSTOM_ENV_PHANTOM_BASE_IMAGE;
+  if (!baseImage) {
+    console.error("[phantom] Error: CUSTOM_ENV_PHANTOM_BASE_IMAGE not set");
     process.exit(SYSTEM_FAILURE);
   }
 
-  // 1. Clone base VM
-  console.error(`[phantom] Cloning ${baseVm} for job ${jobId}...`);
-  const createResp = await sendRequest({
-    method: "vm.create",
-    params: { sourceVmId: baseVm },
-  });
+  // 1. Create VM from image
+  console.error(`[phantom] Creating VM from image ${baseImage} for job ${jobId}...`);
+  const createResp = await sendRequest(
+    {
+      method: "vm.create",
+      params: { fromImage: baseImage },
+    },
+    { timeoutMs: 1800_000 } // 30 min — image decompression can take several minutes
+  );
   if (createResp.error) {
-    console.error(`[phantom] Clone failed: ${createResp.error.message}`);
+    console.error(`[phantom] VM create failed: ${createResp.error.message}`);
     process.exit(SYSTEM_FAILURE);
   }
   const vmId = createResp.result?.vmId as string;
