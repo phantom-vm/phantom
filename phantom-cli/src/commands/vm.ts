@@ -1,7 +1,7 @@
 import { sendRequest, type VM } from "../lib/api";
 
 export async function vmList() {
-  const response = await sendRequest({ method: "vms.list" });
+  const response = await sendRequest({ method: "vm.list" });
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);
@@ -10,7 +10,7 @@ export async function vmList() {
 
   const vms = response.result?.vms as VM[] || [];
 
-  if (vms.length === 0) {
+  if (vm.length === 0) {
     console.log("No VMs. Run 'phantom create --from-ipsw <IPSW_ID>' to create one.");
     return;
   }
@@ -31,7 +31,7 @@ export async function vmRun(ipswId: string) {
   console.log(`Creating VM from IPSW ${ipswId}...`);
 
   const response = await sendRequest({
-    method: "vms.create",
+    method: "vm.create",
     params: { ipswId },
   });
 
@@ -62,7 +62,7 @@ export async function vmExec(...args: string[]) {
 
   const response = await sendRequest(
     {
-      method: "vms.exec",
+      method: "vm.exec",
       params: { vmId, command },
     },
     { timeoutMs: 300_000 }
@@ -89,7 +89,7 @@ export async function vmStart(vmId: string) {
   console.log(`Starting VM ${vmId}...`);
 
   const response = await sendRequest(
-    { method: "vms.start", params: { vmId } },
+    { method: "vm.start", params: { vmId } },
     { timeoutMs: 120_000 }
   );
 
@@ -111,7 +111,7 @@ export async function vmStop(vmId: string) {
   console.log(`Stopping VM ${vmId}...`);
 
   const response = await sendRequest({
-    method: "vms.stop",
+    method: "vm.stop",
     params: { vmId },
   });
 
@@ -131,7 +131,7 @@ export async function vmDisplay(vmId: string) {
   }
 
   const response = await sendRequest({
-    method: "vms.display",
+    method: "vm.display",
     params: { vmId },
   });
 
@@ -153,7 +153,7 @@ export async function vmDelete(vmId: string) {
   console.log(`Deleting VM ${vmId}...`);
 
   const response = await sendRequest({
-    method: "vms.delete",
+    method: "vm.delete",
     params: { vmId },
   });
 

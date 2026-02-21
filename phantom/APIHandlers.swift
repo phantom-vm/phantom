@@ -63,19 +63,19 @@ struct APIHandlers {
             return try await handleIpswPull()
         case "ipsw.status":
             return try await handleIpswStatus()
-        case "vms.list":
+        case "vm.list":
             return try await handleVmsList()
-        case "vms.create":
+        case "vm.create":
             return try await handleVmsCreate(params: request.params)
-        case "vms.start":
+        case "vm.start":
             return try await handleVmsStart(params: request.params)
-        case "vms.stop":
+        case "vm.stop":
             return try await handleVmsStop(params: request.params)
-        case "vms.exec":
+        case "vm.exec":
             return try await handleVmsExec(params: request.params)
-        case "vms.delete":
+        case "vm.delete":
             return try await handleVmsDelete(params: request.params)
-        case "vms.display":
+        case "vm.display":
             return try await handleVmsDisplay(params: request.params)
         case "images.save":
             return try await handleImagesSave(params: request.params)

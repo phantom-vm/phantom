@@ -88,7 +88,7 @@ Single-file CLI that sends JSON-RPC requests to the daemon.
 
 **Command Flow**:
 1. Parse command-line arguments
-2. Construct JSON request: `{"method": "vms.list"}`
+2. Construct JSON request: `{"method": "vm.list"}`
 3. Connect to localhost:9090 via `Bun.connect()`
 4. Send request with newline delimiter
 5. Read response until newline
@@ -124,7 +124,7 @@ Lightweight vsock server that executes commands inside the VM.
 ```
 CLI                     Daemon                  VM
  │                         │                    │
- │  vms.create            │                    │
+ │  vm.create            │                    │
  ├────────────────────────▶│                    │
  │                         │                    │
  │                         │ Load IPSW          │
@@ -135,7 +135,7 @@ CLI                     Daemon                  VM
  │  {"status":"started"}   │                    │
  │◀────────────────────────┤                    │
  │                         │                    │
- │  (poll vms.list)        │  Installing...     │
+ │  (poll vm.list)        │  Installing...     │
  │────────────────────────▶│────────────────────▶│
  │                         │                    │
  │  {"state":"running"}    │                    │
@@ -147,7 +147,7 @@ CLI                     Daemon                  VM
 ```
 CLI                     Daemon                  Filesystem
  │                         │                    │
- │  vms.list              │                    │
+ │  vm.list              │                    │
  ├────────────────────────▶│                    │
  │                         │                    │
  │                         │ Scan vms/          │
@@ -193,18 +193,18 @@ Daemon                    Guest Agent           Shell
 ```
 CLI                     Daemon                  VM
  │                         │                    │
- │  vms.create (clone)     │                    │
+ │  vm.create (clone)     │                    │
  ├────────────────────────▶│                    │
  │  {"vmId":"vm-xyz"}      │ APFS CoW clone     │
  │◀────────────────────────┤                    │
  │                         │                    │
- │  vms.start              │                    │
+ │  vm.start              │                    │
  │                         │ Boot VM            │
  ├────────────────────────▶│ + VirtioFS shared  │
  │  {"status":"running"}   │───────────────────▶│
  │◀────────────────────────┤                    │
  │                         │                    │
- │  vms.execStream         │                    │
+ │  vm.execStream         │                    │
  ├────────────────────────▶│ Retry vsock until  │
  │                         │ agent ready...     │
  │                         │  {"command":"...",   │
@@ -215,7 +215,7 @@ CLI                     Daemon                  VM
  │  {"type":"done",...}     │                    │
  │◀────────────────────────┤                    │
  │                         │                    │
- │  vms.delete             │                    │
+ │  vm.delete             │                    │
  ├────────────────────────▶│ Stop + rm bundle   │
  │  {"status":"deleted"}   │                    │
  │◀────────────────────────┤                    │
@@ -242,7 +242,7 @@ CLI                     Daemon                  VM
                           ▼
 ┌──────────────────────────────────────────────────────────┐
 │ 3. Processing (on MainActor)                              │
-│    - Parse JSON: {"method":"vms.list"}                    │
+│    - Parse JSON: {"method":"vm.list"}                    │
 │    - Route to APIHandlers.handleVmsList()                 │
 │    - Call VMManager.listVMs()                             │
 │    - Scan filesystem for VM bundles                       │
@@ -324,7 +324,7 @@ CLI                     Daemon                  VM
 **Request Structure**:
 ```json
 {
-  "method": "vms.create",
+  "method": "vm.create",
   "params": {
     "ipswId": "25C56"
   }
@@ -404,12 +404,12 @@ Or on error:
 - **Purpose**: Poll current IPSW download state
 - **Response**: `{"state": "none|fetching|downloading|downloaded|error", "progress": 0.5, "message": "..."}`
 
-### vms.list
+### vm.list
 - **Purpose**: List all VM bundles
 - **Implementation**: Scans `~/Library/Application Support/phantom/vms/`
 - **Response**: `{"vms": [{"id": "vm-abc", "path": "...", "state": "running"}]}`
 
-### vms.create
+### vm.create
 - **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string)
 - **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
 - **Implementation**:
@@ -418,25 +418,25 @@ Or on error:
   - `fromImage`: Decompresses image chunks into new VM bundle, generates fresh MachineIdentifier
 - **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`
 
-### vms.start
+### vm.start
 - **Params**: `vmId` (string)
 - **Purpose**: Start an existing stopped VM
 - **Implementation**: Loads VM bundle, builds config with VirtioFS shared directory, calls `VZVirtualMachine.start()`
 - **Response**: `{"status": "running", "vmId": "vm-abc"}`
 
-### vms.stop
+### vm.stop
 - **Params**: `vmId` (string)
 - **Purpose**: Stop running VM
 - **Implementation**: Calls `VZVirtualMachine.stop()`
 - **Response**: `{"status": "stopped", "vmId": "vm-abc"}`
 
-### vms.exec
+### vm.exec
 - **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
 - **Purpose**: Execute command inside running VM via vsock
 - **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs).
 - **Response**: `{"stdout": "...", "stderr": "...", "exitCode": 0}`
 
-### vms.execStream
+### vm.execStream
 - **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
 - **Purpose**: Execute command with streaming output. Connection stays open, sending chunks as they arrive.
 - **Protocol**: Newline-delimited JSON chunks:
@@ -444,13 +444,13 @@ Or on error:
   - `{"type":"stderr","data":"..."}`
   - `{"type":"done","exitCode":0}` (final chunk, connection closes)
 
-### vms.display
+### vm.display
 - **Params**: `vmId` (string)
 - **Purpose**: Open VM display window in the daemon GUI
 - **Implementation**: Sets `displayedVMId` and increments `displayRequestCounter` on VMManager. ContentView observes the counter and calls `openWindow(id: "vm-display")`.
 - **Response**: `{"status": "ok", "vmId": "vm-abc"}`
 
-### vms.delete
+### vm.delete
 - **Params**: `vmId` (string)
 - **Purpose**: Delete VM bundle from disk
 - **Implementation**: Stops VM if running, removes bundle directory
@@ -877,9 +877,9 @@ var body: some View {
 
 ### Streaming for Command Execution
 
-**Rationale**: Long-running commands (e.g., xcodebuild) need real-time output. The `vms.execStream` endpoint keeps the TCP connection open and sends newline-delimited JSON chunks. Other endpoints remain stateless (one request, one response).
+**Rationale**: Long-running commands (e.g., xcodebuild) need real-time output. The `vm.execStream` endpoint keeps the TCP connection open and sends newline-delimited JSON chunks. Other endpoints remain stateless (one request, one response).
 
-**Trade-off**: Streaming adds protocol complexity but only for the exec path. Non-streaming `vms.exec` is preserved for backward compatibility.
+**Trade-off**: Streaming adds protocol complexity but only for the exec path. Non-streaming `vm.exec` is preserved for backward compatibility.
 
 ### Newline-Delimited JSON
 

@@ -29,7 +29,7 @@ async function prepare() {
   // 1. Clone base VM
   console.error(`[phantom] Cloning ${baseVm} for job ${jobId}...`);
   const createResp = await sendRequest({
-    method: "vms.create",
+    method: "vm.create",
     params: { sourceVmId: baseVm },
   });
   if (createResp.error) {
@@ -41,24 +41,24 @@ async function prepare() {
   // 2. Start VM
   console.error(`[phantom] Starting ${vmId}...`);
   const startResp = await sendRequest(
-    { method: "vms.start", params: { vmId } },
+    { method: "vm.start", params: { vmId } },
     { timeoutMs: 120_000 }
   );
   if (startResp.error) {
     console.error(`[phantom] Start failed: ${startResp.error.message}`);
-    await sendRequest({ method: "vms.delete", params: { vmId } });
+    await sendRequest({ method: "vm.delete", params: { vmId } });
     process.exit(SYSTEM_FAILURE);
   }
 
   // 3. Wait for agent to be ready
   console.error(`[phantom] Waiting for agent...`);
   const agentResp = await sendRequest(
-    { method: "vms.exec", params: { vmId, command: "echo ready", waitForAgent: true } },
+    { method: "vm.exec", params: { vmId, command: "echo ready", waitForAgent: true } },
     { timeoutMs: 120_000 }
   );
   if (agentResp.error) {
     console.error(`[phantom] Agent unavailable: ${agentResp.error.message}`);
-    await sendRequest({ method: "vms.delete", params: { vmId } });
+    await sendRequest({ method: "vm.delete", params: { vmId } });
     process.exit(SYSTEM_FAILURE);
   }
 
@@ -98,7 +98,7 @@ async function run(scriptPath: string) {
   // Execute in VM with streaming output
   let exitCode = BUILD_FAILURE;
   const result = await sendStreamingRequest(
-    { method: "vms.execStream", params: { vmId, command } },
+    { method: "vm.execStream", params: { vmId, command } },
     (chunk) => {
       if (chunk.type === "stdout" && chunk.data) process.stdout.write(chunk.data);
       if (chunk.type === "stderr" && chunk.data) process.stderr.write(chunk.data);
@@ -122,7 +122,7 @@ async function cleanup() {
   }
 
   console.error(`[phantom] Deleting VM ${vmId}...`);
-  await sendRequest({ method: "vms.delete", params: { vmId } });
+  await sendRequest({ method: "vm.delete", params: { vmId } });
   try { unlinkSync(stateFile); } catch {}
   console.error(`[phantom] Cleanup complete`);
 }

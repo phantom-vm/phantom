@@ -154,7 +154,7 @@ class TCPServer {
         }
 
         // Streaming methods keep the connection open
-        if request.method == "vms.execStream" {
+        if request.method == "vm.execStream" {
             let handlers = APIHandlers(vmManager: vmManager)
             await handlers.handleStream(request) { chunk in
                 self.sendChunk(chunk, to: connection)

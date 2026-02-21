@@ -82,7 +82,7 @@ export async function vmCreate(...args: string[]) {
   console.log(`Creating VM from ${sourceType} ${sourceId}...`);
 
   const response = await sendRequest({
-    method: "vms.create",
+    method: "vm.create",
     params,
   });
 
@@ -103,7 +103,7 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
   // 1. Clone
   console.error(`Cloning VM ${sourceVmId}...`);
   const createResponse = await sendRequest({
-    method: "vms.create",
+    method: "vm.create",
     params: { sourceVmId },
   });
 
@@ -121,7 +121,7 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
     // 2. Start
     console.error(`Starting VM ${vmId}...`);
     const startResponse = await sendRequest(
-      { method: "vms.start", params: { vmId } },
+      { method: "vm.start", params: { vmId } },
       { timeoutMs: 120_000 }
     );
 
@@ -136,7 +136,7 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
     console.error(`Executing: ${command}`);
     const { exitCode: code } = await sendStreamingRequest(
       {
-        method: "vms.execStream",
+        method: "vm.execStream",
         params: { vmId, command, waitForAgent: true },
       },
       (chunk) => {
@@ -148,7 +148,7 @@ async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
   } finally {
     // 4. Always delete
     console.error(`Deleting ephemeral VM ${vmId}...`);
-    await sendRequest({ method: "vms.delete", params: { vmId } });
+    await sendRequest({ method: "vm.delete", params: { vmId } });
     console.error(`Deleted ${vmId}`);
     process.exit(exitCode);
   }
