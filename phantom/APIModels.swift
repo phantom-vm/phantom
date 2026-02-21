@@ -77,6 +77,8 @@ struct AnyCodable: Codable {
             try container.encode(bool)
         case let int as Int:
             try container.encode(int)
+        case let int64 as Int64:
+            try container.encode(int64)
         case let double as Double:
             try container.encode(double)
         case let string as String:

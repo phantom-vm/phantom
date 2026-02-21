@@ -46,10 +46,8 @@ export async function imageList() {
 
   console.log("IMAGES");
   for (const img of images) {
-    const sizeMB = (img.totalSize / 1024 / 1024).toFixed(1);
-    console.log(
-      `${img.name.padEnd(25)} ${img.diskChunks} chunks  ${sizeMB}MB`
-    );
+    const sizeGB = (img.totalSize / 1024 / 1024 / 1024).toFixed(1);
+    console.log(`${img.name.padEnd(25)} ${sizeGB}GB`);
   }
 }
 
