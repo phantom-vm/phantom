@@ -946,7 +946,7 @@ phantom/
             ├── vm.ts        # list, stop, delete, exec
             ├── ipsw.ts      # IPSW management
             ├── save.ts      # Save VM as OCI image
-            ├── image.ts    # List/delete local images
+            ├── images.ts    # List/delete local images
             ├── push.ts      # Push image to registry
             ├── pull.ts      # Pull image from registry
             └── health.ts    # Daemon health check
