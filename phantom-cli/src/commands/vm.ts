@@ -81,10 +81,10 @@ export async function vmCreate(...args: string[]) {
 
   console.log(`Creating VM from ${sourceType} ${sourceId}...`);
 
-  const response = await sendRequest({
-    method: "vm.create",
-    params,
-  });
+  const response = await sendRequest(
+    { method: "vm.create", params },
+    { timeoutMs: 600_000 }
+  );
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);

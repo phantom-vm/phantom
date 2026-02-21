@@ -270,7 +270,8 @@ class OCIImageManager {
                 let machineIdentifier = VZMacMachineIdentifier()
                 try machineIdentifier.dataRepresentation.write(to: bundlePath.appendingPathComponent("MachineIdentifier"))
 
-                // Reconstruct disk from chunks (one at a time to avoid memory spike)
+                // Reconstruct disk from chunks in parallel using pwrite
+                // pwrite allows concurrent writes at different offsets without seeking
                 updateProgress(0.15, "Reconstructing disk...")
                 let diskDir = imageDir.appendingPathComponent("disk")
                 let chunkFiles = try FileManager.default.contentsOfDirectory(
@@ -279,23 +280,58 @@ class OCIImageManager {
 
                 let diskPath = bundlePath.appendingPathComponent("disk.img")
                 FileManager.default.createFile(atPath: diskPath.path, contents: nil)
-                let fileHandle = try FileHandle(forWritingTo: diskPath)
-                defer { try? fileHandle.close() }
-                try fileHandle.truncate(atOffset: vmConfig.diskSize)
+                let diskFD = Darwin.open(diskPath.path, O_WRONLY)
+                guard diskFD >= 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(Darwin.errno), userInfo: nil)
+                }
+                defer { Darwin.close(diskFD) }
+                guard Darwin.ftruncate(diskFD, off_t(vmConfig.diskSize)) == 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(Darwin.errno), userInfo: nil)
+                }
 
-                for (i, chunkFile) in chunkFiles.enumerated() {
-                    try autoreleasepool {
-                        let compressedData = try Data(contentsOf: chunkFile)
-                        let decompressed = try OCIDiskLayerizer.decompress(compressedData, expectedSize: OCIDiskLayerizer.chunkSize)
+                // Cap at 4 concurrent tasks (4 × 512 MB = 2 GB peak RAM)
+                let maxConcurrent = 4
+                let chunkCount = chunkFiles.count
+                var inFlight = 0
+                var completedCount = 0
 
-                        if !OCIDiskLayerizer.isAllZeros(decompressed) {
-                            let offset = UInt64(i) * UInt64(OCIDiskLayerizer.chunkSize)
-                            try fileHandle.seek(toOffset: offset)
-                            fileHandle.write(decompressed)
+                try await withThrowingTaskGroup(of: Int.self) { group in
+                    for (i, chunkFile) in chunkFiles.enumerated() {
+                        if inFlight >= maxConcurrent {
+                            _ = try await group.next()
+                            inFlight -= 1
+                            completedCount += 1
+                            let progress = 0.15 + Double(completedCount) / Double(chunkCount) * 0.8
+                            updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
                         }
+
+                        let offset = off_t(UInt64(i) * UInt64(OCIDiskLayerizer.chunkSize))
+                        let fd = diskFD
+
+                        group.addTask {
+                            try autoreleasepool {
+                                let compressedData = try Data(contentsOf: chunkFile)
+                                let decompressed = try OCIDiskLayerizer.decompress(compressedData, expectedSize: OCIDiskLayerizer.chunkSize)
+
+                                if !OCIDiskLayerizer.isAllZeros(decompressed) {
+                                    let written = decompressed.withUnsafeBytes { ptr in
+                                        Darwin.pwrite(fd, ptr.baseAddress!, decompressed.count, offset)
+                                    }
+                                    guard written == decompressed.count else {
+                                        throw NSError(domain: NSPOSIXErrorDomain, code: Int(Darwin.errno), userInfo: nil)
+                                    }
+                                }
+                            }
+                            return i
+                        }
+                        inFlight += 1
                     }
-                    let progress = 0.15 + Double(i + 1) / Double(chunkFiles.count) * 0.8
-                    updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
+
+                    for try await _ in group {
+                        completedCount += 1
+                        let progress = 0.15 + Double(completedCount) / Double(chunkCount) * 0.8
+                        updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
+                    }
                 }
 
                 bgLog("Created VM '\(vmId)' from image '\(name)'")
