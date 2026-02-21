@@ -18,59 +18,42 @@
 2. Walk through the macOS setup assistant (language, account, etc.)
 3. Skip Apple ID, create a local user account
 
-## Step 5: Build the guest agent
+## Step 5: Build and stage the guest agent
 On the **host** machine:
 ```bash
 cd phantom-agent
-swift build -c release
-cp .build/release/phantom-agent ~/Library/Application\ Support/phantom/shared/
+./init-host-shared-folder.sh
 ```
+
+This builds `phantom-agent` and copies it along with the install scripts into the phantom shared directory, making them available inside any running VM.
 
 ## Step 6: Install the guest agent
 Inside the **guest VM**:
 ```bash
-# The shared directory is auto-mounted
-sudo cp "/Volumes/My Shared Files/phantom-agent" /usr/local/bin/
-sudo chmod +x /usr/local/bin/phantom-agent
+# Mount the shared directory
+sudo mkdir -p /Volumes/phantom-shared
+sudo mount_virtiofs phantom-shared /Volumes/phantom-shared
+
+# Run the installer
+cd /Volumes/phantom-shared && sudo ./install.sh
 ```
 
-## Step 7: Run the guest agent
-Inside the **guest VM**:
+The installer copies the binary to `/usr/local/bin/phantom-agent` and registers it as a launchd daemon (`com.monk.phantom-agent`) that starts automatically on boot.
+
+## Step 7: Test host-to-guest execution
+On the **host** machine, get the VM ID and run a test command:
 ```bash
-phantom-agent
+phantom vm list
+phantom vm exec <vm-id> -- whoami
 ```
-You should see: `phantom-agent: listening for connections...`
 
-## Step 8: Test host-to-guest execution
-Back in the **host app**:
-1. Type a command in the **"Run Command"** text field (e.g. `whoami`)
-2. Click **Run**
-3. You should see the output from inside the VM
+You should see the output from inside the VM.
 
-## Optional: Auto-start the agent on boot
-Inside the **guest VM**, create a launchd plist:
+## Step 8: Save as image
+Stop the VM, then save it as a named local image for use as a CI base:
 ```bash
-sudo tee /Library/LaunchDaemons/com.phantom.agent.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.phantom.agent</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/phantom-agent</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
-sudo launchctl load /Library/LaunchDaemons/com.phantom.agent.plist
+phantom vm stop <vm-id>
+phantom image save <vm-id> macos-sequoia-base
 ```
 
-## Subsequent starts
-Once the VM is installed, just click **"Start VM"** — no reinstall needed.
+This image can be used directly as `PHANTOM_BASE_IMAGE` in the [GitLab runner integration](integration/gitlab.md).
