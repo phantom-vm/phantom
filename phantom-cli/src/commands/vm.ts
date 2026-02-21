@@ -10,7 +10,7 @@ export async function vmList() {
 
   const vms = response.result?.vms as VM[] || [];
 
-  if (vm.length === 0) {
+  if (vms.length === 0) {
     console.log("No VMs. Run 'phantom create --from-ipsw <IPSW_ID>' to create one.");
     return;
   }

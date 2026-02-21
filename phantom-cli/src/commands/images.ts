@@ -37,7 +37,7 @@ export async function imagesList() {
 
   const images = (response.result?.images as any[]) ?? [];
 
-  if (image.length === 0) {
+  if (images.length === 0) {
     console.log(
       "No images found. Use 'phantom save <vmId> <name>' to save a VM as an image."
     );

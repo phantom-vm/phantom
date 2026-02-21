@@ -333,7 +333,7 @@ struct APIHandlers {
 
     private func handleImagesList() async throws -> AnyCodable {
         let images = vmManager.imageManager.list()
-        return AnyCodable(["images": image.map { img in
+        return AnyCodable(["images": images.map { img in
             [
                 "name": img.name,
                 "diskChunks": img.diskChunks,
