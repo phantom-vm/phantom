@@ -14,8 +14,8 @@ GitLab Runner          phantom daemon         VM
       │                      ├────────────────▶│
       │                      │                 │
       │  run (build step)     │                 │
-      ├─────────────────────▶│ Copy script     │
-      │                      │ via shared dir  │
+      ├─────────────────────▶│ Inline script   │
+      │                      │ (base64-encoded)│
       │  streaming output     │ Execute script  │
       │◀─────────────────────│◀────────────────│
       │                      │                 │
@@ -101,7 +101,7 @@ Each job gets its own VM. Concurrent jobs are supported — configure `concurren
 concurrent = 4
 ```
 
-Scripts are staged through the phantom shared directory using job-scoped filenames (`ci-<job-id>-<stage>.sh`) to avoid collisions.
+Each job's script is base64-encoded and piped directly into the VM over vsock, so there are no shared files and no risk of collisions between concurrent jobs.
 
 ## Troubleshooting
 
@@ -115,4 +115,4 @@ Check that the phantom daemon is running and the template VM ID is correct (`pha
 The template VM must have `phantom-agent` installed and configured to start on boot. See [manual.md](../manual.md) for installation steps.
 
 **Jobs hang during script execution**
-The shared directory (`~/Library/Application Support/phantom/shared/`) must be writable and the VM must have it mounted at `/Volumes/phantom-shared`. This happens automatically when the VM is started by Phantom.
+Check that the phantom agent is running inside the VM (`phantom vm exec <vmId> -- launchctl list com.monk.phantom-agent`). The agent must be installed and started on boot in the template VM.
