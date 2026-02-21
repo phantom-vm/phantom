@@ -1,4 +1,4 @@
-# Creating a Ready-to-Use Phantom Image
+# Create a Ready-to-Use Phantom Image
 
 ## Step 1: Build the host app
 1. Open `phantom.xcodeproj` in Xcode
