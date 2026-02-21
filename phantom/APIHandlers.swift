@@ -77,17 +77,17 @@ struct APIHandlers {
             return try await handleVmsDelete(params: request.params)
         case "vm.display":
             return try await handleVmsDisplay(params: request.params)
-        case "images.save":
+        case "image.save":
             return try await handleImagesSave(params: request.params)
-        case "images.list":
+        case "image.list":
             return try await handleImagesList()
-        case "images.delete":
+        case "image.delete":
             return try await handleImagesDelete(params: request.params)
-        case "images.status":
+        case "image.status":
             return try await handleImagesStatus()
-        case "images.push":
+        case "image.push":
             return try await handleImagesPush(params: request.params)
-        case "images.pull":
+        case "image.pull":
             return try await handleImagesPull(params: request.params)
         default:
             throw APIHandlerError.unknownMethod(request.method)
@@ -333,7 +333,7 @@ struct APIHandlers {
 
     private func handleImagesList() async throws -> AnyCodable {
         let images = vmManager.imageManager.list()
-        return AnyCodable(["images": images.map { img in
+        return AnyCodable(["images": image.map { img in
             [
                 "name": img.name,
                 "diskChunks": img.diskChunks,

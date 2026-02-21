@@ -31,7 +31,7 @@ export async function imagePull(...args: string[]) {
   if (username) params.username = username;
   if (password) params.password = password;
 
-  const response = await sendRequest({ method: "images.pull", params });
+  const response = await sendRequest({ method: "image.pull", params });
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);

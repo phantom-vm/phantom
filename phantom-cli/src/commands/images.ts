@@ -2,8 +2,8 @@ import { sendRequest } from "../lib/api";
 
 export async function imagesList() {
   const [response, statusResponse] = await Promise.all([
-    sendRequest({ method: "images.list" }),
-    sendRequest({ method: "images.status" }),
+    sendRequest({ method: "image.list" }),
+    sendRequest({ method: "image.status" }),
   ]);
 
   if (response.error) {
@@ -37,7 +37,7 @@ export async function imagesList() {
 
   const images = (response.result?.images as any[]) ?? [];
 
-  if (images.length === 0) {
+  if (image.length === 0) {
     console.log(
       "No images found. Use 'phantom save <vmId> <name>' to save a VM as an image."
     );
@@ -60,7 +60,7 @@ export async function imagesDelete(name?: string) {
   }
 
   const response = await sendRequest({
-    method: "images.delete",
+    method: "image.delete",
     params: { name },
   });
 

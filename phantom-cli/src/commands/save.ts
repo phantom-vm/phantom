@@ -10,7 +10,7 @@ export async function imageSave(...args: string[]) {
   const name = args[1];
 
   const response = await sendRequest({
-    method: "images.save",
+    method: "image.save",
     params: { vmId, name },
   });
 

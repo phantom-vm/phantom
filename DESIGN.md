@@ -456,34 +456,34 @@ Or on error:
 - **Implementation**: Stops VM if running, removes bundle directory
 - **Response**: `{"status": "deleted", "vmId": "vm-abc"}`
 
-### images.save
+### image.save
 - **Params**: `vmId` (string), `name` (string)
 - **Purpose**: Save a stopped VM as a local OCI image
 - **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json.
 - **Response**: `{"status": "started", "message": "Saving VM '...' as image '...'"}`
 
-### images.list
+### image.list
 - **Purpose**: List locally saved OCI images
 - **Response**: `{"images": [{"name": "macos-base", "diskChunks": 5, "totalSize": 12345678, "createdAt": "2024-01-01T00:00:00Z"}]}`
 
-### images.delete
+### image.delete
 - **Params**: `name` (string)
 - **Purpose**: Delete a local image
 - **Response**: `{"status": "deleted", "name": "macos-base"}`
 
-### images.push
+### image.push
 - **Params**: `name` (string), `reference` (string), `username` (string, optional), `password` (string, optional)
 - **Purpose**: Push a local image to an OCI-compatible registry
 - **Implementation**: Fire-and-forget. Checks blob existence on registry (skips if already present), uploads missing blobs, then pushes manifest with tag.
 - **Response**: `{"status": "started", "message": "Pushing image '...' to ..."}`
 
-### images.pull
+### image.pull
 - **Params**: `reference` (string), `name` (string, optional), `username` (string, optional), `password` (string, optional)
 - **Purpose**: Pull an image from an OCI registry to local storage
 - **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory.
 - **Response**: `{"status": "started", "message": "Pulling image from ..."}`
 
-### images.status
+### image.status
 - **Purpose**: Poll current image operation state (saving, pushing, pulling)
 - **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
 
@@ -946,7 +946,7 @@ phantom/
             ├── vm.ts        # list, stop, delete, exec
             ├── ipsw.ts      # IPSW management
             ├── save.ts      # Save VM as OCI image
-            ├── images.ts    # List/delete local images
+            ├── image.ts    # List/delete local images
             ├── push.ts      # Push image to registry
             ├── pull.ts      # Pull image from registry
             └── health.ts    # Daemon health check

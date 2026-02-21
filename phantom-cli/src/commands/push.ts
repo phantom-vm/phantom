@@ -29,7 +29,7 @@ export async function imagePush(...args: string[]) {
   if (username) params.username = username;
   if (password) params.password = password;
 
-  const response = await sendRequest({ method: "images.push", params });
+  const response = await sendRequest({ method: "image.push", params });
 
   if (response.error) {
     console.error(`Error: ${response.error.message}`);
