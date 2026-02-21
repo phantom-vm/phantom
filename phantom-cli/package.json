@@ -6,6 +6,9 @@
   "bin": {
     "phantom": "./src/main.ts"
   },
+  "scripts": {
+    "install-bin": "rm -rf dist && bun build src/main.ts --compile --outfile dist/phantom && mv dist/phantom ~/.local/bin/phantom"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

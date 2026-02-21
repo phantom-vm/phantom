@@ -54,7 +54,8 @@ phantom/
 1. **Before making changes**: Read DESIGN.md to understand current architecture
 2. **During development**: Follow existing patterns (see DESIGN.md for details)
 3. **After changes**: Update DESIGN.md if architecture was modified
-4. **Committing**: Follow conventional commit format
+4. **After phantom-cli changes**: Run `cd phantom-cli && bun run install-bin` to rebuild and install the binary
+5. **Committing**: Follow conventional commit format
 
 ## Key Technologies
 
