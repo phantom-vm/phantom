@@ -199,8 +199,8 @@ CLI                     Daemon                  VM
  │◀────────────────────────┤                    │
  │                         │                    │
  │  vms.start              │                    │
- │  + mounts (optional)    │ Boot VM            │
- ├────────────────────────▶│ + VirtioFS mounts  │
+ │                         │ Boot VM            │
+ ├────────────────────────▶│ + VirtioFS shared  │
  │  {"status":"running"}   │───────────────────▶│
  │◀────────────────────────┤                    │
  │                         │                    │
@@ -310,11 +310,6 @@ CLI                     Daemon                  VM
 - Mounted in guest: `mount_virtiofs phantom-shared /Volumes/phantom-shared`
 - Used for transferring phantom-agent to VMs
 
-**Per-VM Mounts**:
-- Additional host directories can be mounted into VMs via `mounts` parameter on `vms.start`
-- Each mount specifies a `hostPath` and `tag`
-- Mounted in guest: `mount_virtiofs <tag> /Volumes/<tag>`
-- Used for sharing project directories (e.g., for xcodebuild)
 
 ---
 
@@ -424,10 +419,9 @@ Or on error:
 - **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`
 
 ### vms.start
-- **Params**: `vmId` (string), `mounts` (array, optional)
-- **Purpose**: Start an existing stopped VM, optionally mounting host directories
-- **Mounts**: Each mount has `hostPath` (string) and `tag` (string). Mounted in guest via `mount_virtiofs <tag> /Volumes/<tag>`
-- **Implementation**: Loads VM bundle, builds config with VirtioFS mounts, calls `VZVirtualMachine.start()`
+- **Params**: `vmId` (string)
+- **Purpose**: Start an existing stopped VM
+- **Implementation**: Loads VM bundle, builds config with VirtioFS shared directory, calls `VZVirtualMachine.start()`
 - **Response**: `{"status": "running", "vmId": "vm-abc"}`
 
 ### vms.stop
@@ -675,11 +669,6 @@ VZVirtualMachineConfiguration {
         VZVirtioFileSystemDeviceConfiguration {
             tag: "phantom-shared"
             share: VZSingleDirectoryShare(directory: ~/phantom/shared)
-        },
-        // Additional per-VM mounts (from `mounts` parameter)
-        VZVirtioFileSystemDeviceConfiguration {
-            tag: "mount"  // custom tag
-            share: VZSingleDirectoryShare(directory: /path/on/host)
         }
     ]
 

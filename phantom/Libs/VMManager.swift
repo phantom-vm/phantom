@@ -28,11 +28,6 @@ class VMManager {
         var virtualMachine: VZVirtualMachine?
     }
 
-    struct MountConfig {
-        let hostPath: String
-        let tag: String
-    }
-
     // MARK: - Private
 
     private let baseDir: URL = {
@@ -177,7 +172,7 @@ class VMManager {
     }
 
     /// Start an existing VM from a previously installed bundle (no reinstall needed)
-    private func startExistingVM(vmId: String, mounts: [MountConfig] = []) async {
+    private func startExistingVM(vmId: String) async {
         guard let instance = vmInstances[vmId] else {
             log("VM not found: \(vmId)")
             return
@@ -224,8 +219,7 @@ class VMManager {
                 bundlePath: bundlePath,
                 hardwareModel: hardwareModel,
                 machineIdentifier: machineIdentifier,
-                auxiliaryStorage: auxiliaryStorage,
-                mounts: mounts
+                auxiliaryStorage: auxiliaryStorage
             )
 
             try config.validate()
@@ -264,7 +258,7 @@ class VMManager {
         }
     }
 
-    func startVM(vmId: String, mounts: [MountConfig] = []) async {
+    func startVM(vmId: String) async {
         // Ensure VM exists in dictionary
         if vmInstances[vmId] == nil {
             let bundlePath = vmsDir.appendingPathComponent(vmId)
@@ -281,7 +275,7 @@ class VMManager {
             )
         }
 
-        await startExistingVM(vmId: vmId, mounts: mounts)
+        await startExistingVM(vmId: vmId)
     }
 
     func setDisplayedVM(vmId: String?) {
@@ -621,8 +615,7 @@ class VMManager {
         bundlePath: URL,
         hardwareModel: VZMacHardwareModel,
         machineIdentifier: VZMacMachineIdentifier,
-        auxiliaryStorage: VZMacAuxiliaryStorage,
-        mounts: [MountConfig] = []
+        auxiliaryStorage: VZMacAuxiliaryStorage
     ) throws -> VZVirtualMachineConfiguration {
         let config = VZVirtualMachineConfiguration()
 
@@ -663,23 +656,7 @@ class VMManager {
         let share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: sharedDir, readOnly: false))
         let fsConfig = VZVirtioFileSystemDeviceConfiguration(tag: "phantom-shared")
         fsConfig.share = share
-        var sharingDevices: [VZVirtioFileSystemDeviceConfiguration] = [fsConfig]
-
-        // Additional per-VM mounts
-        for mount in mounts {
-            let url = URL(fileURLWithPath: mount.hostPath)
-            guard FileManager.default.fileExists(atPath: url.path) else {
-                throw PhantomError.mountPathNotFound(mount.hostPath)
-            }
-            let dir = VZSharedDirectory(url: url, readOnly: false)
-            let mountShare = VZSingleDirectoryShare(directory: dir)
-            let mountConfig = VZVirtioFileSystemDeviceConfiguration(tag: mount.tag)
-            mountConfig.share = mountShare
-            sharingDevices.append(mountConfig)
-            log("Mounting \(mount.hostPath) as '\(mount.tag)'")
-        }
-
-        config.directorySharingDevices = sharingDevices
+        config.directorySharingDevices = [fsConfig]
 
         return config
     }
@@ -751,7 +728,6 @@ enum PhantomError: LocalizedError {
     case vmNotRunning(String)
     case noSocketDevice
     case connectionClosed
-    case mountPathNotFound(String)
 
     var errorDescription: String? {
         switch self {
@@ -763,7 +739,6 @@ enum PhantomError: LocalizedError {
         case .vmNotRunning(let id): "VM is not running: \(id)"
         case .noSocketDevice: "No vsock device available"
         case .connectionClosed: "Connection to guest agent closed"
-        case .mountPathNotFound(let path): "Mount path not found: \(path)"
         }
     }
 }

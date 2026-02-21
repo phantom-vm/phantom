@@ -84,8 +84,6 @@ Commands:
   create --from-image <IMAGE>     Create VM from a saved image
   create --from-vm <VM_ID> --rm -- <cmd>
                                   Run ephemeral VM (clone, run, delete)
-  create --from-vm <VM_ID> --rm --mount <path> -- <cmd>
-                                  Ephemeral VM with host dir mounted at /Volumes/mount
   save <VM_ID> <IMAGE_NAME>       Save VM as a local OCI image
   images                          List saved images
   images delete <IMAGE_NAME>      Delete a saved image

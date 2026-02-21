@@ -6,7 +6,6 @@ export async function vmCreate(...args: string[]) {
   let fromIpsw: string | undefined;
   let fromImage: string | undefined;
   let rm = false;
-  let mountPath: string | undefined;
   let commandArgs: string[] = [];
 
   // Split on -- separator
@@ -28,9 +27,6 @@ export async function vmCreate(...args: string[]) {
       i++;
     } else if (flagArgs[i] === "--rm") {
       rm = true;
-    } else if (flagArgs[i] === "--mount" && i + 1 < flagArgs.length) {
-      mountPath = flagArgs[i + 1];
-      i++;
     }
   }
 
@@ -66,14 +62,9 @@ export async function vmCreate(...args: string[]) {
     process.exit(1);
   }
 
-  if (mountPath && !rm) {
-    console.error("Error: --mount requires --rm (ephemeral mode)");
-    process.exit(1);
-  }
-
   // Ephemeral VM: clone → start → exec → delete
   if (rm && fromVm) {
-    await runEphemeral(fromVm, commandArgs, mountPath);
+    await runEphemeral(fromVm, commandArgs);
     return;
   }
 
@@ -106,18 +97,8 @@ export async function vmCreate(...args: string[]) {
   );
 }
 
-async function runEphemeral(
-  sourceVmId: string,
-  commandArgs: string[],
-  mountPath?: string
-) {
-  let command = commandArgs.join(" ");
-
-  // If mounting, prepend mount commands
-  if (mountPath) {
-    const mountPoint = "/Volumes/mount";
-    command = `mkdir -p ${mountPoint} && mount_virtiofs mount ${mountPoint} && ${command}`;
-  }
+async function runEphemeral(sourceVmId: string, commandArgs: string[]) {
+  const command = commandArgs.join(" ");
 
   // 1. Clone
   console.error(`Cloning VM ${sourceVmId}...`);
@@ -137,20 +118,10 @@ async function runEphemeral(
   // Ensure cleanup on exit
   let exitCode = 1;
   try {
-    // 2. Start (with optional mount)
-    const startParams: Record<string, any> = { vmId };
-    if (mountPath) {
-      // Resolve to absolute path
-      const absolutePath = mountPath.startsWith("/")
-        ? mountPath
-        : `${process.cwd()}/${mountPath}`;
-      startParams.mounts = [{ hostPath: absolutePath, tag: "mount" }];
-      console.error(`Mounting ${absolutePath} → /Volumes/mount`);
-    }
-
+    // 2. Start
     console.error(`Starting VM ${vmId}...`);
     const startResponse = await sendRequest(
-      { method: "vms.start", params: startParams },
+      { method: "vms.start", params: { vmId } },
       { timeoutMs: 120_000 }
     );
 

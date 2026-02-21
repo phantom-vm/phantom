@@ -205,17 +205,7 @@ struct APIHandlers {
             throw APIHandlerError.missingParam("vmId")
         }
 
-        // Parse optional mounts
-        var mounts: [VMManager.MountConfig] = []
-        if let mountsArray = params?["mounts"]?.value as? [[String: Any]] {
-            for dict in mountsArray {
-                guard let hostPath = dict["hostPath"] as? String,
-                      let tag = dict["tag"] as? String else { continue }
-                mounts.append(VMManager.MountConfig(hostPath: hostPath, tag: tag))
-            }
-        }
-
-        await vmManager.startVM(vmId: vmId, mounts: mounts)
+        await vmManager.startVM(vmId: vmId)
 
         // Check if VM actually started
         guard let instance = vmManager.vmInstances[vmId] else {
