@@ -31,7 +31,7 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
 
 1. **Phantom daemon running** on the host Mac
 2. **GitLab Runner installed** on the same Mac (`brew install gitlab-runner`)
-3. **A base image** with `phantom-agent` installed (see [manual.md](../manual.md))
+3. **A base image** with `phantom-agent` installed (see [creating-image.md](../creating-image.md))
 
 ## Setup
 
@@ -113,7 +113,7 @@ Add `PHANTOM_BASE_IMAGE` to `[runners.env]` in `config.toml`.
 Check that the phantom daemon is running and the image name is correct (`phantom image list`).
 
 **`Agent unavailable`**
-The template VM must have `phantom-agent` installed and configured to start on boot. See [manual.md](../manual.md) for installation steps.
+The template VM must have `phantom-agent` installed and configured to start on boot. See [creating-image.md](../creating-image.md) for installation steps.
 
 **Jobs hang during script execution**
 Check that the phantom agent is running inside the VM (`phantom vm exec <vmId> -- launchctl list com.monk.phantom-agent`). The agent must be installed and started on boot in the template VM.
