@@ -1,11 +1,7 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
-import { vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay } from "./commands/vm";
-import { vmCreate } from "./commands/create";
+import { vmCreate, vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay } from "./commands/vm";
+import { imageList, imageDelete, imageSave, imagePush, imagePull } from "./commands/image";
 import { health } from "./commands/health";
-import { imageSave } from "./commands/save";
-import { imagesList, imagesDelete } from "./commands/images";
-import { imagePush } from "./commands/push";
-import { imagePull } from "./commands/pull";
 import { gitlabRunner } from "./commands/gitlab-runner";
 import { route } from "./router";
 
@@ -31,13 +27,13 @@ const commands = {
   },
   image: {
     subcommands: {
-      list: { handler: imagesList as (arg?: string) => Promise<void> },
-      delete: { handler: imagesDelete as (arg?: string) => Promise<void> },
+      list: { handler: imageList as (arg?: string) => Promise<void> },
+      delete: { handler: imageDelete as (arg?: string) => Promise<void> },
       save: { multiArgHandler: imageSave },
       push: { multiArgHandler: imagePush },
       pull: { multiArgHandler: imagePull },
     },
-    handler: imagesList as (arg?: string) => Promise<void>,
+    handler: imageList as (arg?: string) => Promise<void>,
   },
   "gitlab-runner": {
     multiArgHandler: gitlabRunner,
