@@ -2,6 +2,11 @@
 
 Run and manage macOS virtual machines on your Mac from the command line.
 
+## Documentation
+
+- [Create a Ready-to-Use Phantom Image](docs/create-image.md) — set up a base VM with phantom-agent installed and save it as an image
+- [GitLab CI Integration](docs/integration/gitlab.md) — use Phantom as a GitLab custom executor for ephemeral macOS CI jobs
+
 ## Tech Stack
 
 - Swift, SwiftUI, Virtualization.framework
