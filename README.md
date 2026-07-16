@@ -15,5 +15,6 @@ Run and manage macOS virtual machines on your Mac from the command line.
 
 ## Roadmap
 
+- Prepare base macOS image
+- Prepare base macOS + xcode image
 - **GitLab runner: registry-backed base image** — `PHANTOM_BASE_IMAGE` currently only supports local image names. Add auto-pull from a registry reference (e.g. `registry.gitlab.com/org/macos-ci:latest`) before `vm.create`, including polling `image.status` until the pull completes.
-
