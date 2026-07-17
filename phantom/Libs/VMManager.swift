@@ -41,6 +41,7 @@ class VMManager {
     let imageManager: OCIImageManager
 
     private(set) var vmInstances: [String: VMInstance] = [:]
+    private(set) var vncServers: [String: VNCServer] = [:]
     private(set) var displayedVMId: String? = nil
     private(set) var displayRequestCounter: Int = 0
 
@@ -244,6 +245,8 @@ class VMManager {
               case .running = instance.state,
               let vm = instance.virtualMachine else { return }
 
+        stopVNC(vmId: vmId)
+
         vmInstances[vmId]?.state = .stopping
         log("Stopping VM \(vmId)...")
 
@@ -276,6 +279,40 @@ class VMManager {
         }
 
         await startExistingVM(vmId: vmId)
+    }
+
+    // MARK: - VNC
+
+    /// Starts a VNC server for a running VM (or returns the existing one).
+    /// Returns a `vnc://:password@127.0.0.1:port` URL.
+    func startVNC(vmId: String) async throws -> String {
+        guard let instance = vmInstances[vmId],
+              case .running = instance.state,
+              let vm = instance.virtualMachine else {
+            throw PhantomError.vmNotRunning(vmId)
+        }
+
+        if let existing = vncServers[vmId], let url = existing.url {
+            return url
+        }
+
+        let server = try VNCServer(virtualMachine: vm)
+        vncServers[vmId] = server
+        do {
+            let url = try await server.start()
+            log("VNC server for \(vmId): \(url)")
+            return url
+        } catch {
+            vncServers.removeValue(forKey: vmId)
+            throw error
+        }
+    }
+
+    func stopVNC(vmId: String) {
+        if let server = vncServers.removeValue(forKey: vmId) {
+            server.stop()
+            log("VNC server for \(vmId) stopped")
+        }
     }
 
     func setDisplayedVM(vmId: String?) {

@@ -77,6 +77,10 @@ struct APIHandlers {
             return try await handleVmsDelete(params: request.params)
         case "vm.display":
             return try await handleVmsDisplay(params: request.params)
+        case "vm.vnc.start":
+            return try await handleVmsVNCStart(params: request.params)
+        case "vm.vnc.stop":
+            return try await handleVmsVNCStop(params: request.params)
         case "image.save":
             return try await handleImagesSave(params: request.params)
         case "image.list":
@@ -302,6 +306,45 @@ struct APIHandlers {
             "vmId": vmId
         ])
     }
+    private func handleVmsVNCStart(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+
+        guard vmManager.vmInstances[vmId] != nil else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+
+        do {
+            let url = try await vmManager.startVNC(vmId: vmId)
+            return AnyCodable([
+                "status": "ok",
+                "vmId": vmId,
+                "url": url
+            ])
+        } catch let error as PhantomError {
+            if case .vmNotRunning = error {
+                throw APIHandlerError.vmNotRunning(vmId)
+            }
+            throw APIHandlerError.invalidParams("Failed to start VNC: \(error.localizedDescription)")
+        } catch {
+            throw APIHandlerError.invalidParams("Failed to start VNC: \(error.localizedDescription)")
+        }
+    }
+
+    private func handleVmsVNCStop(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+
+        vmManager.stopVNC(vmId: vmId)
+
+        return AnyCodable([
+            "status": "stopped",
+            "vmId": vmId
+        ])
+    }
+
     // MARK: - Image Handlers
 
     private func handleImagesSave(params: [String: AnyCodable]?) async throws -> AnyCodable {

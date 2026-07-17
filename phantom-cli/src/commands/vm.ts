@@ -274,6 +274,44 @@ export async function vmDisplay(vmId: string) {
   console.log(`Display opened for VM ${vmId}`);
 }
 
+export async function vmVnc(...args: string[]) {
+  const stop = args.includes("--stop");
+  const vmId = args.find((a) => !a.startsWith("--"));
+
+  if (!vmId) {
+    console.error("Error: VM_ID required");
+    console.error("Usage: phantom vm vnc <VM_ID> [--stop]");
+    process.exit(1);
+  }
+
+  if (stop) {
+    const response = await sendRequest({
+      method: "vm.vnc.stop",
+      params: { vmId },
+    });
+
+    if (response.error) {
+      console.error(`Error: ${response.error.message}`);
+      process.exit(1);
+    }
+
+    console.log(`VNC server stopped for VM ${vmId}`);
+    return;
+  }
+
+  const response = await sendRequest({
+    method: "vm.vnc.start",
+    params: { vmId },
+  });
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(response.result?.url);
+}
+
 export async function vmDelete(vmId: string) {
   if (!vmId) {
     console.error("Error: VM_ID required");

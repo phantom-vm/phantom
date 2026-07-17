@@ -57,6 +57,7 @@ phantom/
     ├── VMManager.swift   # VM lifecycle management
     ├── IPSWManager.swift # IPSW download and listing
     ├── TCPServer.swift   # Network.framework TCP server
+    ├── VNCServer.swift   # Host-side VNC server (_VZVNCServer private API)
     └── OCI/
         ├── OCITypes.swift          # Manifest, descriptor, media types, digest
         ├── OCIReference.swift      # Registry reference parsing
@@ -449,6 +450,17 @@ Or on error:
 - **Purpose**: Open VM display window in the daemon GUI
 - **Implementation**: Sets `displayedVMId` and increments `displayRequestCounter` on VMManager. ContentView observes the counter and calls `openWindow(id: "vm-display")`.
 - **Response**: `{"status": "ok", "vmId": "vm-abc"}`
+
+### vm.vnc.start
+- **Params**: `vmId` (string)
+- **Purpose**: Start a VNC server for a running VM (idempotent — returns the existing server's URL if already started)
+- **Implementation**: Uses Virtualization.framework's private `_VZVNCServer` API (invoked via the ObjC runtime, see `VNCServer.swift`). Serves the framebuffer directly from the host, so it works during macOS installation and Setup Assistant with no guest-side software. Random 8-char password, system-assigned port. The server is stopped automatically when the VM stops.
+- **Response**: `{"status": "ok", "vmId": "vm-abc", "url": "vnc://:password@127.0.0.1:port"}`
+
+### vm.vnc.stop
+- **Params**: `vmId` (string)
+- **Purpose**: Stop the VM's VNC server
+- **Response**: `{"status": "stopped", "vmId": "vm-abc"}`
 
 ### vm.delete
 - **Params**: `vmId` (string)
