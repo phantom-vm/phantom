@@ -120,8 +120,14 @@ async function run(opts: BuildOptions) {
   }
   console.log(`    provisioned`);
 
-  // 6. Stop the VM
-  step(6, "Stopping VM");
+  // 6. Flush the guest disk cache, then stop.
+  // vm.stop is a force stop (VZVirtualMachine.stop() = "like unplugging the
+  // machine"), so anything still in the guest's buffer cache — including the
+  // agent install and provisioning — would be lost from the saved image.
+  // sync pushes those writes to the virtual disk first.
+  step(6, "Flushing disk and stopping VM");
+  await call("vm.exec", { vmId, command: "sync; sync; sync", waitForAgent: true }, 60_000);
+  await sleep(3_000);
   await call("vm.stop", { vmId }, 60_000);
 
   // 7. Save the image
