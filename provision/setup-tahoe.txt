@@ -82,6 +82,10 @@
 echo admin | sudo -S mkdir -p /Volumes/phantom-shared && echo admin | sudo -S mount_virtiofs phantom-shared /Volumes/phantom-shared && sudo /Volumes/phantom-shared/install.sh<enter><wait5s>
 <click 'Allow'><wait10s>
 
+# Quit Terminal so the saved image boots to a clean desktop (Alt = Command in
+# the guest). The shell is idle now, so Cmd+Q closes it without a prompt.
+<leftAltOn>q<leftAltOff><wait3s>
+
 # The phantom-agent is now running as a launchd daemon. From here the host
 # drives the VM over vsock:
 #   phantom vm exec <vm-id> -- sh /path/to/provision.sh   (see provision.sh)
