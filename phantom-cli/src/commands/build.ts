@@ -25,7 +25,7 @@ function parseArgs(args: string[]): BuildOptions | null {
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === "--from-ipsw") opts.fromIpsw = args[++i];
+    if (a === "--ipsw") opts.fromIpsw = args[++i];
     else if (a === "--boot-script") opts.bootScript = args[++i]!;
     else if (a === "--provision") opts.provision = args[++i]!;
     else if (a === "--agent-dir") opts.agentDir = args[++i];
@@ -57,7 +57,7 @@ export async function imageBuild(...args: string[]) {
   const opts = parseArgs(args);
   if (!opts) {
     console.error("Usage: phantom image build <image-name> [options]");
-    console.error("  --from-ipsw <id>       IPSW to install from (default: the only downloaded one)");
+    console.error("  --ipsw <id>            IPSW to install from (default: the only downloaded one)");
     console.error("  --boot-script <path>   Setup Assistant script (default: provision/setup-tahoe.txt)");
     console.error("  --provision <path>     Provision script (default: provision/provision.sh)");
     console.error("  --agent-dir <path>     phantom-agent dir to stage into the shared folder first");
@@ -159,7 +159,7 @@ async function resolveIpsw(fromIpsw?: string): Promise<string> {
   if (ipsws.length === 0) throw new Error("No IPSW downloaded. Run 'phantom ipsw pull' first.");
   if (ipsws.length > 1) {
     throw new Error(
-      `Multiple IPSWs found (${ipsws.map((i) => i.id).join(", ")}). Specify one with --from-ipsw.`
+      `Multiple IPSWs found (${ipsws.map((i) => i.id).join(", ")}). Specify one with --ipsw.`
     );
   }
   return ipsws[0]!.id;

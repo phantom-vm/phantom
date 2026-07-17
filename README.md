@@ -41,7 +41,7 @@ screenshot`.
 ## Roadmap
 
 - [ ] **Publish base image** — push the built base image to a registry so users only ever `image pull` (the build pipeline is done; `push` wiring remains).
-- [ ] **`vm.create --from-image` async** — fire-and-forget + status polling like `image.save`; also fixes a CLI-timeout race that can leave the bundle unregistered until a daemon restart. Low priority now that create is ~12s.
+- [ ] **`vm deploy --image` async** — fire-and-forget + status polling like `image.save`; also fixes a CLI-timeout race that can leave the bundle unregistered until a daemon restart. Low priority now that create is ~12s.
 - [ ] **Don't store all-zero chunks** — skip them at chunk time to shrink images (restore already skips writing zeros).
 - [ ] **GitLab: registry-backed base image** — let `PHANTOM_BASE_IMAGE` reference a registry image (e.g. `registry.gitlab.com/org/macos-ci:latest`) and auto-pull before `vm.create`.
 

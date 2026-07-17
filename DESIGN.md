@@ -567,7 +567,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 `phantom image build <name>` is a CLI-side orchestrator ([phantom-cli/src/commands/build.ts](phantom-cli/src/commands/build.ts)) that chains existing daemon endpoints into a hands-off pipeline. All the sequencing and long-polling lives in the CLI; the daemon stays a set of primitive operations.
 
-1. **Resolve IPSW** — `ipsw.list`; use `--from-ipsw` or the single downloaded IPSW
+1. **Resolve IPSW** — `ipsw.list`; use `--ipsw` or the single downloaded IPSW
 2. **Stage agent** (optional `--agent-dir`) — runs `init-host-shared-folder.sh` to build phantom-agent into the shared folder
 3. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
 4. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also installs the agent inside the guest via VNC-typed Terminal commands

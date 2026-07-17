@@ -7,13 +7,13 @@ export async function vmDeploy(...args: string[]) {
   let fromImage: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--from-vm" && i + 1 < args.length) {
+    if (args[i] === "--template-vm" && i + 1 < args.length) {
       fromVm = args[i + 1];
       i++;
-    } else if (args[i] === "--from-ipsw" && i + 1 < args.length) {
+    } else if (args[i] === "--ipsw" && i + 1 < args.length) {
       fromIpsw = args[i + 1];
       i++;
-    } else if (args[i] === "--from-image" && i + 1 < args.length) {
+    } else if (args[i] === "--image" && i + 1 < args.length) {
       fromImage = args[i + 1];
       i++;
     }
@@ -23,18 +23,18 @@ export async function vmDeploy(...args: string[]) {
   const sources = [fromVm, fromIpsw, fromImage].filter(Boolean);
   if (sources.length === 0) {
     console.error(
-      "Error: Must specify one of --from-vm, --from-ipsw, or --from-image"
+      "Error: Must specify one of --ipsw, --template-vm, or --image"
     );
     console.error("Usage:");
-    console.error("  phantom vm deploy --from-ipsw <ipsw-id>");
-    console.error("  phantom vm deploy --from-vm <vm-id>");
-    console.error("  phantom vm deploy --from-image <image-name>");
+    console.error("  phantom vm deploy --ipsw <ipsw-id>");
+    console.error("  phantom vm deploy --template-vm <vm-id>");
+    console.error("  phantom vm deploy --image <image-name>");
     process.exit(1);
   }
 
   if (sources.length > 1) {
     console.error(
-      "Error: Cannot specify multiple sources (--from-vm, --from-ipsw, --from-image)"
+      "Error: Cannot specify multiple sources (--ipsw, --template-vm, --image)"
     );
     process.exit(1);
   }
@@ -82,7 +82,7 @@ export async function vmList() {
   const vms = response.result?.vms as VM[] || [];
 
   if (vms.length === 0) {
-    console.log("No VMs. Run 'phantom vm deploy --from-ipsw <IPSW_ID>' to create one.");
+    console.log("No VMs. Run 'phantom vm deploy --ipsw <IPSW_ID>' to create one.");
     return;
   }
 

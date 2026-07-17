@@ -9,7 +9,7 @@ image, with no manual interaction.
 IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ provision.sh (vsock) ─▶ image.save
 ```
 
-1. **Install** — `phantom vm deploy --from-ipsw <id>` installs macOS headlessly.
+1. **Install** — `phantom vm deploy --ipsw <id>` installs macOS headlessly.
 2. **Stage the agent** — `cd phantom-agent && ./init-host-shared-folder.sh`
    builds `phantom-agent` and copies it into the shared folder.
 3. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
