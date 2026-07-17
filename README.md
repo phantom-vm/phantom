@@ -29,6 +29,19 @@ Goal: `phantom image build <name>` — one command from IPSW to a ready-to-use i
 
 Known risks: `_VZVNCServer` is a private API (tart has shipped it for years); Setup Assistant screens differ across macOS versions, so boot scripts are per-version; keystroke timing needs generous waits.
 
+### Image Compression Performance — HIGH PRIORITY
+
+`image save` / `image create --from-image` are unacceptably slow: chunking and
+reconstruction in [OCIDiskLayerizer.swift](phantom/Libs/OCI/OCIDiskLayerizer.swift)
+process 512MB LZ4 chunks **one at a time on a single thread** (`for i in 0..<totalChunks`),
+so a ~21GB image takes many minutes while most CPU cores sit idle. Creating a VM
+from an image even exceeded the CLI's 600s request timeout.
+
+- [ ] **Parallelize chunk compress/decompress** across cores (e.g. `DispatchQueue.concurrentPerform` or a `TaskGroup`) — the single biggest win, disk image chunks are independent.
+- [ ] **Don't store all-zero chunks** — skip them at chunk time (reconstruction already skips writing zeros to keep the disk sparse), avoiding both compression and storage of empty regions.
+- [ ] **Stream instead of buffering whole 512MB chunks** in memory to cut allocation pressure and allow smaller, more parallelizable units.
+- [ ] **Make `vm.create --from-image` async** (fire-and-forget + status polling) like `image.save`, so long reconstructions don't hit the CLI request timeout.
+
 ### GitLab Runner
 
 - [ ] **Registry-backed base image** — `PHANTOM_BASE_IMAGE` currently only supports local image names. Add auto-pull from a registry reference (e.g. `registry.gitlab.com/org/macos-ci:latest`) before `vm.create`, including polling `image.status` until the pull completes.
