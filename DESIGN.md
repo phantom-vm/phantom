@@ -418,7 +418,7 @@ Or on error:
 - **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string)
 - **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
 - **Implementation**:
-  - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`).
+  - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`). After the install finishes, the installer's VM instance is torn down and a **fresh** `VZVirtualMachine` is booted from the bundle — the installer's own instance flakily hangs on a black screen instead of reaching Setup Assistant; a clean restart is reliable.
   - `sourceVmId`: APFS CoW clone of existing VM bundle
   - `fromImage`: Decompresses image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier
 - **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`

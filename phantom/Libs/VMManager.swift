@@ -159,12 +159,18 @@ class VMManager {
 
             log("Installation complete!")
             hasExistingVM = true
-            if vm.state == .stopped {
-                log("Starting VM...")
-                try await vm.start()
-            }
-            vmInstances[generatedId]?.state = .running
-            log("VM \(generatedId) is running")
+
+            // The VZMacOSInstaller's own VM instance doesn't reliably boot into
+            // Setup Assistant — it often hangs on a black screen. Tear it down
+            // and boot a fresh VZVirtualMachine from the installed bundle
+            // instead; a clean restart reaches Setup Assistant every time. The
+            // grace period lets Virtualization.framework finalize the install
+            // before we reopen the disk (cf. tart's create_grace_time).
+            vmInstances[generatedId]?.virtualMachine = nil
+            vmInstances[generatedId]?.state = .stopped
+            log("Finalizing install, restarting VM cleanly...")
+            try await Task.sleep(nanoseconds: 10_000_000_000)
+            await startExistingVM(vmId: generatedId)
 
         } catch {
             log("VM error: \(error.localizedDescription)")
