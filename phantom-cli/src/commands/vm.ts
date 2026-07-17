@@ -66,9 +66,12 @@ export async function vmDeploy(...args: string[]) {
   if (response.result?.vmId) {
     console.log(`VM ID: ${response.result.vmId}`);
   }
-  console.log(
-    "\nNote: VM creation happens in the background. Use 'phantom vm list' to check status."
-  );
+  // IPSW installs run in the background; image/clone deploys return running.
+  if (response.result?.status === "started") {
+    console.log(
+      "\nNote: installation runs in the background. Use 'phantom vm list' to check status."
+    );
+  }
 }
 
 export async function vmList() {

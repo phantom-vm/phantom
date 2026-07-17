@@ -165,11 +165,15 @@ struct APIHandlers {
         if let fromImage = fromImage {
             do {
                 let vmId = try await vmManager.createVMFromImage(imageName: fromImage)
+                await vmManager.startVM(vmId: vmId)
+                try ensureStarted(vmId)
                 return AnyCodable([
-                    "status": "success",
-                    "message": "VM created from image",
+                    "status": "running",
+                    "message": "VM created from image and started",
                     "vmId": vmId
                 ])
+            } catch let error as APIHandlerError {
+                throw error
             } catch {
                 throw APIHandlerError.invalidParams("Failed to create VM from image: \(error.localizedDescription)")
             }
@@ -197,20 +201,33 @@ struct APIHandlers {
 
         // Clone from existing VM
         if let sourceVmId = sourceVmId {
-            // Clone the VM (async operation)
             do {
                 let newVmId = try await vmManager.cloneVM(sourceVmId: sourceVmId)
+                await vmManager.startVM(vmId: newVmId)
+                try ensureStarted(newVmId)
                 return AnyCodable([
-                    "status": "success",
-                    "message": "VM cloned successfully",
+                    "status": "running",
+                    "message": "VM cloned and started",
                     "vmId": newVmId
                 ])
+            } catch let error as APIHandlerError {
+                throw error
             } catch {
                 throw APIHandlerError.cloneFailed(error.localizedDescription)
             }
         }
 
         throw APIHandlerError.invalidParams("Invalid parameters")
+    }
+
+    /// Verifies a just-started VM didn't land in an error state.
+    private func ensureStarted(_ vmId: String) throws {
+        guard let instance = vmManager.vmInstances[vmId] else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+        if case .error(let message) = instance.state {
+            throw APIHandlerError.invalidParams("Failed to start VM: \(message)")
+        }
     }
 
     private func handleVmsStart(params: [String: AnyCodable]?) async throws -> AnyCodable {
