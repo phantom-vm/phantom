@@ -11,28 +11,14 @@ export async function imageList() {
     process.exit(1);
   }
 
-  // Show operation status if active
+  // Only surface a status line while an operation is actively running.
+  // completed/error/idle are skipped so a finished op doesn't linger in the
+  // listing (and so create-from-image's state can't leak in here).
   const status = statusResponse.result;
-  if (status && status.state !== "idle") {
+  const inProgress = ["saving", "pushing", "pulling"];
+  if (status && inProgress.includes(status.state)) {
     const pct = status.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
-    switch (status.state) {
-      case "saving":
-        console.log(`[saving${pct}] ${status.message ?? ""}`);
-        break;
-      case "pushing":
-        console.log(`[pushing${pct}] ${status.message ?? ""}`);
-        break;
-      case "pulling":
-        console.log(`[pulling${pct}] ${status.message ?? ""}`);
-        break;
-      case "completed":
-        console.log(`[done] ${status.message ?? ""}`);
-        break;
-      case "error":
-        console.log(`[error] ${status.message ?? ""}`);
-        break;
-    }
-    console.log();
+    console.log(`[${status.state}${pct}] ${status.message ?? ""}\n`);
   }
 
   const images = (response.result?.images as any[]) ?? [];
@@ -44,7 +30,6 @@ export async function imageList() {
     return;
   }
 
-  console.log("IMAGES");
   for (const img of images) {
     const sizeGB = (img.totalSize / 1024 / 1024 / 1024).toFixed(1);
     console.log(`${img.name.padEnd(25)} ${sizeGB}GB`);
