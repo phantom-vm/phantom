@@ -22,12 +22,31 @@ nonisolated final class BootScriptRunner {
     /// at full speed, so pace them like Packer does.
     private let keystrokeInterval: UInt32 = 100_000 // 100ms
 
-    private let client: RFBClient
+    private var client: RFBClient
+    private let vncPort: UInt16
+    private let vncPassword: String
     private let onProgress: @Sendable (String) -> Void
 
     init(vncPort: UInt16, vncPassword: String, onProgress: @escaping @Sendable (String) -> Void) throws {
+        self.vncPort = vncPort
+        self.vncPassword = vncPassword
         self.client = try RFBClient(port: vncPort, password: vncPassword)
         self.onProgress = onProgress
+    }
+
+    /// Runs a VNC operation, reconnecting once if the connection dropped. The
+    /// display changes resolution across the boot → Setup Assistant transition,
+    /// which makes `_VZVNCServer` drop the client; a fresh connection re-syncs
+    /// to the new geometry.
+    @discardableResult
+    private func withReconnect<T>(_ op: (RFBClient) throws -> T) throws -> T {
+        do {
+            return try op(client)
+        } catch RFBClient.RFBError.connectionClosed {
+            onProgress("VNC connection dropped, reconnecting...")
+            client = try RFBClient(port: vncPort, password: vncPassword)
+            return try op(client)
+        }
     }
 
     /// Runs boot commands sequentially. Each command is reported to
@@ -49,15 +68,15 @@ nonisolated final class BootScriptRunner {
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
 
         case .keyDown(let keysym):
-            try client.sendKey(keysym, down: true)
+            try withReconnect { try $0.sendKey(keysym, down: true) }
             usleep(keystrokeInterval)
 
         case .keyUp(let keysym):
-            try client.sendKey(keysym, down: false)
+            try withReconnect { try $0.sendKey(keysym, down: false) }
             usleep(keystrokeInterval)
 
         case .keyPress(let keysym):
-            try client.pressKey(keysym)
+            try withReconnect { try $0.pressKey(keysym) }
             usleep(keystrokeInterval)
 
         case .typeText(let text):
@@ -66,18 +85,23 @@ nonisolated final class BootScriptRunner {
                 // _VZVNCServer maps a keysym to a physical key but does not
                 // apply its shift level, so uppercase letters and shifted
                 // symbols (|, &, _, :, ...) need Shift held explicitly.
-                if BootCommand.requiresShift(character) {
-                    try client.sendKey(BootCommand.leftShift, down: true)
-                    try client.pressKey(keysym)
-                    try client.sendKey(BootCommand.leftShift, down: false)
-                } else {
-                    try client.pressKey(keysym)
+                try withReconnect { client in
+                    if BootCommand.requiresShift(character) {
+                        try client.sendKey(BootCommand.leftShift, down: true)
+                        try client.pressKey(keysym)
+                        try client.sendKey(BootCommand.leftShift, down: false)
+                    } else {
+                        try client.pressKey(keysym)
+                    }
                 }
                 usleep(keystrokeInterval)
             }
 
         case .click(let text):
             try await clickText(text)
+
+        case .waitFor(let text):
+            try await waitForText(text)
         }
     }
 
@@ -87,16 +111,46 @@ nonisolated final class BootScriptRunner {
     /// settles, then clicks the center of the matched text.
     private func clickText(_ text: String, attempts: Int = 12, retryDelay: TimeInterval = 5) async throws {
         for attempt in 1...attempts {
-            let image = try client.captureFramebuffer()
+            let image = try withReconnect { try $0.captureFramebuffer() }
             if let center = try Self.findText(text, in: image) {
                 onProgress("Found '\(text)' at (\(center.x), \(center.y)), clicking")
-                try client.clickAt(x: center.x, y: center.y)
+                try withReconnect { try $0.clickAt(x: center.x, y: center.y) }
                 return
             }
             if attempt < attempts {
                 onProgress("'\(text)' not on screen yet (attempt \(attempt)/\(attempts))")
                 try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
             }
+        }
+        throw RunnerError.textNotFound(text)
+    }
+
+    /// Blocks until `text` appears on screen (does not click). Used to gate the
+    /// script on a slow screen transition — e.g. the cold boot to Setup
+    /// Assistant, which can take minutes — instead of a fixed `<wait>`.
+    private func waitForText(_ text: String, timeout: TimeInterval = 600, retryDelay: TimeInterval = 5) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        var attempt = 0
+        while Date() < deadline {
+            attempt += 1
+            // Capture failures (the connection flaps as the display resolution
+            // settles during boot) are non-fatal here — just try again.
+            do {
+                let image = try withReconnect { client -> CGImage in
+                    // The display may be black/asleep early in boot; nudge it awake.
+                    try? client.sendKey(BootCommand.leftShift, down: true)
+                    try? client.sendKey(BootCommand.leftShift, down: false)
+                    return try client.captureFramebuffer()
+                }
+                if try Self.findText(text, in: image) != nil {
+                    onProgress("'\(text)' appeared (after \(attempt) checks)")
+                    return
+                }
+                onProgress("waiting for '\(text)' (\(attempt))")
+            } catch {
+                onProgress("waiting for '\(text)' (\(attempt), reconnecting)")
+            }
+            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
         }
         throw RunnerError.textNotFound(text)
     }

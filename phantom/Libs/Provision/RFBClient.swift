@@ -63,6 +63,11 @@ nonisolated final class RFBClient {
             throw RFBError.connectFailed("connect() to \(host):\(port) failed: errno \(errno)")
         }
 
+        // Read timeout so a stalled/half-open connection (e.g. the VM stopped
+        // mid-capture) surfaces as an error instead of blocking forever.
+        var timeout = timeval(tv_sec: 20, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
         do {
             try handshake(password: password)
         } catch {

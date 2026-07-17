@@ -17,6 +17,7 @@ nonisolated enum BootCommand {
         case keyPress(UInt32)
         case typeText(String)
         case click(String)
+        case waitFor(String)
     }
 
     enum ParseError: LocalizedError {
@@ -97,6 +98,16 @@ nonisolated enum BootCommand {
 
     private static func parseTag(_ tag: String) throws -> Step {
         let lower = tag.lowercased()
+
+        // <waitfor 'Some Text'> — block until the text appears on screen.
+        // Checked before <wait...> so "waitfor" isn't parsed as a duration.
+        if lower.hasPrefix("waitfor ") {
+            let argument = tag.dropFirst("waitfor ".count).trimmingCharacters(in: .whitespaces)
+            if argument.hasPrefix("'"), argument.hasSuffix("'"), argument.count >= 2 {
+                return .waitFor(String(argument.dropFirst().dropLast()))
+            }
+            throw ParseError.unknownTag(tag)
+        }
 
         // <wait>, <wait30s>, <wait1m>, <wait500ms>
         if lower.hasPrefix("wait") {

@@ -1,6 +1,7 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
 import { vmCreate, vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay, vmVnc, vmBootScript, vmScreenshot } from "./commands/vm";
 import { imageList, imageDelete, imageSave, imagePush, imagePull } from "./commands/image";
+import { imageBuild } from "./commands/build";
 import { health } from "./commands/health";
 import { gitlabRunner } from "./commands/gitlab-runner";
 import { route } from "./router";
@@ -35,6 +36,7 @@ const commands = {
       save: { multiArgHandler: imageSave },
       push: { multiArgHandler: imagePush },
       pull: { multiArgHandler: imagePull },
+      build: { multiArgHandler: imageBuild },
     },
     handler: imageList as (arg?: string) => Promise<void>,
   },
@@ -67,8 +69,9 @@ Commands:
   ipsw list|pull                  Manage macOS IPSWs
   vm create|list|start|stop|exec|display|vnc|boot-script|screenshot|delete
                                   Manage VMs
-  image list|delete|save|push|pull
+  image list|delete|save|push|pull|build
                                   Manage images
+  image build <name>              Build a base image end-to-end (IPSW → agent → save)
   gitlab-runner prepare|run|cleanup
                                   GitLab custom executor integration
   health                          Check daemon status

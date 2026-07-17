@@ -418,9 +418,9 @@ Or on error:
 - **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string)
 - **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
 - **Implementation**:
-  - `ipswId`: Validates IPSW exists, creates VM bundle, installs macOS, auto-starts (async)
+  - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`).
   - `sourceVmId`: APFS CoW clone of existing VM bundle
-  - `fromImage`: Decompresses image chunks into new VM bundle, generates fresh MachineIdentifier
+  - `fromImage`: Decompresses image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier
 - **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`
 
 ### vm.start
@@ -564,8 +564,8 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 - Disk images are split into **512MB chunks**, each LZ4-compressed
 - Each chunk becomes one OCI layer with an `uncompressed-size` annotation
-- On restore: `ftruncate` creates a sparse disk, chunks are decompressed in order, all-zero chunks are skipped (stays sparse)
-- Concurrency: up to 4 concurrent compress/decompress operations
+- On restore: `ftruncate` creates a sparse disk, chunks are decompressed in parallel and `pwrite`-ten at their offsets, all-zero chunks are skipped (stays sparse). All-zero detection uses libc `memcmp` (fast even in unoptimized builds).
+- Concurrency: `OCIDiskLayerizer` is `nonisolated` so compress/decompress run off the main actor; up to `min(cores, 6)` concurrent chunks (bounds peak RAM). Chunking reads each chunk with `pread` for lock-free parallel reads.
 
 ### Image Flows
 
@@ -595,6 +595,19 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 5. Decompress disk chunks → reassemble `disk.img` (sparse, zero-skip)
 6. Generate fresh MachineIdentifier
 7. Register in `vmInstances`
+
+### Automated Image Building (`image build`)
+
+`phantom image build <name>` is a CLI-side orchestrator ([phantom-cli/src/commands/build.ts](phantom-cli/src/commands/build.ts)) that chains existing daemon endpoints into a hands-off pipeline. All the sequencing and long-polling lives in the CLI; the daemon stays a set of primitive operations.
+
+1. **Resolve IPSW** — `ipsw.list`; use `--from-ipsw` or the single downloaded IPSW
+2. **Stage agent** (optional `--agent-dir`) — runs `init-host-shared-folder.sh` to build phantom-agent into the shared folder
+3. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
+4. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also installs the agent inside the guest via VNC-typed Terminal commands
+5. **Provision** — `vm.exec` runs `provision/provision.sh` over vsock (passwordless sudo, auto-login, no sleep)
+6. **Stop** — `vm.stop`
+7. **Save** — `image.save`, poll `image.list` until the image appears
+8. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
 
 ### Registry Authentication
 

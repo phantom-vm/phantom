@@ -17,12 +17,13 @@
 # between macOS versions — this script targets Tahoe 26.x. Note: in the guest,
 # Alt maps to the Command key. Creates a local admin account phantom/phantom.
 
-# Language: the list defaults to 日本語 (top). Move down one to English and
+# Language: wait for the language list to actually appear (cold boot to Setup
+# Assistant can take minutes), then move down one from 日本語 to English and
 # confirm; macOS reloads in English and advances to the country picker.
-<wait60s><down><wait2s><enter><wait15s>
+<waitfor 'English'><wait2s><down><wait2s><enter><wait15s>
 
-# Select Your Country or Region — type to filter, then Continue
-united states<wait2s><click 'Continue'><wait3s>
+# Select Your Country or Region — wait for it, type to filter, then Continue
+<waitfor 'Country'><wait2s>united states<wait2s><click 'Continue'><wait3s>
 
 # Transfer Your Data to This Mac — start clean
 <click 'Set up as new'><wait1s><click 'Continue'><wait3s>
@@ -49,9 +50,29 @@ united states<wait2s><click 'Continue'><wait3s>
 # these off the adjacent "Disagree" button)
 <click 'Agree'><wait2s><click 'Agree'><wait5s>
 
-# Welcome — enter the desktop (a virtualized Tahoe install skips the
-# Location/Analytics/Siri screens that appear on real hardware)
-<click 'Get Started'><wait20s>
+# Enable Location Services — leave off; confirm the "are you sure" sheet
+<waitfor 'Location Services'><wait1s><click 'Continue'><wait2s><click 'Don't Use'><wait3s>
+
+# Select Your Time Zone — accept the default (Cupertino/Pacific)
+<waitfor 'Time Zone'><wait1s><click 'Continue'><wait3s>
+
+# Analytics — uncheck "Share Mac Analytics with Apple", then Continue
+<waitfor 'Analytics'><wait1s><click 'Share Mac Analytics'><wait1s><click 'Continue'><wait3s>
+
+# Screen Time — skip
+<waitfor 'Screen Time'><wait1s><click 'Set Up Later'><wait3s>
+
+# FileVault — don't encrypt (keeps auto-login working); confirm the sheet
+<waitfor 'FileVault'><wait1s><click 'Not Now'><wait2s><click 'Continue'><wait3s>
+
+# Choose Your Look — accept Light
+<waitfor 'Choose Your Look'><wait1s><click 'Continue'><wait3s>
+
+# Update Mac Automatically — download but don't auto-install on a base image
+<waitfor 'Update Mac'><wait1s><click 'Only Download Automatically'><wait3s>
+
+# Welcome — enter the desktop
+<waitfor 'Get Started'><wait1s><click 'Get Started'><wait20s>
 
 # Open Terminal via Spotlight
 <leftAltOn><spacebar><leftAltOff><wait2s>Terminal<wait2s><enter><wait8s>

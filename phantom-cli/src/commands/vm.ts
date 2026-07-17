@@ -92,6 +92,9 @@ export async function vmCreate(...args: string[]) {
   }
 
   console.log(response.result?.message || "VM creation started");
+  if (response.result?.vmId) {
+    console.log(`VM ID: ${response.result.vmId}`);
+  }
   console.log(
     "\nNote: VM creation happens in the background. Use 'phantom vm list' to check status."
   );
