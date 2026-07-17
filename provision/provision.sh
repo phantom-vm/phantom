@@ -13,8 +13,8 @@ USER_NAME=admin
 USER_PASS=admin
 
 echo "Enabling passwordless sudo for $USER_NAME..."
-echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/phantom-nopasswd
-chmod 440 /etc/sudoers.d/phantom-nopasswd
+echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/admin-nopasswd
+chmod 440 /etc/sudoers.d/admin-nopasswd
 
 echo "Enabling auto-login for $USER_NAME..."
 # /etc/kcpassword is the login password XOR'd with Apple's fixed key.
