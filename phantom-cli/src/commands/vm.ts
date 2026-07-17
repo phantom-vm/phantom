@@ -1,6 +1,6 @@
 import { sendRequest, type VM } from "../lib/api";
 
-export async function vmCreate(...args: string[]) {
+export async function vmDeploy(...args: string[]) {
   // Parse flags
   let fromVm: string | undefined;
   let fromIpsw: string | undefined;
@@ -26,9 +26,9 @@ export async function vmCreate(...args: string[]) {
       "Error: Must specify one of --from-vm, --from-ipsw, or --from-image"
     );
     console.error("Usage:");
-    console.error("  phantom vm create --from-ipsw <ipsw-id>");
-    console.error("  phantom vm create --from-vm <vm-id>");
-    console.error("  phantom vm create --from-image <image-name>");
+    console.error("  phantom vm deploy --from-ipsw <ipsw-id>");
+    console.error("  phantom vm deploy --from-vm <vm-id>");
+    console.error("  phantom vm deploy --from-image <image-name>");
     process.exit(1);
   }
 
@@ -82,7 +82,7 @@ export async function vmList() {
   const vms = response.result?.vms as VM[] || [];
 
   if (vms.length === 0) {
-    console.log("No VMs. Run 'phantom vm create --from-ipsw <IPSW_ID>' to create one.");
+    console.log("No VMs. Run 'phantom vm deploy --from-ipsw <IPSW_ID>' to create one.");
     return;
   }
 
