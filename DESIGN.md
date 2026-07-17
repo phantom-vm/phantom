@@ -193,39 +193,6 @@ Daemon                    Guest Agent           Shell
   ├─────────────────────────▶│                    │
 ```
 
-### Ephemeral VM (--rm)
-
-```
-CLI                     Daemon                  VM
- │                         │                    │
- │  vm.create (clone)     │                    │
- ├────────────────────────▶│                    │
- │  {"vmId":"vm-xyz"}      │ APFS CoW clone     │
- │◀────────────────────────┤                    │
- │                         │                    │
- │  vm.start              │                    │
- │                         │ Boot VM            │
- ├────────────────────────▶│ + VirtioFS shared  │
- │  {"status":"running"}   │───────────────────▶│
- │◀────────────────────────┤                    │
- │                         │                    │
- │  vm.execStream         │                    │
- ├────────────────────────▶│ Retry vsock until  │
- │                         │ agent ready...     │
- │                         │  {"command":"...",   │
- │                         │   "stream":true}    │
- │                         ├───────────────────▶│
- │  {"type":"stdout",...}   │ ← streaming chunks │
- │◀────────────────────────┤◀───────────────────┤
- │  {"type":"done",...}     │                    │
- │◀────────────────────────┤                    │
- │                         │                    │
- │  vm.delete             │                    │
- ├────────────────────────▶│ Stop + rm bundle   │
- │  {"status":"deleted"}   │                    │
- │◀────────────────────────┤                    │
-```
-
 ### API Request Lifecycle
 
 ```
@@ -989,14 +956,12 @@ phantom/
         ├── router.ts        # Command routing
         ├── lib/api.ts       # TCP client (batch + streaming)
         └── commands/
-            ├── create.ts    # VM creation + ephemeral flow
-            ├── vm.ts        # list, stop, delete, exec
-            ├── ipsw.ts      # IPSW management
-            ├── save.ts      # Save VM as OCI image
-            ├── images.ts    # List/delete local images
-            ├── push.ts      # Push image to registry
-            ├── pull.ts      # Pull image from registry
-            └── health.ts    # Daemon health check
+            ├── vm.ts            # create, list, start, stop, exec, display, vnc, boot-script, screenshot, delete
+            ├── image.ts         # list, delete, save, push, pull
+            ├── build.ts         # image build orchestrator
+            ├── ipsw.ts          # IPSW management
+            ├── gitlab-runner.ts # GitLab custom executor
+            └── health.ts        # Daemon health check
 ```
 
 ### Runtime Data
