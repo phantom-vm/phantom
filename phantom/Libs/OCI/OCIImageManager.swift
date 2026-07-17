@@ -314,6 +314,7 @@ class OCIImageManager {
                                 let compressedData = try Data(contentsOf: chunkFile)
                                 let decompressed = try OCIDiskLayerizer.decompress(compressedData, expectedSize: OCIDiskLayerizer.chunkSize)
 
+                                // Skip all-zero chunks to keep the disk sparse
                                 if !OCIDiskLayerizer.isAllZeros(decompressed) {
                                     let written = decompressed.withUnsafeBytes { ptr in
                                         Darwin.pwrite(fd, ptr.baseAddress!, decompressed.count, offset)

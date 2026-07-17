@@ -205,26 +205,18 @@ nonisolated enum OCIDiskLayerizer {
     // MARK: - Zero Detection
 
     /// Check if data is entirely zeros. Used to skip writing zero chunks and preserve disk sparseness.
+    ///
+    /// A buffer is all-zero iff its first byte is 0 and every byte equals the
+    /// next one — i.e. `memcmp(buf, buf+1, n-1) == 0`. Delegating the scan to
+    /// libc's vectorized `memcmp` keeps this fast even in unoptimized builds,
+    /// where a hand-rolled Swift loop over 512 MB is pathologically slow.
     static func isAllZeros(_ data: Data) -> Bool {
-        data.withUnsafeBytes { buffer in
-            guard let baseAddress = buffer.baseAddress else { return true }
-            let ptr = baseAddress.assumingMemoryBound(to: UInt64.self)
-            let count = data.count / MemoryLayout<UInt64>.size
-
-            for i in 0..<count {
-                if ptr[i] != 0 { return false }
-            }
-
-            // Check remaining bytes
-            let remainder = data.count % MemoryLayout<UInt64>.size
-            if remainder > 0 {
-                let bytePtr = baseAddress.assumingMemoryBound(to: UInt8.self)
-                for i in (data.count - remainder)..<data.count {
-                    if bytePtr[i] != 0 { return false }
-                }
-            }
-
-            return true
+        data.withUnsafeBytes { buffer -> Bool in
+            guard let base = buffer.baseAddress, buffer.count > 0 else { return true }
+            let bytes = base.assumingMemoryBound(to: UInt8.self)
+            if bytes[0] != 0 { return false }
+            if buffer.count == 1 { return true }
+            return memcmp(base, base + 1, buffer.count - 1) == 0
         }
     }
 }

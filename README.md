@@ -37,10 +37,10 @@ inherited the project's default `MainActor` isolation, so every `compress` /
 `decompress` / `isAllZeros` call hopped back to the main thread and ran
 serially — even inside a `TaskGroup`.
 
-- [x] **Parallelize chunk compress/decompress** — marked the layerizer (and `Digest`) `nonisolated` so the work runs off-main, made `chunkDisk` async with a `TaskGroup` (per-chunk `pread`, concurrency = min(cores, 6)), and pointed reconstruction at the same cap. **Save (24GB VM) went from minutes to ~16s.** Verified: a VM created from a parallel-decompressed image boots, auto-logs-in, and its agent responds.
-- [ ] **Speed up create-from-image write path** — still ~337s (down from >600s). Now that decompression is parallel, the bottleneck is writing ~24GB into the sparse disk via scattered `pwrite`s. Investigate larger/sequential writes or `F_NOCACHE`.
+- [x] **Parallelize chunk compress/decompress** — marked the layerizer (and `Digest`) `nonisolated` so the work runs off-main, made `chunkDisk` async with a `TaskGroup` (per-chunk `pread`, concurrency = min(cores, 6)), and pointed reconstruction at the same cap. **Save (24GB VM) went from minutes to ~16s.**
+- [x] **Fix `isAllZeros`** — was the real bottleneck for create-from-image: a hand-rolled Swift loop over 512 MB per chunk that, in the unoptimized dev build, cost ~2600s of CPU (per-phase timing pinned it exactly). Replaced with libc `memcmp` (`buf[0]==0 && memcmp(buf, buf+1, n-1)==0`), which is vectorized regardless of build mode. **Create-from-image went from 460s to ~12s** (zeroCheck 2595s → 1.2s); verified the resulting VM boots and its agent responds. Writes (~30GB) run at >1GB/s and were never the problem.
 - [ ] **Don't store all-zero chunks** — skip them at chunk time (reconstruction already skips writing zeros to keep the disk sparse), avoiding compression and storage of empty regions.
-- [ ] **Make `vm.create --from-image` async** (fire-and-forget + status polling) like `image.save`; also fixes the bug where a CLI timeout leaves the bundle on disk unregistered until the next daemon restart.
+- [ ] **Make `vm.create --from-image` async** (fire-and-forget + status polling) like `image.save`; also fixes the bug where a CLI timeout leaves the bundle on disk unregistered until the next daemon restart. Less urgent now that create is ~12s.
 
 ### GitLab Runner
 
