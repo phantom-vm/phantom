@@ -315,6 +315,63 @@ class VMManager {
         }
     }
 
+    // MARK: - Boot Script
+
+    enum BootScriptState: Equatable {
+        case idle
+        case running(message: String)
+        case completed
+        case error(String)
+    }
+
+    private(set) var bootScriptStates: [String: BootScriptState] = [:]
+
+    /// Starts executing boot commands against the VM via VNC keystroke
+    /// injection. Runs in the background; poll `bootScriptStates` for progress.
+    func runBootScript(vmId: String, commands: [String]) async throws {
+        guard let instance = vmInstances[vmId],
+              case .running = instance.state,
+              instance.virtualMachine != nil else {
+            throw PhantomError.vmNotRunning(vmId)
+        }
+        if case .running = bootScriptStates[vmId] {
+            throw PhantomError.bootScriptBusy(vmId)
+        }
+
+        // Validate the DSL upfront so typos fail the API call, not the background task
+        _ = try BootCommand.parse(commands: commands)
+
+        _ = try await startVNC(vmId: vmId)
+        guard let vnc = vncServers[vmId] else {
+            throw PhantomError.vmNotRunning(vmId)
+        }
+        let port = vnc.port
+        let password = vnc.password
+
+        bootScriptStates[vmId] = .running(message: "connecting")
+        log("Boot script started on \(vmId) (\(commands.count) commands)")
+
+        let manager = self
+        Task.detached {
+            let report: @Sendable (BootScriptState, String) -> Void = { state, logMessage in
+                Task { @MainActor in
+                    manager.bootScriptStates[vmId] = state
+                    manager.log(logMessage)
+                }
+            }
+
+            do {
+                let runner = try BootScriptRunner(vncPort: port, vncPassword: password) { message in
+                    report(.running(message: message), "bootScript[\(vmId)]: \(message)")
+                }
+                try await runner.run(commands: commands)
+                report(.completed, "Boot script completed on \(vmId)")
+            } catch {
+                report(.error(error.localizedDescription), "Boot script failed on \(vmId): \(error.localizedDescription)")
+            }
+        }
+    }
+
     func setDisplayedVM(vmId: String?) {
         displayedVMId = vmId
     }
@@ -765,6 +822,7 @@ enum PhantomError: LocalizedError {
     case vmNotRunning(String)
     case noSocketDevice
     case connectionClosed
+    case bootScriptBusy(String)
 
     var errorDescription: String? {
         switch self {
@@ -776,6 +834,7 @@ enum PhantomError: LocalizedError {
         case .vmNotRunning(let id): "VM is not running: \(id)"
         case .noSocketDevice: "No vsock device available"
         case .connectionClosed: "Connection to guest agent closed"
+        case .bootScriptBusy(let id): "A boot script is already running on VM: \(id)"
         }
     }
 }

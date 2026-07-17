@@ -58,6 +58,10 @@ phantom/
     ├── IPSWManager.swift # IPSW download and listing
     ├── TCPServer.swift   # Network.framework TCP server
     ├── VNCServer.swift   # Host-side VNC server (_VZVNCServer private API)
+    ├── Provision/
+    │   ├── RFBClient.swift        # Minimal RFB 3.8 client (keys, pointer, framebuffer)
+    │   ├── BootCommand.swift      # Keystroke DSL parser (<wait>, <tab>, <click '...'>)
+    │   └── BootScriptRunner.swift # Executes boot commands, OCR clicks via Vision
     └── OCI/
         ├── OCITypes.swift          # Manifest, descriptor, media types, digest
         ├── OCIReference.swift      # Registry reference parsing
@@ -461,6 +465,18 @@ Or on error:
 - **Params**: `vmId` (string)
 - **Purpose**: Stop the VM's VNC server
 - **Response**: `{"status": "stopped", "vmId": "vm-abc"}`
+
+### vm.bootScript
+- **Params**: `vmId` (string), `commands` (string[])
+- **Purpose**: Drive a running VM through its VNC server by injecting keystrokes and OCR-guided clicks — used to automate the macOS Setup Assistant during image building. The DSL is validated synchronously (bad syntax fails the call); execution runs in the background.
+- **DSL**: `<wait30s>` pauses, `<tab>`/`<enter>`/`<spacebar>`/`<f5>`... special keys, `<leftShiftOn>`/`<leftShiftOff>`... modifier hold/release, `<click 'Some Text'>` OCRs the framebuffer (Vision.framework) and clicks the matched text, anything else is typed literally. Note: the guest maps Alt to the Command key. Implemented in `Libs/Provision/`.
+- **Implementation**: Starts (or reuses) the VM's VNC server, connects a minimal RFB 3.8 client (`RFBClient`), and runs each command via `BootScriptRunner` on a detached task. Progress is exposed through `vm.bootScript.status`.
+- **Response**: `{"status": "started", "vmId": "vm-abc", "total": 42}`
+
+### vm.bootScript.status
+- **Params**: `vmId` (string)
+- **Purpose**: Poll boot-script progress
+- **Response**: `{"state": "idle|running|completed|error", "message": "..."}` (message present for running/error)
 
 ### vm.delete
 - **Params**: `vmId` (string)

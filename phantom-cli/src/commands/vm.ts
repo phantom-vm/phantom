@@ -312,6 +312,83 @@ export async function vmVnc(...args: string[]) {
   console.log(response.result?.url);
 }
 
+export async function vmBootScript(...args: string[]) {
+  const fileIndex = args.indexOf("--file");
+  const filePath = fileIndex !== -1 ? args[fileIndex + 1] : undefined;
+  const vmId = args.find((a, i) => !a.startsWith("--") && i !== fileIndex + 1);
+
+  if (!vmId || !filePath) {
+    console.error("Usage: phantom vm boot-script <VM_ID> --file <script>");
+    console.error(
+      "Script file: one boot command per line, blank lines and # comments ignored"
+    );
+    process.exit(1);
+  }
+
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) {
+    console.error(`Error: file not found: ${filePath}`);
+    process.exit(1);
+  }
+
+  const commands = (await file.text())
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+
+  if (commands.length === 0) {
+    console.error("Error: script file contains no commands");
+    process.exit(1);
+  }
+
+  const response = await sendRequest(
+    { method: "vm.bootScript", params: { vmId, commands } },
+    { timeoutMs: 60_000 }
+  );
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(`Boot script started (${commands.length} commands)`);
+
+  // Poll status until the script finishes
+  let lastMessage = "";
+  while (true) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const status = await sendRequest({
+      method: "vm.bootScript.status",
+      params: { vmId },
+    });
+
+    if (status.error) {
+      console.error(`Error: ${status.error.message}`);
+      process.exit(1);
+    }
+
+    const { state, message } = status.result as {
+      state: string;
+      message?: string;
+    };
+
+    if (state === "running" && message && message !== lastMessage) {
+      console.log(message);
+      lastMessage = message;
+    } else if (state === "completed") {
+      console.log("Boot script completed");
+      return;
+    } else if (state === "error") {
+      console.error(`Boot script failed: ${message}`);
+      process.exit(1);
+    } else if (state === "idle") {
+      console.error("Boot script state lost (daemon restarted?)");
+      process.exit(1);
+    }
+  }
+}
+
 export async function vmDelete(vmId: string) {
   if (!vmId) {
     console.error("Error: VM_ID required");

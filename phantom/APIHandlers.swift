@@ -81,6 +81,10 @@ struct APIHandlers {
             return try await handleVmsVNCStart(params: request.params)
         case "vm.vnc.stop":
             return try await handleVmsVNCStop(params: request.params)
+        case "vm.bootScript":
+            return try await handleVmsBootScript(params: request.params)
+        case "vm.bootScript.status":
+            return try await handleVmsBootScriptStatus(params: request.params)
         case "image.save":
             return try await handleImagesSave(params: request.params)
         case "image.list":
@@ -343,6 +347,52 @@ struct APIHandlers {
             "status": "stopped",
             "vmId": vmId
         ])
+    }
+
+    private func handleVmsBootScript(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+        guard let commands = params?["commands"]?.value as? [String], !commands.isEmpty else {
+            throw APIHandlerError.missingParam("commands")
+        }
+
+        guard vmManager.vmInstances[vmId] != nil else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+
+        do {
+            try await vmManager.runBootScript(vmId: vmId, commands: commands)
+            return AnyCodable([
+                "status": "started",
+                "vmId": vmId,
+                "total": commands.count
+            ] as [String: Any])
+        } catch let error as PhantomError {
+            if case .vmNotRunning = error {
+                throw APIHandlerError.vmNotRunning(vmId)
+            }
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
+    }
+
+    private func handleVmsBootScriptStatus(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+
+        switch vmManager.bootScriptStates[vmId] ?? .idle {
+        case .idle:
+            return AnyCodable(["state": "idle"])
+        case .running(let message):
+            return AnyCodable(["state": "running", "message": message] as [String: Any])
+        case .completed:
+            return AnyCodable(["state": "completed"])
+        case .error(let message):
+            return AnyCodable(["state": "error", "message": message] as [String: Any])
+        }
     }
 
     // MARK: - Image Handlers
