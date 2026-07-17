@@ -6,11 +6,11 @@
 #
 #   phantom vm exec <vm-id> -- sh /Volumes/phantom-shared/provision.sh
 #
-# Assumes an admin account "phantom" with password "phantom".
+# Assumes an admin account "admin" with password "admin".
 set -e
 
-USER_NAME=phantom
-USER_PASS=phantom
+USER_NAME=admin
+USER_PASS=admin
 
 echo "Enabling passwordless sudo for $USER_NAME..."
 echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/phantom-nopasswd
@@ -18,8 +18,8 @@ chmod 440 /etc/sudoers.d/phantom-nopasswd
 
 echo "Enabling auto-login for $USER_NAME..."
 # /etc/kcpassword is the login password XOR'd with Apple's fixed key.
-# 0de1334da6d3b0ea00000000 is "phantom" encoded; see xfreebird/kcpassword.
-echo 0de1334da6d3b0ea00000000 | xxd -r -p - /etc/kcpassword
+# 1ced3f4abcbcba2ccaca4e82 is "admin" encoded; see xfreebird/kcpassword.
+echo 1ced3f4abcbcba2ccaca4e82 | xxd -r -p - /etc/kcpassword
 chmod 600 /etc/kcpassword
 defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser "$USER_NAME"
 

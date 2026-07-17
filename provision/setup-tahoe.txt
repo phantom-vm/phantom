@@ -15,7 +15,7 @@
 # Screens are matched by on-screen text, so exact button coordinates don't
 # matter, but timings assume a cold first boot. Setup Assistant wording differs
 # between macOS versions — this script targets Tahoe 26.x. Note: in the guest,
-# Alt maps to the Command key. Creates a local admin account phantom/phantom.
+# Alt maps to the Command key. Creates a local admin account admin/admin.
 
 # Language: wait for the language list to actually appear (cold boot to Setup
 # Assistant can take minutes), then move down one from 日本語 to English and
@@ -39,7 +39,7 @@
 
 # Create a Mac Account — full name, (auto) account name, password x2.
 # Then uncheck "reset password with Apple Account" so no Apple sign-in is forced.
-<click 'Full Name'>phantom<tab><tab>phantom<tab>phantom<wait1s>
+<click 'Full Name'>admin<tab><tab>admin<tab>admin<wait1s>
 <click 'Allow computer'><wait1s>
 <click 'Continue'><wait30s>
 
@@ -79,7 +79,7 @@
 
 # Mount the host shared folder and install the agent. sudo reads the password
 # from stdin; the first access to the virtiofs volume triggers a TCC prompt.
-echo phantom | sudo -S mkdir -p /Volumes/phantom-shared && echo phantom | sudo -S mount_virtiofs phantom-shared /Volumes/phantom-shared && sudo /Volumes/phantom-shared/install.sh<enter><wait5s>
+echo admin | sudo -S mkdir -p /Volumes/phantom-shared && echo admin | sudo -S mount_virtiofs phantom-shared /Volumes/phantom-shared && sudo /Volumes/phantom-shared/install.sh<enter><wait5s>
 <click 'Allow'><wait10s>
 
 # The phantom-agent is now running as a launchd daemon. From here the host

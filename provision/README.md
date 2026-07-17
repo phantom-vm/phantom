@@ -14,7 +14,7 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
    builds `phantom-agent` and copies it into the shared folder.
 3. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
    drives Setup Assistant over VNC (keystrokes + OCR clicks): creates a local
-   admin account `phantom`/`phantom`, skips every online step, reaches the
+   admin account `admin`/`admin`, skips every online step, reaches the
    desktop, and installs the agent. After this the agent answers on vsock.
 4. **Provision** — `phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"`
    (or copy the script in) configures passwordless sudo, auto-login, and
@@ -37,6 +37,6 @@ Assistant wording and flow change between releases.
 
 ## Credentials
 
-The base image ships with a well-known admin account **phantom / phantom** and
+The base image ships with a well-known admin account **admin / admin** and
 passwordless sudo. It is meant for ephemeral CI VMs on a trusted host, not for
 exposure to untrusted networks.
