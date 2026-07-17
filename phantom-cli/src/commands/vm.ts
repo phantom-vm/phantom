@@ -85,7 +85,7 @@ export async function vmList() {
   const vms = response.result?.vms as VM[] || [];
 
   if (vms.length === 0) {
-    console.log("No VMs. Run 'phantom vm deploy --ipsw <IPSW_ID>' to create one.");
+    console.log("No VMs.");
     return;
   }
 
