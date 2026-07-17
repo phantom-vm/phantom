@@ -116,7 +116,7 @@ enum PhantomAnnotation {
 
 // MARK: - Digest
 
-enum Digest {
+nonisolated enum Digest {
     static func sha256(_ data: Data) -> String {
         var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         data.withUnsafeBytes { buffer in

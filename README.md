@@ -29,18 +29,18 @@ Goal: `phantom image build <name>` — one command from IPSW to a ready-to-use i
 
 Known risks: `_VZVNCServer` is a private API (tart has shipped it for years); Setup Assistant screens differ across macOS versions, so boot scripts are per-version; keystroke timing needs generous waits.
 
-### Image Compression Performance — HIGH PRIORITY
+### Image Compression Performance
 
-`image save` / `image create --from-image` are unacceptably slow: chunking and
-reconstruction in [OCIDiskLayerizer.swift](phantom/Libs/OCI/OCIDiskLayerizer.swift)
-process 512MB LZ4 chunks **one at a time on a single thread** (`for i in 0..<totalChunks`),
-so a ~21GB image takes many minutes while most CPU cores sit idle. Creating a VM
-from an image even exceeded the CLI's 600s request timeout.
+The real cause of the original slowness was not a lack of concurrency but
+actor isolation: [OCIDiskLayerizer.swift](phantom/Libs/OCI/OCIDiskLayerizer.swift)
+inherited the project's default `MainActor` isolation, so every `compress` /
+`decompress` / `isAllZeros` call hopped back to the main thread and ran
+serially — even inside a `TaskGroup`.
 
-- [ ] **Parallelize chunk compress/decompress** across cores (e.g. `DispatchQueue.concurrentPerform` or a `TaskGroup`) — the single biggest win, disk image chunks are independent.
-- [ ] **Don't store all-zero chunks** — skip them at chunk time (reconstruction already skips writing zeros to keep the disk sparse), avoiding both compression and storage of empty regions.
-- [ ] **Stream instead of buffering whole 512MB chunks** in memory to cut allocation pressure and allow smaller, more parallelizable units.
-- [ ] **Make `vm.create --from-image` async** (fire-and-forget + status polling) like `image.save`, so long reconstructions don't hit the CLI request timeout.
+- [x] **Parallelize chunk compress/decompress** — marked the layerizer (and `Digest`) `nonisolated` so the work runs off-main, made `chunkDisk` async with a `TaskGroup` (per-chunk `pread`, concurrency = min(cores, 6)), and pointed reconstruction at the same cap. **Save (24GB VM) went from minutes to ~16s.** Verified: a VM created from a parallel-decompressed image boots, auto-logs-in, and its agent responds.
+- [ ] **Speed up create-from-image write path** — still ~337s (down from >600s). Now that decompression is parallel, the bottleneck is writing ~24GB into the sparse disk via scattered `pwrite`s. Investigate larger/sequential writes or `F_NOCACHE`.
+- [ ] **Don't store all-zero chunks** — skip them at chunk time (reconstruction already skips writing zeros to keep the disk sparse), avoiding compression and storage of empty regions.
+- [ ] **Make `vm.create --from-image` async** (fire-and-forget + status polling) like `image.save`; also fixes the bug where a CLI timeout leaves the bundle on disk unregistered until the next daemon restart.
 
 ### GitLab Runner
 

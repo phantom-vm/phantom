@@ -4,9 +4,20 @@ import Foundation
 // MARK: - Disk Layerizer
 
 /// Handles splitting VM disk images into LZ4-compressed chunks and reassembling them.
-enum OCIDiskLayerizer {
+///
+/// `nonisolated` so its CPU-heavy compress/decompress work runs on whatever
+/// background executor calls it, in true parallel. Without this the project's
+/// default MainActor isolation would hop every chunk back to the main thread,
+/// serializing the work no matter how many concurrent tasks the caller spawns.
+nonisolated enum OCIDiskLayerizer {
     /// 512 MB chunk size
     static let chunkSize = 512 * 1024 * 1024
+
+    /// Concurrency for chunk compress/decompress. Each in-flight chunk holds up
+    /// to one 512 MB buffer, so this also bounds peak RAM (cap × 512 MB).
+    static var maxConcurrency: Int {
+        min(ProcessInfo.processInfo.activeProcessorCount, 6)
+    }
 
     /// Metadata for a compressed disk chunk (without holding the data in memory)
     struct ChunkMetadata {
@@ -19,58 +30,82 @@ enum OCIDiskLayerizer {
 
     // MARK: - Chunking (for save/push)
 
-    /// Split a disk image into LZ4-compressed chunks, writing each to disk immediately.
+    /// Split a disk image into LZ4-compressed chunks, writing each to disk.
+    /// Chunks are compressed concurrently across cores; each task reads its own
+    /// range with `pread` (thread-safe, doesn't move the shared fd offset).
     /// - Parameters:
     ///   - path: Path to the disk image file
     ///   - outputDir: Directory to write compressed .lz4 files into
     ///   - progress: Callback with fraction complete (0.0...1.0)
     /// - Returns: Array of chunk metadata (data written to outputDir, not held in memory)
-    static func chunkDisk(at path: URL, outputDir: URL, progress: @escaping (Double) -> Void) throws -> [ChunkMetadata] {
-        let fileHandle = try FileHandle(forReadingFrom: path)
-        defer { try? fileHandle.close() }
-
-        let fileSize = try fileHandle.seekToEnd()
-        try fileHandle.seek(toOffset: 0)
-
-        guard fileSize > 0 else {
-            return []
+    static func chunkDisk(at path: URL, outputDir: URL, progress: @escaping (Double) -> Void) async throws -> [ChunkMetadata] {
+        let fd = Darwin.open(path.path, O_RDONLY)
+        guard fd >= 0 else {
+            throw OCIError.compressionFailed("Failed to open disk image: \(path.path)")
         }
+        defer { Darwin.close(fd) }
+
+        let fileSize = UInt64(Darwin.lseek(fd, 0, SEEK_END))
+        guard fileSize > 0 else { return [] }
 
         let totalChunks = Int((fileSize + UInt64(chunkSize) - 1) / UInt64(chunkSize))
-        var metadata: [ChunkMetadata] = []
-        metadata.reserveCapacity(totalChunks)
+        var results = [ChunkMetadata?](repeating: nil, count: totalChunks)
+        var completed = 0
 
-        for i in 0..<totalChunks {
-            // autoreleasepool ensures NSData-backed buffers from FileHandle.read
-            // are released after each chunk, preventing all chunks from accumulating
-            // in the autorelease pool simultaneously (which would reach 64GB+ for a full disk).
-            let chunkMeta: ChunkMetadata = try autoreleasepool {
-                let offset = UInt64(i) * UInt64(chunkSize)
-                try fileHandle.seek(toOffset: offset)
+        try await withThrowingTaskGroup(of: (Int, ChunkMetadata).self) { group in
+            var next = 0
+            var inFlight = 0
 
-                guard let rawData = try fileHandle.read(upToCount: chunkSize), !rawData.isEmpty else {
-                    throw OCIError.compressionFailed("Unexpected empty read at chunk \(i)")
+            func schedule(_ i: Int) {
+                group.addTask {
+                    (i, try compressChunk(fd: fd, index: i, fileSize: fileSize, outputDir: outputDir))
                 }
-
-                let compressed = try compress(rawData)
-                let digest = Digest.sha256(compressed)
-
-                let chunkPath = outputDir.appendingPathComponent(String(format: "%03d.lz4", i))
-                try compressed.write(to: chunkPath)
-
-                return ChunkMetadata(
-                    index: i,
-                    offset: offset,
-                    compressedSize: Int64(compressed.count),
-                    uncompressedSize: rawData.count,
-                    digest: digest
-                )
+                next += 1
+                inFlight += 1
             }
-            metadata.append(chunkMeta)
-            progress(Double(i + 1) / Double(totalChunks))
+
+            while next < totalChunks && inFlight < maxConcurrency { schedule(next) }
+
+            while inFlight > 0 {
+                let (index, meta) = try await group.next()!
+                results[index] = meta
+                inFlight -= 1
+                completed += 1
+                progress(Double(completed) / Double(totalChunks))
+                if next < totalChunks { schedule(next) }
+            }
         }
 
-        return metadata
+        return results.compactMap { $0 }
+    }
+
+    /// Reads one chunk with `pread`, LZ4-compresses it, and writes the `.lz4`.
+    private static func compressChunk(fd: Int32, index: Int, fileSize: UInt64, outputDir: URL) throws -> ChunkMetadata {
+        try autoreleasepool {
+            let offset = UInt64(index) * UInt64(chunkSize)
+            let thisSize = Int(min(UInt64(chunkSize), fileSize - offset))
+            var raw = Data(count: thisSize)
+
+            let readCount = raw.withUnsafeMutableBytes { ptr in
+                Darwin.pread(fd, ptr.baseAddress, thisSize, off_t(offset))
+            }
+            guard readCount == thisSize else {
+                throw OCIError.compressionFailed("Short read at chunk \(index): \(readCount) != \(thisSize)")
+            }
+
+            let compressed = try compress(raw)
+            let digest = Digest.sha256(compressed)
+            let chunkPath = outputDir.appendingPathComponent(String(format: "%03d.lz4", index))
+            try compressed.write(to: chunkPath)
+
+            return ChunkMetadata(
+                index: index,
+                offset: offset,
+                compressedSize: Int64(compressed.count),
+                uncompressedSize: thisSize,
+                digest: digest
+            )
+        }
     }
 
     // MARK: - Reconstruction (for pull/restore)

@@ -104,7 +104,7 @@ class OCIImageManager {
 
                 // Chunk disk image (writes each chunk to disk immediately)
                 bgLog("Chunking disk image...")
-                let metadata = try OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: diskDir) { progress in
+                let metadata = try await OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: diskDir) { progress in
                     let overall = 0.1 + progress * 0.8
                     updateProgress(overall, "Compressing chunk \(Int(progress * 100))%")
                 }
@@ -289,8 +289,9 @@ class OCIImageManager {
                     throw NSError(domain: NSPOSIXErrorDomain, code: Int(Darwin.errno), userInfo: nil)
                 }
 
-                // Cap at 4 concurrent tasks (4 × 512 MB = 2 GB peak RAM)
-                let maxConcurrent = 4
+                // Decompress chunks in parallel across cores; the cap bounds
+                // peak RAM (maxConcurrency × 512 MB).
+                let maxConcurrent = OCIDiskLayerizer.maxConcurrency
                 let chunkCount = chunkFiles.count
                 var inFlight = 0
                 var completedCount = 0
