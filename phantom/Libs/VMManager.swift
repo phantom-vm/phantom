@@ -315,6 +315,34 @@ class VMManager {
         }
     }
 
+    /// Captures the VM's current screen to a PNG. Starts a VNC server if needed.
+    /// Returns the file path written. Useful for authoring/debugging boot scripts.
+    func captureScreenshot(vmId: String, outputPath: String?) async throws -> String {
+        _ = try await startVNC(vmId: vmId)
+        guard let vnc = vncServers[vmId] else {
+            throw PhantomError.vmNotRunning(vmId)
+        }
+        let port = vnc.port
+        let password = vnc.password
+
+        let destination: String
+        if let outputPath {
+            destination = (outputPath as NSString).expandingTildeInPath
+        } else {
+            destination = FileManager.default.temporaryDirectory
+                .appendingPathComponent("phantom-\(vmId)-\(Int(Date().timeIntervalSince1970)).png").path
+        }
+
+        try await Task.detached {
+            let client = try RFBClient(port: port, password: password)
+            let image = try client.captureFramebuffer()
+            try RFBClient.writePNG(image, to: destination)
+        }.value
+
+        log("Screenshot of \(vmId) saved to \(destination)")
+        return destination
+    }
+
     // MARK: - Boot Script
 
     enum BootScriptState: Equatable {

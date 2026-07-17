@@ -85,6 +85,8 @@ struct APIHandlers {
             return try await handleVmsBootScript(params: request.params)
         case "vm.bootScript.status":
             return try await handleVmsBootScriptStatus(params: request.params)
+        case "vm.screenshot":
+            return try await handleVmsScreenshot(params: request.params)
         case "image.save":
             return try await handleImagesSave(params: request.params)
         case "image.list":
@@ -392,6 +394,29 @@ struct APIHandlers {
             return AnyCodable(["state": "completed"])
         case .error(let message):
             return AnyCodable(["state": "error", "message": message] as [String: Any])
+        }
+    }
+
+    private func handleVmsScreenshot(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let vmId = params?["vmId"]?.value as? String else {
+            throw APIHandlerError.missingParam("vmId")
+        }
+        let outputPath = params?["path"]?.value as? String
+
+        guard vmManager.vmInstances[vmId] != nil else {
+            throw APIHandlerError.vmNotFound(vmId)
+        }
+
+        do {
+            let path = try await vmManager.captureScreenshot(vmId: vmId, outputPath: outputPath)
+            return AnyCodable(["status": "ok", "vmId": vmId, "path": path])
+        } catch let error as PhantomError {
+            if case .vmNotRunning = error {
+                throw APIHandlerError.vmNotRunning(vmId)
+            }
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
         }
     }
 

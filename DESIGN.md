@@ -478,6 +478,12 @@ Or on error:
 - **Purpose**: Poll boot-script progress
 - **Response**: `{"state": "idle|running|completed|error", "message": "..."}` (message present for running/error)
 
+### vm.screenshot
+- **Params**: `vmId` (string), `path` (string, optional — defaults to a temp PNG)
+- **Purpose**: Capture the VM's current screen to a PNG. Starts a VNC server if needed. Primarily an aid for authoring/debugging boot scripts against a new macOS version.
+- **Implementation**: Connects an `RFBClient` to the VM's VNC server and encodes one framebuffer to PNG.
+- **Response**: `{"status": "ok", "vmId": "vm-abc", "path": "/.../screen.png"}`
+
 ### vm.delete
 - **Params**: `vmId` (string)
 - **Purpose**: Delete VM bundle from disk

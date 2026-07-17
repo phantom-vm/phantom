@@ -63,7 +63,16 @@ nonisolated final class BootScriptRunner {
         case .typeText(let text):
             for character in text {
                 guard let keysym = BootCommand.keysym(for: character) else { continue }
-                try client.pressKey(keysym)
+                // _VZVNCServer maps a keysym to a physical key but does not
+                // apply its shift level, so uppercase letters and shifted
+                // symbols (|, &, _, :, ...) need Shift held explicitly.
+                if BootCommand.requiresShift(character) {
+                    try client.sendKey(BootCommand.leftShift, down: true)
+                    try client.pressKey(keysym)
+                    try client.sendKey(BootCommand.leftShift, down: false)
+                } else {
+                    try client.pressKey(keysym)
+                }
                 usleep(keystrokeInterval)
             }
 
@@ -102,10 +111,27 @@ nonisolated final class BootScriptRunner {
         try handler.perform([request])
 
         let target = text.lowercased()
+
+        // Rank matches so that an exact label wins over a substring: this keeps
+        // `<click 'Agree'>` off the "Disagree" button and `<click 'Skip'>` off
+        // "Don't Skip". 0 = exact, 1 = word match, 2 = substring.
+        var best: (rank: Int, x: Int, y: Int)?
+
         for observation in request.results ?? [] {
             guard let candidate = observation.topCandidates(1).first else { continue }
             let recognized = candidate.string.lowercased()
             guard recognized.contains(target) else { continue }
+
+            let trimmed = recognized.trimmingCharacters(in: .whitespacesAndPunctuation)
+            let words = recognized.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+            let rank: Int
+            if trimmed == target {
+                rank = 0
+            } else if words.contains(target) {
+                rank = 1
+            } else {
+                rank = 2
+            }
 
             // Bounding box of just the matched substring when available,
             // otherwise the whole observation
@@ -118,8 +144,22 @@ nonisolated final class BootScriptRunner {
             // Vision coordinates are normalized with origin at bottom-left
             let x = Int(box.midX * CGFloat(image.width))
             let y = Int((1 - box.midY) * CGFloat(image.height))
-            return (x, y)
+
+            if best == nil || rank < best!.rank {
+                best = (rank, x, y)
+                if rank == 0 { break }
+            }
         }
-        return nil
+
+        guard let best else { return nil }
+        return (best.x, best.y)
+    }
+}
+
+private extension CharacterSet {
+    static var whitespacesAndPunctuation: CharacterSet {
+        var set = CharacterSet.whitespacesAndNewlines
+        set.formUnion(.punctuationCharacters)
+        return set
     }
 }

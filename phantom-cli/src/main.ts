@@ -1,5 +1,5 @@
 import { ipswList, ipswPull } from "./commands/ipsw";
-import { vmCreate, vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay, vmVnc, vmBootScript } from "./commands/vm";
+import { vmCreate, vmList, vmStart, vmStop, vmDelete, vmExec, vmDisplay, vmVnc, vmBootScript, vmScreenshot } from "./commands/vm";
 import { imageList, imageDelete, imageSave, imagePush, imagePull } from "./commands/image";
 import { health } from "./commands/health";
 import { gitlabRunner } from "./commands/gitlab-runner";
@@ -24,6 +24,7 @@ const commands = {
       display: { handler: vmDisplay as (arg?: string) => Promise<void> },
       vnc: { multiArgHandler: vmVnc },
       "boot-script": { multiArgHandler: vmBootScript },
+      screenshot: { multiArgHandler: vmScreenshot },
       delete: { handler: vmDelete as (arg?: string) => Promise<void> },
     },
   },
@@ -64,7 +65,7 @@ Usage:
 
 Commands:
   ipsw list|pull                  Manage macOS IPSWs
-  vm create|list|start|stop|exec|display|vnc|boot-script|delete
+  vm create|list|start|stop|exec|display|vnc|boot-script|screenshot|delete
                                   Manage VMs
   image list|delete|save|push|pull
                                   Manage images

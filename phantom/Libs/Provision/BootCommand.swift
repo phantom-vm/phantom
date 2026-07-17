@@ -170,6 +170,19 @@ nonisolated enum BootCommand {
         return total
     }
 
+    /// Left Shift keysym, held around shifted characters when typing.
+    static let leftShift: UInt32 = 0xFFE1
+
+    /// Characters that require Shift on a US keyboard (uppercase letters and
+    /// the shifted symbol row). The VNC server does not synthesize Shift from
+    /// the keysym alone, so callers must hold it themselves.
+    private static let shiftedSymbols = Set("~!@#$%^&*()_+{}|:\"<>?")
+
+    static func requiresShift(_ character: Character) -> Bool {
+        if character.isLetter && character.isUppercase { return true }
+        return shiftedSymbols.contains(character)
+    }
+
     /// Keysym for a literal character (printable ASCII and newline).
     /// Returns nil for characters that can't be typed directly.
     static func keysym(for character: Character) -> UInt32? {

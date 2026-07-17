@@ -389,6 +389,32 @@ export async function vmBootScript(...args: string[]) {
   }
 }
 
+export async function vmScreenshot(...args: string[]) {
+  const outIndex = args.indexOf("--out");
+  const outPath = outIndex !== -1 ? args[outIndex + 1] : undefined;
+  const vmId = args.find((a, i) => !a.startsWith("--") && i !== outIndex + 1);
+
+  if (!vmId) {
+    console.error("Usage: phantom vm screenshot <VM_ID> [--out <path>]");
+    process.exit(1);
+  }
+
+  const params: { vmId: string; path?: string } = { vmId };
+  if (outPath) params.path = outPath;
+
+  const response = await sendRequest(
+    { method: "vm.screenshot", params },
+    { timeoutMs: 30_000 }
+  );
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(response.result?.path);
+}
+
 export async function vmDelete(vmId: string) {
   if (!vmId) {
     console.error("Error: VM_ID required");

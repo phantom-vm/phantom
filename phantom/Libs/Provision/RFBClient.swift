@@ -1,6 +1,8 @@
 import Foundation
 import CommonCrypto
 import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Minimal RFB 3.8 (VNC) client used to drive a VM through its host-side VNC
 /// server: keyboard/pointer injection and raw framebuffer capture.
@@ -269,6 +271,20 @@ nonisolated final class RFBClient {
                     dstOffset += 4
                 }
             }
+        }
+    }
+
+    /// Encodes a CGImage to a PNG file.
+    static func writePNG(_ image: CGImage, to path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else {
+            throw RFBError.protocolError("failed to create PNG destination")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw RFBError.protocolError("failed to write PNG")
         }
     }
 
