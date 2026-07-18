@@ -128,8 +128,9 @@ nonisolated final class BootScriptRunner {
     /// Blocks until `text` appears on screen (does not click). Used to gate the
     /// script on a slow screen transition — e.g. the cold boot to Setup
     /// Assistant, which can take minutes — instead of a fixed `<wait>`.
-    private func waitForText(_ text: String, timeout: TimeInterval = 600, retryDelay: TimeInterval = 5) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
+    private func waitForText(_ text: String, timeout: TimeInterval = 600, retryDelay: TimeInterval = 2) async throws {
+        let start = Date()
+        let deadline = start.addingTimeInterval(timeout)
         var attempt = 0
         while Date() < deadline {
             attempt += 1
@@ -143,7 +144,7 @@ nonisolated final class BootScriptRunner {
                     return try client.captureFramebuffer()
                 }
                 if try Self.findText(text, in: image) != nil {
-                    onProgress("'\(text)' appeared (after \(attempt) checks)")
+                    onProgress("'\(text)' appeared after \(Int(-start.timeIntervalSinceNow))s (\(attempt) checks)")
                     return
                 }
                 onProgress("waiting for '\(text)' (\(attempt))")

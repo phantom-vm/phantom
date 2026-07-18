@@ -18,9 +18,10 @@
 # Alt maps to the Command key. Creates a local admin account admin/admin.
 
 # Language: wait for the language list to actually appear (cold boot to Setup
-# Assistant can take minutes), then move down one from 日本語 to English and
-# confirm; macOS reloads in English and advances to the country picker.
-<waitfor 'English'><wait2s><down><wait2s><enter><wait15s>
+# Assistant can take minutes — that wall time is the guest's first-boot work),
+# then move down one from 日本語 to English and confirm; macOS reloads in
+# English. No fixed wait after enter: the next waitfor gates on the reload.
+<waitfor 'English'><wait1s><down><wait1s><enter>
 
 # Select Your Country or Region — wait for it, type to filter, then Continue
 <waitfor 'Country'><wait2s>united states<wait2s><click 'Continue'><wait3s>
