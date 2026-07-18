@@ -140,14 +140,21 @@ export async function vmStop(vmId: string) {
 }
 
 export async function vmExec(...args: string[]) {
-  // Parse: <vm-id> -- <command> [args...]
+  // Parse: <vm-id> [--user <name>] -- <command> [args...]
   const dashDashIndex = args.indexOf("--");
   if (dashDashIndex === -1 || dashDashIndex === 0) {
-    console.error("Usage: phantom vm exec <VM_ID> -- <command> [args...]");
+    console.error("Usage: phantom vm exec <VM_ID> [--user <name>] -- <command> [args...]");
     process.exit(1);
   }
 
-  const vmId = args[0];
+  const vmId = args[0]!; // guaranteed present since dashDashIndex >= 1
+  let user: string | undefined;
+  for (let i = 1; i < dashDashIndex; i++) {
+    if (args[i] === "--user" && i + 1 < dashDashIndex) {
+      user = args[i + 1];
+      i++;
+    }
+  }
   const command = args.slice(dashDashIndex + 1).join(" ");
 
   if (!command) {
@@ -155,11 +162,11 @@ export async function vmExec(...args: string[]) {
     process.exit(1);
   }
 
+  const params: { vmId: string; command: string; user?: string } = { vmId, command };
+  if (user) params.user = user;
+
   const response = await sendRequest(
-    {
-      method: "vm.exec",
-      params: { vmId, command },
-    },
+    { method: "vm.exec", params },
     { timeoutMs: 300_000 }
   );
 

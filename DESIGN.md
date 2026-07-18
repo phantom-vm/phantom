@@ -403,13 +403,14 @@ Or on error:
 - **Response**: `{"status": "stopped", "vmId": "vm-abc"}`
 
 ### vm.exec
-- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
+- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `user` (string, optional), `waitForAgent` (bool, optional)
 - **Purpose**: Execute command inside running VM via vsock
-- **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs).
+- **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs). The agent runs as root; when `user` is set, the daemon wraps the command in `su - <user> -c '…'` so it runs as that user with their login environment (no agent change needed). With an auto-logged-in user this even reaches the GUI session — e.g. `--user admin -- open -a Notes` opens Notes on the desktop.
 - **Response**: `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+- **CLI**: `phantom vm exec <vm-id> [--user <name>] -- <command>`
 
 ### vm.execStream
-- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `waitForAgent` (bool, optional)
+- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `user` (string, optional), `waitForAgent` (bool, optional)
 - **Purpose**: Execute command with streaming output. Connection stays open, sending chunks as they arrive.
 - **Protocol**: Newline-delimited JSON chunks:
   - `{"type":"stdout","data":"..."}`

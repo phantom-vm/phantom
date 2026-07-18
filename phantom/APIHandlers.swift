@@ -15,12 +15,17 @@ struct APIHandlers {
             if let error { sendChunk(error) }
             return
         }
-        let args = request.params?["args"]?.value as? [String]
+        let user = request.params?["user"]?.value as? String
+        let (wrappedCommand, args) = applyUser(
+            command: command,
+            args: request.params?["args"]?.value as? [String],
+            user: user
+        )
         let waitForAgent = (request.params?["waitForAgent"]?.value as? Bool) ?? false
 
         do {
             let exitCode = try await vmManager.executeCommandStreaming(
-                command,
+                wrappedCommand,
                 args: args,
                 vmId: vmId,
                 waitForAgent: waitForAgent
@@ -252,14 +257,33 @@ struct APIHandlers {
         ])
     }
 
+    /// The guest agent runs as root. When a `user` is requested, wrap the
+    /// command in `su - <user> -c '…'` so it runs (with that user's login
+    /// environment) as them instead. Done host-side so no agent change is
+    /// needed. Any `args` are folded into the command string.
+    private func applyUser(command: String, args: [String]?, user: String?) -> (command: String, args: [String]?) {
+        guard let user, !user.isEmpty else { return (command, args) }
+        func shQuote(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
+        var full = command
+        if let args, !args.isEmpty {
+            full += " " + args.map(shQuote).joined(separator: " ")
+        }
+        return ("su - \(user) -c \(shQuote(full))", nil)
+    }
+
     private func handleVmsExec(params: [String: AnyCodable]?) async throws -> AnyCodable {
         guard let vmId = params?["vmId"]?.value as? String else {
             throw APIHandlerError.missingParam("vmId")
         }
-        guard let command = params?["command"]?.value as? String else {
+        guard let rawCommand = params?["command"]?.value as? String else {
             throw APIHandlerError.missingParam("command")
         }
-        let args = (params?["args"]?.value as? [String])
+        let user = params?["user"]?.value as? String
+        let (command, args) = applyUser(
+            command: rawCommand,
+            args: params?["args"]?.value as? [String],
+            user: user
+        )
         let waitForAgent = (params?["waitForAgent"]?.value as? Bool) ?? false
 
         do {
