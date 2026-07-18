@@ -56,6 +56,7 @@ phantom/
 └── Libs/
     ├── VMManager.swift   # VM lifecycle management
     ├── IPSWManager.swift # IPSW download and listing
+    ├── GitLabRunnerManager.swift # Managed GitLab Runner (download, register, supervise)
     ├── TCPServer.swift   # Network.framework TCP server
     ├── VNCServer.swift   # Host-side VNC server (_VZVNCServer private API)
     ├── Provision/
@@ -244,7 +245,7 @@ Daemon                    Guest Agent           Shell
 │
 ├── vms/                      # VM bundles
 │   ├── vm-abc123/
-│   │   ├── disk.img          # 64GB sparse disk image
+│   │   ├── disk.img          # 90GB sparse disk image
 │   │   ├── AuxiliaryStorage  # Binary blob
 │   │   ├── MachineIdentifier # Binary blob
 │   │   └── HardwareModel     # Binary blob
@@ -264,15 +265,21 @@ Daemon                    Guest Agent           Shell
 │   └── macos-dev/
 │       └── ...
 │
-└── shared/                   # Mounted in all VMs
-    ├── phantom-agent         # Guest agent binary
-    ├── install.sh            # Installation script
-    ├── uninstall.sh
-    └── com.monk.phantom-agent.plist
+├── shared/                   # Mounted in all VMs
+│   ├── phantom-agent         # Guest agent binary
+│   ├── install.sh            # Installation script
+│   ├── uninstall.sh
+│   └── com.monk.phantom-agent.plist
+│
+└── gitlab-runner/            # Managed GitLab Runner
+    ├── v18.11.2/
+    │   └── gitlab-runner     # Versioned binary downloaded from GitLab S3
+    ├── config.toml           # Runner config owned by phantom (never touches ~/.gitlab-runner)
+    └── template.toml         # Register template pointing the custom executor at phantom-cli
 ```
 
 **VM Bundle Contents**:
-- `disk.img` - Created via `ftruncate()`, 64GB sparse file
+- `disk.img` - Created via `ftruncate()`, 90GB sparse file
 - `AuxiliaryStorage` - VM-specific data, persisted across boots
 - `MachineIdentifier` - Unique VM identity
 - `HardwareModel` - CPU/hardware configuration
@@ -489,6 +496,24 @@ Or on error:
 - **Purpose**: Poll current image operation state (saving, pushing, pulling)
 - **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
 
+### gitlab.setup
+- **Params**: `url` (string), `token` (string), `image` (string), `cliPath` (string), `concurrent` (int, optional)
+- **Purpose**: One-shot managed GitLab Runner setup
+- **Implementation**: Downloads the pinned gitlab-runner binary to `gitlab-runner/<version>/` if missing (clears quarantine xattr), writes a template config pointing the custom executor at `cliPath`, runs `gitlab-runner register --non-interactive`, then starts the runner as a supervised child process. Re-running replaces the previous registration.
+- **Response**: gitlab.status payload
+
+### gitlab.status
+- **Purpose**: Report managed runner state
+- **Response**: `{"state": "not_configured|downloading|registering|running|stopped|error: ...", "configured": bool, "running": bool, "version": "v18.11.2", "binaryDownloaded": bool, "configPath": "..."}`
+
+### gitlab.start
+- **Purpose**: Start the runner from an existing config (also happens automatically on daemon launch)
+- **Response**: gitlab.status payload
+
+### gitlab.stop
+- **Purpose**: Terminate the supervised runner process
+- **Response**: gitlab.status payload
+
 ---
 
 ## OCI Image Architecture
@@ -655,7 +680,7 @@ VZVirtualMachineConfiguration {
     bootLoader: VZMacOSBootLoader()
 
     cpuCount: max(4, minimumAllowedCPUCount)
-    memorySize: max(8GB, minimumAllowedMemorySize)
+    memorySize: max(16GB, minimumAllowedMemorySize)
 
     storageDevices: [
         VZVirtioBlockDeviceConfiguration(

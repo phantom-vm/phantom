@@ -45,6 +45,12 @@ phantom vm list | start | stop | vnc | screenshot
 phantom ipsw list | pull
 ```
 
+Turn the Mac into a GitLab CI runner (auto-downloads and manages `gitlab-runner`, each job runs in a fresh VM):
+
+```
+phantom gitlab-runner setup --token glrt-xxx --image macos-tahoe
+```
+
 ## Automated Image Building
 
 `phantom image build <name>` turns an IPSW into a ready-to-use, agent-installed

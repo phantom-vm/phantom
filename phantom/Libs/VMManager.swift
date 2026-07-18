@@ -39,6 +39,7 @@ class VMManager {
 
     let ipswManager: IPSWManager
     let imageManager: OCIImageManager
+    let gitlabRunnerManager: GitLabRunnerManager
 
     private(set) var vmInstances: [String: VMInstance] = [:]
     private(set) var vncServers: [String: VNCServer] = [:]
@@ -51,13 +52,16 @@ class VMManager {
     init() {
         let ipswsDir = baseDir.appendingPathComponent("ipsws", isDirectory: true)
         let imagesDir = baseDir.appendingPathComponent("images", isDirectory: true)
+        let runnerDir = baseDir.appendingPathComponent("gitlab-runner", isDirectory: true)
         var logFunc: ((String) -> Void)!
         ipswManager = IPSWManager(ipswsDir: ipswsDir, log: { msg in logFunc(msg) })
         imageManager = OCIImageManager(imagesDir: imagesDir, log: { msg in logFunc(msg) })
+        gitlabRunnerManager = GitLabRunnerManager(runnerDir: runnerDir, log: { msg in logFunc(msg) })
         logFunc = { [weak self] msg in self?.log(msg) }
         ensureDirectories()
         ipswManager.loadExisting()
         loadExistingVMs()
+        Task { await gitlabRunnerManager.autostart() }
     }
 
     // MARK: - Public API
@@ -93,9 +97,9 @@ class VMManager {
 
             log("Creating VM bundle at \(generatedId)...")
 
-            // Disk image — 64GB sparse
+            // Disk image — 90GB sparse
             let diskPath = bundlePath.appendingPathComponent("disk.img")
-            try createDiskImage(at: diskPath, sizeGB: 64)
+            try createDiskImage(at: diskPath, sizeGB: 90)
 
             // Auxiliary storage
             let auxPath = bundlePath.appendingPathComponent("AuxiliaryStorage")
@@ -754,7 +758,7 @@ class VMManager {
         )
         config.bootLoader = VZMacOSBootLoader()
         config.cpuCount = max(VZVirtualMachineConfiguration.minimumAllowedCPUCount, 4)
-        config.memorySize = max(VZVirtualMachineConfiguration.minimumAllowedMemorySize, 8 * 1024 * 1024 * 1024)
+        config.memorySize = max(VZVirtualMachineConfiguration.minimumAllowedMemorySize, 16 * 1024 * 1024 * 1024)
 
         let diskPath = bundlePath.appendingPathComponent("disk.img")
         let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: diskPath, readOnly: false)

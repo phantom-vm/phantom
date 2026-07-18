@@ -2,10 +2,13 @@
 
 Phantom can serve as a [GitLab custom executor](https://docs.gitlab.com/runner/executors/custom.html), running each CI job inside an ephemeral macOS VM. The VM is cloned from a base template, used for the job, then deleted.
 
+Phantom manages GitLab Runner for you: the daemon downloads the `gitlab-runner` binary, registers it against your GitLab instance, and supervises the runner process. No Homebrew install or `config.toml` editing needed.
+
 ## How It Works
 
 ```
 GitLab Runner          phantom daemon         VM
+(managed by daemon)          │                 │
       │                      │                 │
       │  prepare              │                 │
       ├─────────────────────▶│ Create VM from  │
@@ -30,84 +33,64 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
 ## Prerequisites
 
 1. **Phantom daemon running** on the host Mac
-2. **GitLab Runner installed** on the same Mac (`brew install gitlab-runner`)
-3. **A base image** with `phantom-agent` installed (see [create-image.md](../create-image.md))
+2. **A base image** with `phantom-agent` installed (see [create-image.md](../create-image.md))
 
 ## Setup
 
-### 1. Prepare a base image
+1. In GitLab, create a runner (**Settings → CI/CD → Runners → New project runner**) and copy the `glrt-...` token.
 
-Build a VM with `phantom-agent` installed, save it as a local image, and optionally push it to a registry for reuse across machines:
-
-```bash
-phantom image list
-# NAME                 SIZE
-# macos-sequoia-base   42.3 GB   ← use this as your base image
-```
-
-### 2. Register a GitLab Runner
+2. Run:
 
 ```bash
-gitlab-runner register \
-  --url https://gitlab.com \
-  --token <your-runner-token> \
-  --name "phantom-macos" \
-  --executor custom
+phantom gitlab-runner setup --token glrt-xxx --image tahoe-base
 ```
 
-### 3. Configure the runner
+Options:
 
-Edit `~/.gitlab-runner/config.toml` and add the custom executor config to your runner section:
+| Flag | Description |
+|------|-------------|
+| `--token <token>` | Runner authentication token (required) |
+| `--image <name>` | Base image for job VMs, see `phantom image list` (required) |
+| `--url <url>` | GitLab instance URL (default: `https://gitlab.com`) |
+| `--concurrent <n>` | Max concurrent jobs (default: 1) |
 
-```toml
-[[runners]]
-  name = "phantom-macos"
-  url = "https://gitlab.com"
-  token = "<your-runner-token>"
-  executor = "custom"
-
-  [runners.custom]
-    prepare_exec      = "phantom"
-    prepare_exec_args = ["gitlab-runner", "prepare"]
-    run_exec          = "phantom"
-    run_exec_args     = ["gitlab-runner", "run"]
-    cleanup_exec      = "phantom"
-    cleanup_exec_args = ["gitlab-runner", "cleanup"]
-
-  [runners.env]
-    PHANTOM_BASE_IMAGE = "macos-sequoia-base"
-```
-
-Replace `macos-sequoia-base` with your local image name (`phantom image list`).
+That's it. The daemon downloads `gitlab-runner` (pinned version, stored under `~/Library/Application Support/phantom/gitlab-runner/<version>/`), registers it, and starts it. The runner restarts automatically whenever the daemon launches.
 
 > **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. This is slower than a VM clone but guarantees a clean, reproducible environment from a pinned image.
 
-### 4. Start the runner
+### Managing the runner
 
 ```bash
-gitlab-runner run
+phantom gitlab-runner status   # state, version, config path
+phantom gitlab-runner stop     # stop the runner process
+phantom gitlab-runner start    # start it again
 ```
+
+Re-running `setup` replaces the previous registration (e.g. to change the base image or point at a different GitLab instance).
 
 ## How CI Variables Are Passed
 
 GitLab Runner passes CI variables to the executor as `CUSTOM_ENV_<NAME>` environment variables. Phantom strips the prefix and injects them as `export` statements at the top of each job script before executing it in the VM.
 
-This means all standard CI variables (`CI_COMMIT_SHA`, `CI_PROJECT_NAME`, etc.) are available inside the VM just as they would be in any other executor.
+This means all standard CI variables (`CI_COMMIT_SHA`, `CI_PROJECT_NAME`, etc.) are available inside the VM just as they would be in any other executor. The base image name is passed the same way: setup writes it into the runner config as the `PHANTOM_BASE_IMAGE` environment variable.
 
 ## Concurrent Jobs
 
-Each job gets its own VM. Concurrent jobs are supported — configure `concurrent` in `config.toml`:
-
-```toml
-concurrent = 4
-```
+Each job gets its own VM. Concurrent jobs are supported — pass `--concurrent <n>` to setup.
 
 Each job's script is base64-encoded and piped directly into the VM over vsock, so there are no shared files and no risk of collisions between concurrent jobs.
 
+## Under the Hood
+
+Setup generates `~/Library/Application Support/phantom/gitlab-runner/config.toml` with a `[runners.custom]` section that points `prepare_exec`/`run_exec`/`cleanup_exec` at the phantom CLI (`phantom gitlab-runner prepare|run|cleanup`). The daemon runs `gitlab-runner run --config <that file>` as a supervised child process — your `~/.gitlab-runner/` (if any) is never touched.
+
 ## Troubleshooting
 
-**`CUSTOM_ENV_PHANTOM_BASE_IMAGE not set`**
-Add `PHANTOM_BASE_IMAGE` to `[runners.env]` in `config.toml`.
+**`Registration failed`**
+The token is invalid or expired. Create a new runner in GitLab and re-run setup with the fresh `glrt-...` token.
+
+**`Runner exited unexpectedly` in `phantom gitlab-runner status`**
+Check the daemon logs (runner output is forwarded with a `[gitlab-runner]` prefix), then `phantom gitlab-runner start`.
 
 **`VM create failed` / `Start failed`**
 Check that the phantom daemon is running and the image name is correct (`phantom image list`).

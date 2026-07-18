@@ -104,6 +104,14 @@ struct APIHandlers {
             return try await handleImagesPush(params: request.params)
         case "image.pull":
             return try await handleImagesPull(params: request.params)
+        case "gitlab.setup":
+            return try await handleGitLabSetup(params: request.params)
+        case "gitlab.status":
+            return try await handleGitLabStatus()
+        case "gitlab.start":
+            return try await handleGitLabStart()
+        case "gitlab.stop":
+            return try await handleGitLabStop()
         default:
             throw APIHandlerError.unknownMethod(request.method)
         }
@@ -558,6 +566,58 @@ struct APIHandlers {
             "status": "started",
             "message": "Pulling image from \(reference)"
         ])
+    }
+
+    private func handleGitLabSetup(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let url = params?["url"]?.value as? String else {
+            throw APIHandlerError.missingParam("url")
+        }
+        guard let token = params?["token"]?.value as? String else {
+            throw APIHandlerError.missingParam("token")
+        }
+        guard let image = params?["image"]?.value as? String else {
+            throw APIHandlerError.missingParam("image")
+        }
+        guard let cliPath = params?["cliPath"]?.value as? String else {
+            throw APIHandlerError.missingParam("cliPath")
+        }
+        let concurrent = params?["concurrent"]?.value as? Int
+
+        guard vmManager.imageManager.imageExists(image) else {
+            throw APIHandlerError.invalidParams("Image not found: \(image)")
+        }
+
+        do {
+            try await vmManager.gitlabRunnerManager.setup(
+                url: url,
+                token: token,
+                baseImage: image,
+                cliPath: cliPath,
+                concurrent: concurrent
+            )
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
+
+        return AnyCodable(vmManager.gitlabRunnerManager.statusInfo())
+    }
+
+    private func handleGitLabStatus() async throws -> AnyCodable {
+        AnyCodable(vmManager.gitlabRunnerManager.statusInfo())
+    }
+
+    private func handleGitLabStart() async throws -> AnyCodable {
+        do {
+            try await vmManager.gitlabRunnerManager.start()
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
+        return AnyCodable(vmManager.gitlabRunnerManager.statusInfo())
+    }
+
+    private func handleGitLabStop() async throws -> AnyCodable {
+        vmManager.gitlabRunnerManager.stop()
+        return AnyCodable(vmManager.gitlabRunnerManager.statusInfo())
     }
 
     private func handleImagesStatus() async throws -> AnyCodable {

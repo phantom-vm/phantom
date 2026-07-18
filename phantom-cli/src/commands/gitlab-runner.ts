@@ -1,5 +1,7 @@
 import { sendRequest, sendStreamingRequest } from "../lib/api";
 import { unlinkSync } from "node:fs";
+import { basename } from "node:path";
+import { homedir } from "node:os";
 
 // GitLab custom executor exit codes (set by runner as env vars)
 const SYSTEM_FAILURE = parseInt(process.env.SYSTEM_FAILURE_EXIT_CODE ?? "1");
@@ -130,6 +132,70 @@ async function cleanup() {
   console.error(`[phantom] Cleanup complete`);
 }
 
+// The daemon's runner config invokes this CLI as the custom executor, so it
+// needs an absolute path to the binary. In dev mode (`bun run src/main.ts`)
+// execPath points at bun itself — fall back to the installed binary.
+function cliBinaryPath(): string {
+  if (basename(process.execPath) !== "bun") return process.execPath;
+  return `${homedir()}/.local/bin/phantom`;
+}
+
+async function setup(args: string[]) {
+  let url = "https://gitlab.com";
+  let token: string | undefined;
+  let image: string | undefined;
+  let concurrent: number | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--url" && i + 1 < args.length) url = args[++i]!;
+    else if (args[i] === "--token" && i + 1 < args.length) token = args[++i];
+    else if (args[i] === "--image" && i + 1 < args.length) image = args[++i];
+    else if (args[i] === "--concurrent" && i + 1 < args.length) concurrent = parseInt(args[++i]!);
+  }
+
+  if (!token || !image) {
+    console.error("Usage: phantom gitlab-runner setup --token <glrt-...> --image <name> [--url <gitlab-url>] [--concurrent <n>]");
+    console.error("\nOptions:");
+    console.error("  --token <token>      Runner authentication token (create under Settings → CI/CD → Runners)");
+    console.error("  --image <name>       Base image for job VMs (phantom image list)");
+    console.error("  --url <url>          GitLab instance URL (default: https://gitlab.com)");
+    console.error("  --concurrent <n>     Max concurrent jobs (default: 1)");
+    process.exit(1);
+  }
+
+  console.log("Setting up GitLab runner (downloads gitlab-runner on first run, may take a minute)...");
+  const resp = await sendRequest(
+    {
+      method: "gitlab.setup",
+      params: { url, token, image, cliPath: cliBinaryPath(), concurrent },
+    },
+    { timeoutMs: 600_000 } // binary download + registration
+  );
+  if (resp.error) {
+    console.error(`Setup failed: ${resp.error.message}`);
+    process.exit(1);
+  }
+  printStatus(resp.result);
+  console.log("\nRunner is ready — CI jobs will now run in ephemeral phantom VMs.");
+}
+
+function printStatus(result: any) {
+  console.log(`State:      ${result?.state}`);
+  console.log(`Version:    ${result?.version}`);
+  console.log(`Configured: ${result?.configured}`);
+  console.log(`Running:    ${result?.running}`);
+  if (result?.configPath) console.log(`Config:     ${result.configPath}`);
+}
+
+async function daemonCommand(method: string) {
+  const resp = await sendRequest({ method }, { timeoutMs: 600_000 });
+  if (resp.error) {
+    console.error(`Error: ${resp.error.message}`);
+    process.exit(1);
+  }
+  printStatus(resp.result);
+}
+
 export async function gitlabRunner(...args: string[]) {
   const subcommand = args[0];
 
@@ -144,9 +210,17 @@ export async function gitlabRunner(...args: string[]) {
     await run(scriptPath);
   } else if (subcommand === "cleanup") {
     await cleanup();
+  } else if (subcommand === "setup") {
+    await setup(args.slice(1));
+  } else if (subcommand === "status") {
+    await daemonCommand("gitlab.status");
+  } else if (subcommand === "start") {
+    await daemonCommand("gitlab.start");
+  } else if (subcommand === "stop") {
+    await daemonCommand("gitlab.stop");
   } else {
     console.error(`Unknown subcommand: ${subcommand ?? "(none)"}`);
-    console.error("Usage: phantom gitlab-runner <prepare|run|cleanup>");
+    console.error("Usage: phantom gitlab-runner <setup|status|start|stop|prepare|run|cleanup>");
     process.exit(1);
   }
 }

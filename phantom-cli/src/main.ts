@@ -72,8 +72,10 @@ Commands:
   image list|delete|save|push|pull|build
                                   Manage images
   image build <name>              Build a base image end-to-end (IPSW → agent → save)
+  gitlab-runner setup|status|start|stop
+                                  Managed GitLab CI runner (auto-downloads gitlab-runner)
   gitlab-runner prepare|run|cleanup
-                                  GitLab custom executor integration
+                                  GitLab custom executor hooks (called by the runner)
   health                          Check daemon status
 `);
 }
