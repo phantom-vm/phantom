@@ -42,7 +42,7 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
 2. Run:
 
 ```bash
-phantom gitlab-runner setup --token glrt-xxx --image tahoe-base
+phantom gitlab-runner setup --token glrt-xxx
 ```
 
 Options:
@@ -50,11 +50,22 @@ Options:
 | Flag | Description |
 |------|-------------|
 | `--token <token>` | Runner authentication token (required) |
-| `--image <name>` | Base image for job VMs, see `phantom image list` (required) |
 | `--url <url>` | GitLab instance URL (default: `https://gitlab.com`) |
 | `--concurrent <n>` | Max concurrent jobs (default: 1) |
 
 That's it. The daemon downloads `gitlab-runner` (pinned version, stored under `~/Library/Application Support/phantom/gitlab-runner/<version>/`), registers it, and starts it. The runner restarts automatically whenever the daemon launches.
+
+3. Point your jobs at a phantom image with the `image:` keyword (job-level or `default:`), using a local image name from `phantom image list`:
+
+```yaml
+build:
+  image: tahoe-base
+  tags: [phantom]
+  script:
+    - xcodebuild ...
+```
+
+Jobs without an `image:` fail with a clear error — the runner itself has no image configuration.
 
 > **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. This is slower than a VM clone but guarantees a clean, reproducible environment from a pinned image.
 
@@ -68,11 +79,15 @@ phantom gitlab-runner start    # start it again
 
 Re-running `setup` replaces the previous registration (e.g. to change the base image or point at a different GitLab instance).
 
+## Job Execution User
+
+Job scripts run inside the VM as the `admin` user — macOS CI tooling (Homebrew, xcodebuild, simulators) misbehaves as root. Set a `PHANTOM_EXEC_USER` CI variable to override (`root` runs the script unwrapped as the agent's root user).
+
 ## How CI Variables Are Passed
 
-GitLab Runner passes CI variables to the executor as `CUSTOM_ENV_<NAME>` environment variables. Phantom strips the prefix and injects them as `export` statements at the top of each job script before executing it in the VM.
+GitLab Runner passes CI variables to the executor as `CUSTOM_ENV_<NAME>` environment variables. Phantom strips the prefix and injects them as `export` statements at the top of each job script before executing it in the VM. The job's `image:` keyword arrives the same way (`CI_JOB_IMAGE`) and selects the phantom image to boot.
 
-This means all standard CI variables (`CI_COMMIT_SHA`, `CI_PROJECT_NAME`, etc.) are available inside the VM just as they would be in any other executor. The base image name is passed the same way: setup writes it into the runner config as the `PHANTOM_BASE_IMAGE` environment variable.
+This means all standard CI variables (`CI_COMMIT_SHA`, `CI_PROJECT_NAME`, etc.) are available inside the VM just as they would be in any other executor.
 
 ## Concurrent Jobs
 

@@ -497,9 +497,9 @@ Or on error:
 - **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
 
 ### gitlab.setup
-- **Params**: `url` (string), `token` (string), `image` (string), `cliPath` (string), `concurrent` (int, optional)
+- **Params**: `url` (string), `token` (string), `cliPath` (string), `concurrent` (int, optional)
 - **Purpose**: One-shot managed GitLab Runner setup
-- **Implementation**: Downloads the pinned gitlab-runner binary to `gitlab-runner/<version>/` if missing (clears quarantine xattr), writes a template config pointing the custom executor at `cliPath`, runs `gitlab-runner register --non-interactive`, then starts the runner as a supervised child process. Re-running replaces the previous registration.
+- **Implementation**: Downloads the pinned gitlab-runner binary to `gitlab-runner/<version>/` if missing (clears quarantine xattr), writes a template config pointing the custom executor at `cliPath`, runs `gitlab-runner register --non-interactive`, then starts the runner as a supervised child process. Re-running replaces the previous registration. Jobs select their VM image via the `image:` keyword (`CUSTOM_ENV_CI_JOB_IMAGE`) and run as `admin` by default (`PHANTOM_EXEC_USER` overrides).
 - **Response**: gitlab.status payload
 
 ### gitlab.status

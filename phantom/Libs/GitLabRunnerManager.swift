@@ -85,8 +85,9 @@ class GitLabRunnerManager {
     }
 
     /// One-shot setup: download binary, register against GitLab, start the runner.
-    /// Re-running replaces the previous registration.
-    func setup(url: String, token: String, baseImage: String, cliPath: String, concurrent: Int?) async throws {
+    /// Re-running replaces the previous registration. Jobs pick their VM image
+    /// via the `image:` keyword — the runner has no image configuration.
+    func setup(url: String, token: String, cliPath: String, concurrent: Int?) async throws {
         if !isBinaryDownloaded {
             try await downloadBinary()
         }
@@ -100,7 +101,7 @@ class GitLabRunnerManager {
             try? FileManager.default.removeItem(at: configPath)
         }
 
-        try writeTemplate(baseImage: baseImage, cliPath: cliPath)
+        try writeTemplate(cliPath: cliPath)
 
         state = .registering
         log("Registering runner with \(url)...")
@@ -185,12 +186,11 @@ class GitLabRunnerManager {
 
     // MARK: - Config
 
-    private func writeTemplate(baseImage: String, cliPath: String) throws {
+    private func writeTemplate(cliPath: String) throws {
         let template = """
         [[runners]]
           builds_dir = "/tmp/builds"
           cache_dir = "/tmp/cache"
-          environment = ["PHANTOM_BASE_IMAGE=\(baseImage)"]
           [runners.custom]
             prepare_exec = "\(cliPath)"
             prepare_args = ["gitlab-runner", "prepare"]

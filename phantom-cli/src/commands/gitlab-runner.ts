@@ -22,9 +22,10 @@ function stateFilePath(jobId: string): string {
 
 async function prepare() {
   const jobId = getJobId();
-  const baseImage = process.env.CUSTOM_ENV_PHANTOM_BASE_IMAGE;
+  // The image comes from the job's `image:` keyword (default: or job-level)
+  const baseImage = process.env.CUSTOM_ENV_CI_JOB_IMAGE;
   if (!baseImage) {
-    console.error("[phantom] Error: CUSTOM_ENV_PHANTOM_BASE_IMAGE not set");
+    console.error("[phantom] Error: no image specified — set 'image: <name>' in the job (phantom image list)");
     process.exit(SYSTEM_FAILURE);
   }
 
@@ -100,10 +101,18 @@ async function run(scriptPath: string) {
   const base64 = Buffer.from(fullScript).toString("base64");
   const command = `printf '%s' '${base64}' | base64 -d | sh`;
 
+  // Job scripts run as the admin user by default — macOS CI tooling (brew,
+  // xcodebuild, simulators) misbehaves as root. Override with a
+  // PHANTOM_EXEC_USER CI variable; "root" skips the user wrap entirely.
+  const execUser = process.env.CUSTOM_ENV_PHANTOM_EXEC_USER ?? "admin";
+
   // Execute in VM with streaming output
   let exitCode = BUILD_FAILURE;
   const result = await sendStreamingRequest(
-    { method: "vm.execStream", params: { vmId, command } },
+    {
+      method: "vm.execStream",
+      params: { vmId, command, ...(execUser !== "root" && { user: execUser }) },
+    },
     (chunk) => {
       if (chunk.type === "stdout" && chunk.data) process.stdout.write(chunk.data);
       if (chunk.type === "stderr" && chunk.data) process.stderr.write(chunk.data);
@@ -143,23 +152,21 @@ function cliBinaryPath(): string {
 async function setup(args: string[]) {
   let url = "https://gitlab.com";
   let token: string | undefined;
-  let image: string | undefined;
   let concurrent: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--url" && i + 1 < args.length) url = args[++i]!;
     else if (args[i] === "--token" && i + 1 < args.length) token = args[++i];
-    else if (args[i] === "--image" && i + 1 < args.length) image = args[++i];
     else if (args[i] === "--concurrent" && i + 1 < args.length) concurrent = parseInt(args[++i]!);
   }
 
-  if (!token || !image) {
-    console.error("Usage: phantom gitlab-runner setup --token <glrt-...> --image <name> [--url <gitlab-url>] [--concurrent <n>]");
+  if (!token) {
+    console.error("Usage: phantom gitlab-runner setup --token <glrt-...> [--url <gitlab-url>] [--concurrent <n>]");
     console.error("\nOptions:");
     console.error("  --token <token>      Runner authentication token (create under Settings → CI/CD → Runners)");
-    console.error("  --image <name>       Base image for job VMs (phantom image list)");
     console.error("  --url <url>          GitLab instance URL (default: https://gitlab.com)");
     console.error("  --concurrent <n>     Max concurrent jobs (default: 1)");
+    console.error("\nJobs choose their VM image with the 'image:' keyword (phantom image list).");
     process.exit(1);
   }
 
@@ -167,7 +174,7 @@ async function setup(args: string[]) {
   const resp = await sendRequest(
     {
       method: "gitlab.setup",
-      params: { url, token, image, cliPath: cliBinaryPath(), concurrent },
+      params: { url, token, cliPath: cliBinaryPath(), concurrent },
     },
     { timeoutMs: 600_000 } // binary download + registration
   );

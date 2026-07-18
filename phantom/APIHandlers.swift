@@ -575,23 +575,15 @@ struct APIHandlers {
         guard let token = params?["token"]?.value as? String else {
             throw APIHandlerError.missingParam("token")
         }
-        guard let image = params?["image"]?.value as? String else {
-            throw APIHandlerError.missingParam("image")
-        }
         guard let cliPath = params?["cliPath"]?.value as? String else {
             throw APIHandlerError.missingParam("cliPath")
         }
         let concurrent = params?["concurrent"]?.value as? Int
 
-        guard vmManager.imageManager.imageExists(image) else {
-            throw APIHandlerError.invalidParams("Image not found: \(image)")
-        }
-
         do {
             try await vmManager.gitlabRunnerManager.setup(
                 url: url,
                 token: token,
-                baseImage: image,
                 cliPath: cliPath,
                 concurrent: concurrent
             )
