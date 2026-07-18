@@ -13,6 +13,38 @@ Run and manage macOS virtual machines on your Mac from the command line.
 - Network.framework (TCP server, zero dependencies)
 - Storage: `~/Library/Application Support/phantom/`
 
+## Usage
+
+Build a base image from a downloaded IPSW — one unattended command (run from the repo root so it finds `provision/`):
+
+```
+phantom image build macos-tahoe --agent-dir phantom-agent
+```
+
+Deploy a VM and run commands in it over vsock:
+
+```
+phantom vm deploy --image macos-tahoe                   # boot a VM from the image
+phantom vm exec <vm-id> -- sw_vers                      # run a command (as root)
+phantom vm exec <vm-id> --user admin -- open -a Notes   # run as the admin GUI user
+phantom vm delete <vm-id>
+```
+
+Other deploy sources:
+
+```
+phantom vm deploy --ipsw <ipsw-id>          # fresh macOS install from an IPSW
+phantom vm deploy --template-vm <vm-id>     # fast APFS copy-on-write clone
+```
+
+Manage images, VMs, and IPSWs:
+
+```
+phantom image list | save | push | pull | delete
+phantom vm list | start | stop | vnc | screenshot
+phantom ipsw list | pull
+```
+
 ## Automated Image Building
 
 `phantom image build <name>` turns an IPSW into a ready-to-use, agent-installed
