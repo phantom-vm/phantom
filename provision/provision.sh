@@ -31,4 +31,14 @@ echo "Disabling screensaver and screen lock..."
 defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0
 sysadminctl -screenLock off -password "$USER_PASS" 2>/dev/null || true
 
+echo "Installing Xcode Command Line Tools (needed for git in CI)..."
+# Headless CLT install: the marker file makes softwareupdate list CLT packages
+touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+CLT_LABEL=$(softwareupdate -l 2>/dev/null | sed -n 's/^.*Label: \(Command Line Tools for Xcode.*\)$/\1/p' | sort | tail -1)
+[ -n "$CLT_LABEL" ] || { echo "No CLT package found in softwareupdate catalog"; exit 1; }
+echo "Installing: $CLT_LABEL"
+softwareupdate -i "$CLT_LABEL"
+rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+git --version
+
 echo "PROVISION_DONE"
