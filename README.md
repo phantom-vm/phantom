@@ -15,7 +15,7 @@ Run and manage macOS virtual machines on your Mac from the command line.
 
 ## Usage
 
-Build a base image from a downloaded IPSW — one unattended command (run from the repo root so it finds `provision/`):
+Build a base image from a downloaded IPSW — one unattended command (run from the repo root so it finds `provision/`; image-authoring commands like `ipsw` and `image build` only exist in the admin CLI build, `bun run install-bin` — the user build from `bun run build-user-bin` omits them, since regular users start from a published base image):
 
 ```
 phantom image build macos-tahoe --agent-dir phantom-agent

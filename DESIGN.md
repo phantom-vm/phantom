@@ -90,6 +90,8 @@ phantom/
 
 Single-file CLI that sends JSON-RPC requests to the daemon.
 
+**Two build flavors** (compile-time `--define process.env.PHANTOM_ADMIN`): the admin build (`bun run install-bin`) includes the image-authoring commands (`ipsw`, `image build`, `vm boot-script`); the user build (`bun run build-user-bin`) eliminates them at compile time — regular users start from a published base image. This is CLI UX only: the daemon API keeps all endpoints.
+
 **File**: `phantom-cli/src/main.ts` (260 lines)
 
 **Command Flow**:

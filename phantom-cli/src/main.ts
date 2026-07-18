@@ -8,13 +8,21 @@ import { route } from "./router";
 
 // MARK: - Command Registry
 
+// Image-authoring commands (IPSW download, Setup Assistant automation, image
+// build) only exist in the admin build — `bun run install-bin` bakes
+// PHANTOM_ADMIN in via --define, and the user build eliminates the code
+// entirely. Regular users start from a published base image.
+const ADMIN = process.env.PHANTOM_ADMIN === "1";
+
 const commands = {
-  ipsw: {
-    subcommands: {
-      list: { handler: ipswList as (arg?: string) => Promise<void> },
-      pull: { handler: ipswPull as (arg?: string) => Promise<void> },
+  ...(ADMIN && {
+    ipsw: {
+      subcommands: {
+        list: { handler: ipswList as (arg?: string) => Promise<void> },
+        pull: { handler: ipswPull as (arg?: string) => Promise<void> },
+      },
     },
-  },
+  }),
   vm: {
     subcommands: {
       deploy: { multiArgHandler: vmDeploy },
@@ -24,7 +32,7 @@ const commands = {
       exec: { multiArgHandler: vmExec },
       display: { handler: vmDisplay as (arg?: string) => Promise<void> },
       vnc: { multiArgHandler: vmVnc },
-      "boot-script": { multiArgHandler: vmBootScript },
+      ...(ADMIN && { "boot-script": { multiArgHandler: vmBootScript } }),
       screenshot: { multiArgHandler: vmScreenshot },
       delete: { handler: vmDelete as (arg?: string) => Promise<void> },
     },
@@ -36,7 +44,7 @@ const commands = {
       save: { multiArgHandler: imageSave },
       push: { multiArgHandler: imagePush },
       pull: { multiArgHandler: imagePull },
-      build: { multiArgHandler: imageBuild },
+      ...(ADMIN && { build: { multiArgHandler: imageBuild } }),
     },
     handler: imageList as (arg?: string) => Promise<void>,
   },
@@ -60,24 +68,28 @@ const commands = {
 // MARK: - Help
 
 function showHelp() {
+  const adminLines = ADMIN
+    ? `  ipsw list|pull                  Manage macOS IPSWs
+  image build <name>              Build a base image end-to-end (IPSW → agent → save)
+  vm boot-script                  Drive Setup Assistant over VNC (image building)
+`
+    : "";
   console.log(`phantom - macOS VM manager CLI
 
 Usage:
   phantom <command> [options]
 
 Commands:
-  ipsw list|pull                  Manage macOS IPSWs
-  vm deploy|list|start|stop|exec|display|vnc|boot-script|screenshot|delete
+  vm deploy|list|start|stop|exec|display|vnc|screenshot|delete
                                   Manage VMs
-  image list|delete|save|push|pull|build
+  image list|delete|save|push|pull
                                   Manage images
-  image build <name>              Build a base image end-to-end (IPSW → agent → save)
   gitlab-runner setup|status|start|stop
                                   Managed GitLab CI runner (auto-downloads gitlab-runner)
   gitlab-runner prepare|run|cleanup
                                   GitLab custom executor hooks (called by the runner)
   health                          Check daemon status
-`);
+${adminLines}`);
 }
 
 // MARK: - Main
