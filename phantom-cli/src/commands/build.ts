@@ -110,10 +110,11 @@ async function run(opts: BuildOptions) {
 
   // 5. Provision over vsock (agent is up now)
   step(5, "Provisioning over vsock");
+  // 30 min: provisioning includes the headless CLT download + install
   const provRes = await call(
     "vm.exec",
     { vmId, command: provisionBody, waitForAgent: true },
-    600_000
+    1_800_000
   );
   if (provRes.exitCode !== 0) {
     throw new Error(`provision script exited ${provRes.exitCode}: ${provRes.stderr ?? ""}`);
