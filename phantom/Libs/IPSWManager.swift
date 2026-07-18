@@ -82,39 +82,67 @@ class IPSWManager {
             }
 
             log("Starting download...")
-            state = .downloading(progress: 0)
-
-            let delegate = DownloadDelegate(
-                destination: destination,
-                onProgress: { [weak self] progress in
-                    Task { @MainActor in
-                        self?.state = .downloading(progress: progress)
-                    }
-                },
-                onComplete: { [weak self] result in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        switch result {
-                        case .success(let path):
-                            self.log("IPSW saved to \(path.path)")
-                            self.state = .downloaded(path: path)
-                        case .failure(let error):
-                            self.log("Download failed: \(error.localizedDescription)")
-                            self.state = .error(error.localizedDescription)
-                        }
-                    }
-                }
-            )
-            self.downloadDelegate = delegate
-
-            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-            let task = session.downloadTask(with: url)
-            self.downloadTask = task
-            task.resume()
+            startDownload(from: url, to: destination)
         } catch {
             log("Failed to fetch IPSW info: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
         }
+    }
+
+    /// Download a specific IPSW by direct URL (catalog-driven; the caller is
+    /// responsible for validating the URL against Apple's CDN)
+    func download(url: URL, build: String) async {
+        switch state {
+        case .fetching, .downloading:
+            log("A download is already in progress")
+            return
+        default:
+            break
+        }
+
+        let destination = ipswsDir.appendingPathComponent("\(build).ipsw")
+        info = build
+
+        if FileManager.default.fileExists(atPath: destination.path) {
+            log("IPSW \(build) already downloaded")
+            state = .downloaded(path: destination)
+            return
+        }
+
+        log("Starting download of \(build) from \(url.host ?? "?")...")
+        startDownload(from: url, to: destination)
+    }
+
+    private func startDownload(from url: URL, to destination: URL) {
+        state = .downloading(progress: 0)
+
+        let delegate = DownloadDelegate(
+            destination: destination,
+            onProgress: { [weak self] progress in
+                Task { @MainActor in
+                    self?.state = .downloading(progress: progress)
+                }
+            },
+            onComplete: { [weak self] result in
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch result {
+                    case .success(let path):
+                        self.log("IPSW saved to \(path.path)")
+                        self.state = .downloaded(path: path)
+                    case .failure(let error):
+                        self.log("Download failed: \(error.localizedDescription)")
+                        self.state = .error(error.localizedDescription)
+                    }
+                }
+            }
+        )
+        self.downloadDelegate = delegate
+
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        let task = session.downloadTask(with: url)
+        self.downloadTask = task
+        task.resume()
     }
 
     func list() -> [IPSWInfo] {

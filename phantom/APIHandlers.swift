@@ -65,7 +65,7 @@ struct APIHandlers {
         case "ipsw.list":
             return try await handleIpswList()
         case "ipsw.pull":
-            return try await handleIpswPull()
+            return try await handleIpswPull(params: request.params)
         case "ipsw.status":
             return try await handleIpswStatus()
         case "vm.list":
@@ -130,11 +130,33 @@ struct APIHandlers {
         }])
     }
 
-    private func handleIpswPull() async throws -> AnyCodable {
-        // Trigger download - happens async in background
-        await vmManager.ipswManager.download()
+    private func handleIpswPull(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        // Catalog-driven pull of a specific build. The URL comes from an
+        // external catalog via the CLI, so pin it to Apple's CDN — the daemon
+        // must not download restore images from anywhere else.
+        if let urlString = params?["url"]?.value as? String {
+            guard let build = params?["build"]?.value as? String else {
+                throw APIHandlerError.missingParam("build")
+            }
+            guard build.range(of: "^[A-Za-z0-9]+$", options: .regularExpression) != nil else {
+                throw APIHandlerError.invalidParams("Invalid build id: \(build)")
+            }
+            guard let url = URL(string: urlString),
+                  url.scheme == "https",
+                  url.host == "updates.cdn-apple.com",
+                  url.lastPathComponent.hasPrefix("UniversalMac_"),
+                  url.lastPathComponent.hasSuffix("_Restore.ipsw") else {
+                throw APIHandlerError.invalidParams("Refusing IPSW URL outside Apple's CDN: \(urlString)")
+            }
+            await vmManager.ipswManager.download(url: url, build: build)
+            return AnyCodable([
+                "status": "started",
+                "message": "IPSW \(build) download started"
+            ])
+        }
 
-        // Return current state
+        // No URL: resolve the latest supported restore image via Apple's API
+        await vmManager.ipswManager.download()
         return AnyCodable([
             "status": "started",
             "message": "IPSW download started"

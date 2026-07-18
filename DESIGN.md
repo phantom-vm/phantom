@@ -374,11 +374,12 @@ Or on error:
 - **Response**: `{"ipsws": [{"id": "25C56", "path": "...", "size": 17000000000}]}`
 
 ### ipsw.pull
+- **Params**: `url` (string, optional), `build` (string, optional — required with `url`)
 - **Purpose**: Download macOS restore IPSW
 - **Implementation**:
-  - Fetches `VZMacOSRestoreImage.latestSupported`
-  - Downloads via URLSession with progress tracking
-  - Returns immediately (async operation)
+  - Without params: fetches `VZMacOSRestoreImage.latestSupported` (Apple's API)
+  - With `url`+`build`: downloads a specific build to `<build>.ipsw`. The URL comes from the CLI's catalog (VirtualBuddy's curated `data/ipsws_v2.json`, an auditable public git repo), so the daemon pins it: https, host `updates.cdn-apple.com`, filename `UniversalMac_*_Restore.ipsw` — any other URL is refused. Restore image signatures are additionally verified by Virtualization.framework at install time.
+  - Downloads via URLSession with progress tracking, returns immediately (async operation)
 - **Response**: `{"status": "started", "message": "IPSW download started"}`
 
 ### ipsw.status

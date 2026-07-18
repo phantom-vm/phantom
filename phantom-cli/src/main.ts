@@ -18,7 +18,7 @@ const commands = {
   ...(ADMIN && {
     ipsw: {
       subcommands: {
-        list: { handler: ipswList as (arg?: string) => Promise<void> },
+        list: { multiArgHandler: ipswList },
         pull: { handler: ipswPull as (arg?: string) => Promise<void> },
       },
     },
