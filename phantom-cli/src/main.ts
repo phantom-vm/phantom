@@ -68,28 +68,53 @@ const commands = {
 // MARK: - Help
 
 function showHelp() {
-  const adminLines = ADMIN
-    ? `  ipsw list|pull                  Manage macOS IPSWs
-  image build <name>              Build a base image end-to-end (IPSW → agent → save)
-  vm boot-script                  Drive Setup Assistant over VNC (image building)
+  const adminSection = ADMIN
+    ? `
+Image authoring (admin build only)
+  ipsw list [--include-betas]           List downloadable macOS restore images
+  ipsw pull [version|build]             Download one (default: latest supported)
+  image build <name> [options]          IPSW → agent install → provision → save, unattended
+  vm boot-script <id> --file <script>   Drive Setup Assistant over VNC (used by image build)
 `
     : "";
-  console.log(`phantom - macOS VM manager CLI
 
-Usage:
-  phantom <command> [options]
+  console.log(`phantom — macOS VM manager CLI
 
-Commands:
-  vm deploy|list|start|stop|exec|display|vnc|screenshot|delete
-                                  Manage VMs
-  image list|delete|save|push|pull
-                                  Manage images
-  gitlab-runner setup|status|start|stop
-                                  Managed GitLab CI runner (auto-downloads gitlab-runner)
-  gitlab-runner prepare|run|cleanup
-                                  GitLab custom executor hooks (called by the runner)
-  health                          Check daemon status
-${adminLines}`);
+Usage
+  phantom <command> <subcommand> [options]
+
+VMs
+  vm deploy --image <name>              Boot a VM (also: --ipsw <id>, --template-vm <id>)
+  vm list                               List VMs and their state
+  vm start|stop <id>                    Start or stop a VM
+  vm exec <id> [--user <name>] -- <cmd> Run a command inside a VM over vsock
+  vm display <id>                       Open the VM's display window
+  vm vnc <id> [--stop]                  Start/stop host-side VNC (vnc://...)
+  vm screenshot <id> [--out <path>]     Capture the VM's framebuffer
+  vm delete <id>                        Delete a VM
+
+Images
+  image list                            List local images (default with no subcommand)
+  image save <vmId> <name>              Save a stopped VM as a local image
+  image push <name> <registry:tag>      Push a local image to an OCI registry
+  image pull <registry:tag> [--name]    Pull an image from an OCI registry
+  image delete <name>                   Delete a local image
+
+GitLab CI
+  gitlab-runner setup --token <glrt-...>  Register + start a managed runner (one-time)
+  gitlab-runner status|start|stop         Manage the runner process
+  gitlab-runner prepare|run|cleanup       Custom executor hooks (called by gitlab-runner itself)
+${adminSection}
+Other
+  health                                 Check daemon connectivity
+  help                                   Show this help
+
+Examples
+  phantom image list
+  phantom vm deploy --image tahoe-base && phantom vm list
+  phantom vm exec <id> --user admin -- sw_vers
+  phantom gitlab-runner setup --token glrt-xxx
+`);
 }
 
 // MARK: - Main
