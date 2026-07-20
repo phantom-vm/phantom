@@ -90,7 +90,7 @@ phantom/
 
 Single-file CLI that sends JSON-RPC requests to the daemon.
 
-**Two build flavors** (compile-time `--define process.env.PHANTOM_ADMIN`): the admin build (`bun run install-bin`) includes the image-authoring commands (`ipsw`, `image build`, `vm boot-script`); the user build (`bun run build-user-bin`) eliminates them at compile time — regular users start from a published base image. This is CLI UX only: the daemon API keeps all endpoints.
+**Two build flavors, two entry points**: `src/main.ts` (admin, `bun run install-bin`) includes the image-authoring commands (`ipsw`, `image build`, `vm boot-script`); `src/main-user.ts` (`bun run build-user-bin`) simply never imports `commands/ipsw.ts` or the admin-only exports from `commands/vm.ts`/`commands/image.ts`, so that code is absent from the compiled binary via plain unused-module elimination — regular users start from a published base image. (An earlier version of this gated commands behind a `--define`d runtime flag instead; that doesn't reliably dead-code-eliminate once a module is more than a couple of functions, so it was replaced with this static-import-graph split.) Each `commands/*.ts` module exports `Command` records — usage/description bundled with the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`). This is CLI UX/binary-size only: the daemon API keeps all endpoints regardless of which CLI build talks to it.
 
 **File**: `phantom-cli/src/main.ts` (260 lines)
 

@@ -1,4 +1,5 @@
 import { sendRequest } from "../lib/api";
+import type { Command } from "../command";
 
 export async function health() {
   const response = await sendRequest({ method: "health" });
@@ -11,3 +12,5 @@ export async function health() {
   console.log(`Phantom daemon: ${response.result?.status || "unknown"}`);
   console.log(`Version: ${response.result?.version || "unknown"}`);
 }
+
+export const command: Command = { usage: "", description: "Check daemon connectivity", handler: health };

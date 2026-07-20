@@ -1,4 +1,10 @@
 import { sendRequest, type IPSW } from "../lib/api";
+import type { Command } from "../command";
+
+// This whole module is admin-only — it's imported exclusively by the admin
+// entry (src/main.ts). The user entry (src/main-user.ts) never imports it,
+// so it and its network calls to the IPSW catalog are absent from that
+// build (plain unused-module elimination, not a runtime flag).
 
 // IPSW catalog: VirtualBuddy's curated manifest, maintained in a public git
 // repo (auditable history). The catalog only *points* — the daemon refuses
@@ -192,3 +198,8 @@ async function pollDownload() {
     }
   }
 }
+
+export const commands: Record<string, Command> = {
+  list: { usage: "[--include-betas]", description: "List downloadable macOS restore images", multiArgHandler: ipswList },
+  pull: { usage: "[version|build]", description: "Download one (default: latest supported)", handler: ipswPull as Command["handler"] },
+};

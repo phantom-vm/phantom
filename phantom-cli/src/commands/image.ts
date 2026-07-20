@@ -1,4 +1,6 @@
 import { sendRequest } from "../lib/api";
+import { imageBuild } from "./build";
+import type { Command } from "../command";
 
 export async function imageList() {
   const [response, statusResponse] = await Promise.all([
@@ -159,3 +161,23 @@ export async function imagePull(...args: string[]) {
   console.log(`Pulling image from ${reference}...`);
   console.log("Use 'phantom image list' to check progress.");
 }
+
+// Base commands, wired up by both CLI builds (see registry.ts).
+export const commands: Record<string, Command> = {
+  list: { usage: "", description: "List local images (default with no subcommand)", handler: imageList as Command["handler"] },
+  save: { usage: "<vmId> <name>", description: "Save a stopped VM as a local image", multiArgHandler: imageSave },
+  push: { usage: "<name> <registry:tag>", description: "Push a local image to an OCI registry", multiArgHandler: imagePush },
+  pull: { usage: "<registry:tag> [--name <localName>]", description: "Pull an image from an OCI registry", multiArgHandler: imagePull },
+  delete: { usage: "<name>", description: "Delete a local image", handler: imageDelete as Command["handler"] },
+};
+
+// Only imported by the admin entry (src/main.ts) — see the comment on
+// vm.ts's adminCommands for why this is a separate export rather than a
+// runtime-gated one.
+export const adminCommands: Record<string, Command> = {
+  build: {
+    usage: "<name> [options]",
+    description: "IPSW → agent install → provision → save, unattended",
+    multiArgHandler: imageBuild,
+  },
+};

@@ -1,4 +1,5 @@
 import { sendRequest, type VM } from "../lib/api";
+import type { Command } from "../command";
 
 export async function vmDeploy(...args: string[]) {
   // Parse flags
@@ -363,3 +364,31 @@ export async function vmDelete(vmId: string) {
 
   console.log(`VM ${vmId} deleted`);
 }
+
+// Base commands, wired up by both CLI builds (see registry.ts).
+export const commands: Record<string, Command> = {
+  deploy: { usage: "--image <name>", description: "Boot a VM (also: --ipsw <id>, --template-vm <id>)", multiArgHandler: vmDeploy },
+  list: { usage: "", description: "List VMs and their state", handler: vmList as Command["handler"] },
+  start: { usage: "<id>", description: "Start a VM", handler: vmStart as Command["handler"] },
+  stop: { usage: "<id>", description: "Stop a VM", handler: vmStop as Command["handler"] },
+  exec: { usage: "<id> [--user <name>] -- <cmd>", description: "Run a command inside a VM over vsock", multiArgHandler: vmExec },
+  display: { usage: "<id>", description: "Open the VM's display window", handler: vmDisplay as Command["handler"] },
+  vnc: { usage: "<id> [--stop]", description: "Start/stop host-side VNC (vnc://...)", multiArgHandler: vmVnc },
+  screenshot: { usage: "<id> [--out <path>]", description: "Capture the VM's framebuffer", multiArgHandler: vmScreenshot },
+  delete: { usage: "<id>", description: "Delete a VM", handler: vmDelete as Command["handler"] },
+};
+
+// Only imported by the admin entry (src/main.ts) — the user entry
+// (src/main-user.ts) never references vmBootScript, so it and everything it
+// pulls in (VNC keystroke injection, OCR) are absent from that build. This
+// relies on plain unused-export elimination, not a runtime flag: a ternary
+// gated by a `--define`d constant does NOT reliably fold away in Bun's
+// bundler once the codebase is more than a couple of functions (verified
+// empirically — don't reintroduce that pattern here).
+export const adminCommands: Record<string, Command> = {
+  "boot-script": {
+    usage: "<id> --file <script>",
+    description: "Drive Setup Assistant over VNC (used by image build)",
+    multiArgHandler: vmBootScript,
+  },
+};

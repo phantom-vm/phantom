@@ -2,6 +2,18 @@ import { sendRequest, sendStreamingRequest } from "../lib/api";
 import { unlinkSync } from "node:fs";
 import { basename } from "node:path";
 import { homedir } from "node:os";
+import type { Command } from "../command";
+
+// gitlab-runner takes its whole arg vector (see the export at the bottom) and
+// routes internally, so these entries have no handler — they exist purely to
+// document the pseudo-subcommands for help rendering.
+export const commands: Record<string, Command> = {
+  setup: { usage: "--token <glrt-...> [--url <url>] [--concurrent <n>]", description: "Register + start a managed runner (one-time)" },
+  status: { usage: "", description: "Show runner state" },
+  start: { usage: "", description: "Start the runner (also happens automatically on daemon launch)" },
+  stop: { usage: "", description: "Stop the runner" },
+  "prepare|run|cleanup": { usage: "", description: "Custom executor hooks (invoked by gitlab-runner itself)" },
+};
 
 // GitLab custom executor exit codes (set by runner as env vars)
 const SYSTEM_FAILURE = parseInt(process.env.SYSTEM_FAILURE_EXIT_CODE ?? "1");
