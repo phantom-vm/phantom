@@ -25,8 +25,8 @@ never fire.
 | `phantom-agent` | guest agent (arm64), what PHANTOM-5's bootstrap fetches |
 | `phantom-app.zip` | the daemon app, ad-hoc signed |
 
-There is no checksum file: GitHub computes an immutable SHA-256 per asset at
-upload time and serves it as `asset.digest`:
+Each asset's SHA-256 is computed by GitHub at upload and served as
+`asset.digest`:
 
 ```bash
 gh api repos/phantom-vm/phantom/releases/tags/v1.0.0 \
