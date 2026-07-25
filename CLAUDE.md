@@ -4,6 +4,8 @@
 
 **GTD project id**: `PHANTOM` (use this when filing/updating tickets for this project)
 
+**Never reference ticket numbers (`PHANTOM-N`) in documentation** — README, docs/, code comments. The ticket system is internal; the repo is public, and a `PHANTOM-5` means nothing to an outside reader. Commit subjects keep their `(PHANTOM-N)` suffix — that convention stays.
+
 Phantom is the macOS VM orchestrator, built with Apple's Virtualization.framework. It consists of three components:
 
 1. **phantom daemon** - SwiftUI app with GUI and TCP API server

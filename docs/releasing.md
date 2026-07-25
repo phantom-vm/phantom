@@ -26,7 +26,7 @@ never fire.
 | --- | --- |
 | `phantom` | user CLI (arm64, `bun --compile`) |
 | `phantom-admin` | admin CLI — adds image authoring/publishing commands |
-| `phantom-agent` | guest agent (arm64), what PHANTOM-5's bootstrap fetches |
+| `phantom-agent` | guest agent (arm64), what the guest bootstrap fetches |
 | `phantom-app.zip` | the daemon app, ad-hoc signed |
 
 Each asset's SHA-256 is computed by GitHub at upload and served as
