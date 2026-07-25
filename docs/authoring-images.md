@@ -46,11 +46,9 @@ SSH.
 The boot script is **per macOS version**, because Setup Assistant's wording
 changes between releases: [provision/setup-tahoe.txt](../provision/setup-tahoe.txt)
 targets Tahoe 26.x and creates a local admin `admin`/`admin` with passwordless
-sudo and auto-login. Authoring one for a new release is the one case where the
-by-hand walkthrough in [create-image.md](create-image.md) earns its keep —
-`phantom vm screenshot <vm-id> --out screen.png` is how you see what the script
-is looking at. [provision/README.md](../provision/README.md) covers the scripts
-themselves.
+sudo and auto-login. Authoring one for a new release is the one case
+where [doing it by hand](#doing-it-by-hand) earns its keep.
+[provision/README.md](../provision/README.md) covers the scripts themselves.
 
 ## Layering a toolchain
 
@@ -76,17 +74,56 @@ when pushing, so only the registry knows the bytes it kept.
 
 **A newly created ghcr package is private.** Switch both the image and the
 `catalog` package to public once, by hand, in the package settings on GitHub —
-until then anonymous pulls get a 403. Worth verifying rather than assuming; see
-[create-image.md](create-image.md#step-10-publish-it) for a one-liner that checks
-it.
+until then anonymous pulls get a 403. Check rather than assume:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=repository:phantom-vm/xcode-26-6:pull&service=ghcr.io' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')" \
+  -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+  https://ghcr.io/v2/phantom-vm/xcode-26-6/manifests/latest      # expect 200
+```
 
 Credentials are resolved by the CLI and passed to the daemon in the request. That
 direction matters: the daemon is a GUI app started by Launch Services, so it
 inherits neither the shell environment nor access to a Keychain-backed
 `docker login`.
 
+## Doing it by hand
+
+Only worth it to author a boot script for a macOS version that doesn't have one:
+you need to watch each Setup Assistant screen to script it. `phantom vm screenshot
+<vm-id> --out screen.png` shows what the script is looking at, and the screens are
+matched by on-screen text via OCR, so a script survives layout shifts but not
+changed wording.
+
+1. **Run the daemon** — open `phantom.xcodeproj` in Xcode, build and run.
+2. **Get an IPSW** — `phantom ipsw pull <version>`, or "Download Image" in the
+   app (~14GB).
+3. **Install macOS** — `phantom vm deploy --ipsw <id>`, or "Create & Start VM" in
+   the app. Takes ~20 minutes; the display window opens when it's done.
+4. **Walk through Setup Assistant** — `phantom vm vnc <vm-id>` (or "Show Display"),
+   skip Apple ID, create a local admin account. This is the part being scripted,
+   so note the exact wording of each screen.
+5. **Stage the agent** — on the host, `cd phantom-agent && ./init-host-shared-folder.sh`
+   builds it into the shared folder.
+6. **Install the agent** — in the guest:
+
+   ```bash
+   sudo mkdir -p /Volumes/phantom-shared
+   sudo mount_virtiofs phantom-shared /Volumes/phantom-shared
+   cd /Volumes/phantom-shared && sudo ./install.sh
+   ```
+
+   It installs `/usr/local/bin/phantom-agent` and a launchd daemon
+   (`com.monk.phantom-agent`) that starts on boot.
+7. **Check vsock works** — `phantom vm exec <vm-id> -- whoami` should answer from
+   inside the VM.
+8. **Provision and save** — apply [provision/provision.sh](../provision/provision.sh),
+   then `phantom vm stop <vm-id>` and `phantom image save <vm-id> <name>`.
+
+Steps 2–8 are exactly what `phantom image build --ipsw` does unattended.
+
 ## Related
 
-- [DESIGN.md](../DESIGN.md) — the image format, catalog schema, and why pulls pin digests
-- [create-image.md](create-image.md) — the same pipeline by hand, for authoring a new boot script
+- [design.md](design.md) — the image format, catalog schema, and why pulls pin digests
 - [provision/README.md](../provision/README.md) — boot scripts and provisioning

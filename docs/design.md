@@ -599,7 +599,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 ### Automated Image Building (`image build`)
 
-`phantom image build <name>` is a CLI-side orchestrator ([phantom-cli/src/commands/build.ts](phantom-cli/src/commands/build.ts)) that chains existing daemon endpoints into a hands-off pipeline. All the sequencing and long-polling lives in the CLI; the daemon stays a set of primitive operations.
+`phantom image build <name>` is a CLI-side orchestrator ([phantom-cli/src/commands/build.ts](../phantom-cli/src/commands/build.ts)) that chains existing daemon endpoints into a hands-off pipeline. All the sequencing and long-polling lives in the CLI; the daemon stays a set of primitive operations.
 
 1. **Resolve IPSW** — `ipsw.list`; use `--ipsw` or the single downloaded IPSW
 2. **Stage agent** (optional `--agent-dir`) — runs `init-host-shared-folder.sh` to build phantom-agent into the shared folder
@@ -613,7 +613,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 **Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage`, since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive.
 
-**Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
+**Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](../provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
 
 ### Image Catalog (distribution)
 
@@ -629,9 +629,9 @@ The catalog is a one-layer OCI artifact (`vnd.monk-studio.phantom.catalog.v1+jso
                "diskSize": 96636764160, "published": "2026-07-25" }] }
 ```
 
-**Why the digest matters**: `image pull <name>` resolves through the catalog and pulls `repository@sha256:…`, never a tag. A digest names exact bytes, so the daemon verifies the manifest against it ([OCIRegistry.swift](phantom/Libs/OCI/OCIRegistry.swift)), and since every layer is already verified against its own digest, that check extends integrity to the whole image. A tag pull has nothing to compare against — hence the catalog records digests. Like the IPSW catalog, the catalog only *points*.
+**Why the digest matters**: `image pull <name>` resolves through the catalog and pulls `repository@sha256:…`, never a tag. A digest names exact bytes, so the daemon verifies the manifest against it ([OCIRegistry.swift](../phantom/Libs/OCI/OCIRegistry.swift)), and since every layer is already verified against its own digest, that check extends integrity to the whole image. A tag pull has nothing to compare against — hence the catalog records digests. Like the IPSW catalog, the catalog only *points*.
 
-**Publishing** (`phantom image publish <name>`, admin-only): push the image, read the stored manifest digest back from the registry with a `HEAD` (the daemon re-encodes the manifest when pushing, so only the registry knows the bytes it kept), then rewrite the catalog artifact with that entry. The CLI speaks OCI directly for the catalog ([phantom-cli/src/lib/oci.ts](phantom-cli/src/lib/oci.ts)) — it is a small JSON blob, and the daemon's client exists for multi-gigabyte layers. Credentials come from `PHANTOM_REGISTRY_USERNAME`/`PASSWORD` or `~/.docker/config.json`, the same sources the daemon uses.
+**Publishing** (`phantom image publish <name>`, admin-only): push the image, read the stored manifest digest back from the registry with a `HEAD` (the daemon re-encodes the manifest when pushing, so only the registry knows the bytes it kept), then rewrite the catalog artifact with that entry. The CLI speaks OCI directly for the catalog ([phantom-cli/src/lib/oci.ts](../phantom-cli/src/lib/oci.ts)) — it is a small JSON blob, and the daemon's client exists for multi-gigabyte layers. Credentials come from `PHANTOM_REGISTRY_USERNAME`/`PASSWORD` or `~/.docker/config.json`, the same sources the daemon uses.
 
 ### Registry Authentication
 

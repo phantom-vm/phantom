@@ -12,9 +12,9 @@ Phantom is a macOS VM manager built with Apple's Virtualization.framework. It co
 
 ## Architecture Documentation
 
-**📖 For overall architecture and dataflow, see [DESIGN.md](DESIGN.md)**
+**📖 For overall architecture and dataflow, see [docs/design.md](docs/design.md)**
 
-The DESIGN.md file contains comprehensive documentation of:
+The design.md file contains comprehensive documentation of:
 - System architecture and component interactions
 - Data flow diagrams
 - Storage layout
@@ -28,7 +28,7 @@ The DESIGN.md file contains comprehensive documentation of:
 
 ### When Making Architecture Changes
 
-**⚠️ Always update [DESIGN.md](DESIGN.md) when making architectural changes**
+**⚠️ Always update [docs/design.md](docs/design.md) when making architectural changes**
 
 This includes:
 - Adding/removing components
@@ -46,16 +46,16 @@ phantom/
 ├── phantom/          # Main daemon app (Swift)
 ├── phantom-agent/    # Guest agent (Swift)
 ├── phantom-cli/      # CLI tool (Bun/TypeScript)
-├── README.md        # Progress and setup
-├── DESIGN.md        # Architecture documentation
+├── README.md        # User-facing overview
+├── docs/            # design.md, authoring-images.md, integration/
 └── CLAUDE.md        # This file
 ```
 
 ## Development Workflow
 
-1. **Before making changes**: Read DESIGN.md to understand current architecture
-2. **During development**: Follow existing patterns (see DESIGN.md for details)
-3. **After changes**: Update DESIGN.md if architecture was modified
+1. **Before making changes**: Read docs/design.md to understand current architecture
+2. **During development**: Follow existing patterns (see docs/design.md for details)
+3. **After changes**: Update docs/design.md if architecture was modified
 4. **After phantom-cli changes**: Run `cd phantom-cli && bun run install-bin` to rebuild and install the binary
 5. **Committing**: Follow conventional commit format
 
@@ -87,6 +87,7 @@ cd phantom-agent
 
 ## Additional Resources
 
-- [README.md](README.md) - Project overview and progress tracking
-- [DESIGN.md](DESIGN.md) - **Architecture documentation** (main reference)
+- [README.md](README.md) - User-facing overview and quick start
+- [docs/design.md](docs/design.md) - **Architecture documentation** (main reference)
+- [docs/authoring-images.md](docs/authoring-images.md) - Building and publishing images (admin)
 - [phantom-agent/README.md](phantom-agent/README.md) - Guest agent setup
