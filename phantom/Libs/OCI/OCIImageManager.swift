@@ -201,11 +201,19 @@ class OCIImageManager {
                 createdAt = "unknown"
             }
 
+            // Absent for locally saved images, and for anything pulled before
+            // pull started recording it.
+            let pullRecordPath = entry.appendingPathComponent("pulled.json")
+            let pulledFrom = (try? Data(contentsOf: pullRecordPath)).flatMap {
+                try? JSONDecoder().decode(PullRecord.self, from: $0)
+            }
+
             return ImageInfo(
                 name: entry.lastPathComponent,
                 diskChunks: lz4Files.count,
                 totalSize: totalSize,
-                createdAt: createdAt
+                createdAt: createdAt,
+                pulledFrom: pulledFrom
             )
         }.sorted { $0.name < $1.name }
     }
@@ -462,7 +470,17 @@ class OCIImageManager {
 
     // MARK: - Pull Image from Registry
 
-    func pull(reference: String, name: String?, username: String?, password: String?) async {
+    /// - Parameter replace: delete an existing image of the same name first,
+    ///   for updating to a newer published digest. The old copy goes before the
+    ///   new one arrives — there is no second copy on disk, so a pull that fails
+    ///   leaves the name empty and has to be retried.
+    func pull(
+        reference: String,
+        name: String?,
+        username: String?,
+        password: String?,
+        replace: Bool = false
+    ) async {
         guard state == .idle || isTerminalState else {
             state = .error("An operation is already in progress")
             return
@@ -492,7 +510,9 @@ class OCIImageManager {
                 let imageDir = imagesDir.appendingPathComponent(imageName)
 
                 if FileManager.default.fileExists(atPath: imageDir.path) {
-                    throw OCIError.imageAlreadyExists(imageName)
+                    guard replace else { throw OCIError.imageAlreadyExists(imageName) }
+                    bgLog("Replacing existing image '\(imageName)'")
+                    try FileManager.default.removeItem(at: imageDir)
                 }
 
                 try FileManager.default.createDirectory(at: imageDir, withIntermediateDirectories: true)
@@ -501,7 +521,7 @@ class OCIImageManager {
 
                 // Pull manifest
                 updateProgress(0.05, "Pulling manifest...")
-                let manifest = try await client.pullManifest(reference: ref.reference)
+                let (manifest, manifestDigest) = try await client.pullManifest(reference: ref.reference)
                 let manifestData = try manifest.toJSON()
                 try manifestData.write(to: imageDir.appendingPathComponent("manifest.json"))
 
@@ -568,6 +588,17 @@ class OCIImageManager {
                 }
 
                 bgLog("Pulled \(total) disk chunks")
+
+                // Last, so a half-finished pull leaves no record claiming the
+                // image is at this digest.
+                let record = PullRecord(
+                    reference: reference,
+                    digest: manifestDigest,
+                    pulledAt: ISO8601DateFormatter().string(from: Date())
+                )
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .prettyPrinted
+                try encoder.encode(record).write(to: imageDir.appendingPathComponent("pulled.json"))
 
                 bgLog("Image '\(imageName)' pulled from \(reference)")
                 return imageName

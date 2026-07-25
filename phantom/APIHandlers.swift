@@ -526,12 +526,22 @@ struct APIHandlers {
     private func handleImagesList() async throws -> AnyCodable {
         let images = vmManager.imageManager.list()
         return AnyCodable(["images": images.map { img in
-            [
+            var dict: [String: Any] = [
                 "name": img.name,
                 "diskChunks": img.diskChunks,
                 "totalSize": img.totalSize,
                 "createdAt": img.createdAt
-            ] as [String: Any]
+            ]
+            // Only for pulled images: lets the CLI tell whether the catalog has
+            // moved on from the copy that is here.
+            if let pulled = img.pulledFrom {
+                dict["pulledFrom"] = [
+                    "reference": pulled.reference,
+                    "digest": pulled.digest,
+                    "pulledAt": pulled.pulledAt
+                ]
+            }
+            return dict
         }])
     }
 
@@ -579,9 +589,16 @@ struct APIHandlers {
         let name = params?["name"]?.value as? String
         let username = params?["username"]?.value as? String
         let password = params?["password"]?.value as? String
+        let replace = params?["replace"]?.value as? Bool ?? false
 
         Task {
-            await vmManager.imageManager.pull(reference: reference, name: name, username: username, password: password)
+            await vmManager.imageManager.pull(
+                reference: reference,
+                name: name,
+                username: username,
+                password: password,
+                replace: replace
+            )
         }
 
         return AnyCodable([

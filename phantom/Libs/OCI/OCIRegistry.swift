@@ -108,7 +108,10 @@ class OCIRegistryClient {
     }
 
     /// Pull a manifest from the registry.
-    func pullManifest(reference ref: String) async throws -> OCIManifest {
+    /// Returns the manifest along with the digest of the bytes received, which
+    /// is the digest the registry stores — the caller records it so a later
+    /// `image list` can tell a pulled image from the one now published.
+    func pullManifest(reference ref: String) async throws -> (manifest: OCIManifest, digest: String) {
         let url = endpointURL("\(reference.namespace)/manifests/\(ref)")
 
         let (data, response) = try await authenticatedRequest(
@@ -126,14 +129,14 @@ class OCIRegistryClient {
         // manifest — and since every layer digest is checked on pull, verifying
         // the manifest extends that guarantee to the whole image. A tag pull has
         // nothing to check against; the catalog therefore records digests.
+        let digest = Digest.sha256(data)
         if ref.hasPrefix("sha256:") {
-            let actual = Digest.sha256(data)
-            guard actual == ref else {
-                throw OCIError.digestMismatch(expected: ref, actual: actual)
+            guard digest == ref else {
+                throw OCIError.digestMismatch(expected: ref, actual: digest)
             }
         }
 
-        return try OCIManifest.fromJSON(data)
+        return (try OCIManifest.fromJSON(data), digest)
     }
 
     // MARK: - HTTP Layer

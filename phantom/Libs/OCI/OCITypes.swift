@@ -184,4 +184,18 @@ struct ImageInfo: Codable {
     let diskChunks: Int
     let totalSize: Int64
     let createdAt: String
+    /// Where a pulled image came from, absent for one saved locally — see `PullRecord`.
+    let pulledFrom: PullRecord?
+}
+
+/// Written beside a pulled image as `pulled.json`, so a later `image list` can
+/// tell whether the catalog now points somewhere else.
+///
+/// The digest has to be recorded at pull time because nothing else preserves it:
+/// pushing re-encodes the manifest, so the local `manifest.json` bytes hash to
+/// something other than what the registry stored.
+struct PullRecord: Codable {
+    let reference: String
+    let digest: String
+    let pulledAt: String
 }
