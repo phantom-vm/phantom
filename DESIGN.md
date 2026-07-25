@@ -615,6 +615,24 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 **Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
 
+### Image Catalog (distribution)
+
+Users are not expected to build images. `phantom image list` shows a published catalog, and `phantom image pull <name>` fetches one by name — the same shape as `ipsw list` / `ipsw pull`.
+
+The catalog is a one-layer OCI artifact (`vnd.monk-studio.phantom.catalog.v1+json`) living in the same registry as the images, `ghcr.io/phantom-vm/catalog:latest` by default (`PHANTOM_CATALOG` overrides it). Hosting it as an artifact keeps distribution to a single dependency, and reads are anonymous, so a fresh install can browse before it has credentials. Its entries carry a name, description, repository, sizes, and the image's **manifest digest**:
+
+```json
+{ "schemaVersion": 1,
+  "images": [{ "name": "xcode-26-6", "description": "…",
+               "repository": "ghcr.io/phantom-vm/xcode-26-6",
+               "digest": "sha256:…", "compressedSize": 58859000000,
+               "diskSize": 96636764160, "published": "2026-07-25" }] }
+```
+
+**Why the digest matters**: `image pull <name>` resolves through the catalog and pulls `repository@sha256:…`, never a tag. A digest names exact bytes, so the daemon verifies the manifest against it ([OCIRegistry.swift](phantom/Libs/OCI/OCIRegistry.swift)), and since every layer is already verified against its own digest, that check extends integrity to the whole image. A tag pull has nothing to compare against — hence the catalog records digests. Like the IPSW catalog, the catalog only *points*.
+
+**Publishing** (`phantom image publish <name>`, admin-only): push the image, read the stored manifest digest back from the registry with a `HEAD` (the daemon re-encodes the manifest when pushing, so only the registry knows the bytes it kept), then rewrite the catalog artifact with that entry. The CLI speaks OCI directly for the catalog ([phantom-cli/src/lib/oci.ts](phantom-cli/src/lib/oci.ts)) — it is a small JSON blob, and the daemon's client exists for multi-gigabyte layers. Credentials come from `PHANTOM_REGISTRY_USERNAME`/`PASSWORD` or `~/.docker/config.json`, the same sources the daemon uses.
+
 ### Registry Authentication
 
 Auth follows the OCI Distribution Spec token flow:

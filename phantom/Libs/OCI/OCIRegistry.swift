@@ -121,6 +121,18 @@ class OCIRegistryClient {
             throw OCIError.registryError(statusCode: response.statusCode, message: "pulling manifest")
         }
 
+        // Pulling by digest is the only self-verifying form: the digest names
+        // the exact bytes, so a registry (or anything between) cannot swap the
+        // manifest — and since every layer digest is checked on pull, verifying
+        // the manifest extends that guarantee to the whole image. A tag pull has
+        // nothing to check against; the catalog therefore records digests.
+        if ref.hasPrefix("sha256:") {
+            let actual = Digest.sha256(data)
+            guard actual == ref else {
+                throw OCIError.digestMismatch(expected: ref, actual: actual)
+            }
+        }
+
         return try OCIManifest.fromJSON(data)
     }
 

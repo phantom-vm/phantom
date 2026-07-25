@@ -83,3 +83,17 @@ phantom vm exec <vm-id> -- xcodebuild -version
 Note that steps 1–8 above are what `phantom image build <name> --ipsw <id>`
 automates end to end; doing them by hand is only useful when authoring a new
 boot script.
+
+## Step 10: Publish it
+
+Users never run any of the above — they pull. Publishing pushes the image and
+lists it in the catalog `phantom image list` reads:
+
+```bash
+docker login ghcr.io     # credentials also picked up from PHANTOM_REGISTRY_USERNAME/PASSWORD
+phantom image publish xcode-26-6 --description "macOS 26 + Xcode 26.6 + all simulator runtimes"
+```
+
+Afterwards any machine can `phantom image pull xcode-26-6`, which resolves the
+name through the catalog and pulls by manifest digest. See the Image Catalog
+section of [DESIGN.md](../DESIGN.md) for the format and why it pins digests.

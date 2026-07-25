@@ -1,11 +1,20 @@
 import { sendRequest } from "../lib/api";
 import { imageBuild } from "./build";
+import { imagePublish } from "./publish";
+import {
+  fetchCatalog,
+  formatGB,
+  pullReference,
+  resolve,
+  type Catalog,
+} from "../lib/catalog";
 import type { Command } from "../command";
 
 export async function imageList() {
-  const [response, statusResponse] = await Promise.all([
+  const [response, statusResponse, catalog] = await Promise.all([
     sendRequest({ method: "image.list" }),
     sendRequest({ method: "image.status" }),
+    fetchCatalog(),
   ]);
 
   if (response.error) {
@@ -24,17 +33,31 @@ export async function imageList() {
   }
 
   const images = (response.result?.images as any[]) ?? [];
+  const local = new Map<string, number>(images.map((i) => [i.name, i.totalSize]));
 
-  if (images.length === 0) {
-    console.log(
-      "No images found. Use 'phantom image save <vmId> <name>' to save a VM as an image."
-    );
+  // Catalog images first, marked with whether they're already here, then
+  // anything local the catalog doesn't know about (locally built or pulled).
+  for (const entry of catalog?.images ?? []) {
+    const mark = local.has(entry.name) ? "  (Downloaded)" : "";
+    console.log(`${entry.name.padEnd(25)} ${formatGB(entry.compressedSize).padStart(7)}${mark}`);
+    console.log(`${" ".repeat(25)} ${entry.description}`);
+    local.delete(entry.name);
+  }
+
+  if (local.size > 0) {
+    if (catalog) console.log("\nLocal only:");
+    for (const [name, totalSize] of local) {
+      console.log(`${name.padEnd(25)} ${formatGB(totalSize).padStart(7)}`);
+    }
+  }
+
+  if (!catalog && local.size === 0) {
+    console.log("No local images, and the image catalog could not be reached.");
     return;
   }
 
-  for (const img of images) {
-    const sizeGB = (img.totalSize / 1024 / 1024 / 1024).toFixed(1);
-    console.log(`${img.name.padEnd(25)} ${sizeGB}GB`);
+  if (catalog && images.length === 0) {
+    console.log("\nPull one with 'phantom image pull <name>'.");
   }
 }
 
@@ -139,11 +162,33 @@ export async function imagePull(...args: string[]) {
   }
 
   if (!reference) {
-    console.error("Usage: phantom image pull <registry/namespace:tag> [--name <localName>]");
+    console.error("Usage: phantom image pull <name | registry/namespace:tag> [--name <localName>]");
+    console.error("  <name>               Catalog image, e.g. 'xcode-26-6' (see 'phantom image list')");
     console.error("  --name <name>        Local image name (default: derived from reference)");
     console.error("  --username <user>     Registry username");
     console.error("  --password <pass>     Registry password");
     process.exit(1);
+  }
+
+  // A bare name means the catalog. Resolving it there pins the pull to the
+  // published manifest digest, which is what makes it verifiable.
+  if (!reference.includes("/")) {
+    const catalog = await fetchCatalog();
+    if (!catalog) {
+      console.error(`Error: could not reach the image catalog to resolve '${reference}'`);
+      console.error("Pass a full registry reference to pull without the catalog.");
+      process.exit(1);
+    }
+    const entry = resolve(catalog, reference);
+    if (!entry) {
+      console.error(`Error: no image named '${reference}' in the catalog`);
+      console.error(`Available: ${catalog.images.map((i) => i.name).join(", ")}`);
+      process.exit(1);
+    }
+    name ??= entry.name;
+    reference = pullReference(entry);
+    console.log(`${entry.name} — ${entry.description}`);
+    console.log(`${formatGB(entry.compressedSize)} to download, ${formatGB(entry.diskSize)} on disk\n`);
   }
 
   const params: Record<string, any> = { reference };
@@ -179,5 +224,10 @@ export const adminCommands: Record<string, Command> = {
     usage: "<name> [options]",
     description: "IPSW → agent install → provision → save, unattended",
     multiArgHandler: imageBuild,
+  },
+  publish: {
+    usage: "<name> [--description <text>]",
+    description: "Push a local image and list it in the public catalog",
+    multiArgHandler: imagePublish,
   },
 };

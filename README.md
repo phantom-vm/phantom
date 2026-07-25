@@ -78,7 +78,7 @@ screenshot`.
 
 ## Roadmap
 
-- [ ] **Publish base image** — push the built base image to a registry so users only ever `image pull` (the build pipeline is done; `push` wiring remains).
+- [ ] **Publish base image** — the machinery is in (`image publish` pushes and updates a catalog artifact; `image list`/`image pull <name>` read it, pinned to manifest digests, verified end to end against a local registry). What remains is the one-off: create the `phantom-vm` ghcr namespace and push the real 55GB image there.
 - [ ] **`vm deploy --image` async** — fire-and-forget + status polling like `image.save`; also fixes a CLI-timeout race that can leave the bundle unregistered until a daemon restart. Low priority now that create is ~12s.
 - [x] **Don't store all-zero chunks** — skipped at chunk time. 114 of `tahoe-base`'s 180 chunks were all-zero, so this removes ~63% of an image's layers (registry objects, push/pull round trips) though only ~1.4% of its bytes. Layers now carry a `chunk-index` annotation, since position no longer implies offset.
 - [ ] **GitLab: registry-backed base image** — let the job's `image:` reference a registry image (e.g. `registry.gitlab.com/org/macos-ci:latest`) and auto-pull before `vm.create`.
