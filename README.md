@@ -14,7 +14,7 @@ Install the daemon (the app that runs the VMs — keep it running) and the CLI:
 
 ```
 curl -fsSLO https://github.com/phantom-vm/phantom/releases/latest/download/phantom-daemon.zip
-ditto -x -k phantom-daemon.zip /Applications && open /Applications/Phantom.app
+unzip -q phantom-daemon.zip -d /Applications && open /Applications/Phantom.app
 
 sudo curl -fsSL -o /usr/local/bin/phantom \
   https://github.com/phantom-vm/phantom/releases/latest/download/phantom-cli
