@@ -367,7 +367,7 @@ Or on error:
 
 ### health
 - **Purpose**: Check daemon status
-- **Response**: `{"status": "ok", "version": "1.0.0"}`
+- **Response**: `{"status": "ok", "version": "1.2.3"}` — the app's `CFBundleShortVersionString` (`MARKETING_VERSION`, set by `scripts/set-version.sh` at release time)
 
 ### ipsw.list
 - **Purpose**: List downloaded IPSW files

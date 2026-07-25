@@ -90,4 +90,5 @@ cd phantom-agent
 - [README.md](README.md) - User-facing overview and quick start
 - [docs/design.md](docs/design.md) - **Architecture documentation** (main reference)
 - [docs/authoring-images.md](docs/authoring-images.md) - Building and publishing images (admin)
+- [docs/releasing.md](docs/releasing.md) - Cutting a release (version bump + GitHub release, one workflow)
 - [phantom-agent/README.md](phantom-agent/README.md) - Guest agent setup

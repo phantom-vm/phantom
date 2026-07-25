@@ -1,5 +1,6 @@
 import { renderGroup, type CommandGroup } from "./command";
 import { route } from "./router";
+import { VERSION } from "./version";
 
 export interface CliDefinition {
   routes: Record<string, any>;
@@ -21,6 +22,11 @@ export async function runCli(build: () => CliDefinition) {
     process.exit(0);
   }
 
+  if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
+    console.log(VERSION);
+    process.exit(0);
+  }
+
   try {
     await route(commands, args);
   } catch (error) {
@@ -34,7 +40,7 @@ export async function runCli(build: () => CliDefinition) {
 function showHelp(groups: CommandGroup[]) {
   const sections = groups.map(renderGroup).filter(Boolean).join("\n\n");
 
-  console.log(`phantom — the macOS VM orchestrator
+  console.log(`phantom ${VERSION} — the macOS VM orchestrator
 
 Usage
   phantom <command> <subcommand> [options]

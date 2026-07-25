@@ -171,7 +171,14 @@ func writeLine(_ data: Data, to fd: Int32) {
 
 // MARK: - Main
 
-print("phantom-agent: starting on vsock port \(VSOCK_PORT)...")
+// So an installer (or a human) can ask a downloaded binary what it is
+// without starting a vsock listener.
+if CommandLine.arguments.contains("--version") {
+    print(phantomAgentVersion)
+    exit(0)
+}
+
+print("phantom-agent \(phantomAgentVersion): starting on vsock port \(VSOCK_PORT)...")
 
 let sockFd = socket(AF_VSOCK, SOCK_STREAM, 0)
 guard sockFd >= 0 else {

@@ -1,0 +1,129 @@
+# Cut a release, end to end, from one manual trigger.
+#
+# Two jobs in one run, deliberately not tag-triggered: pushes made with the
+# workflow's own GITHUB_TOKEN never fire other workflows (GitHub's recursion
+# guard), so a "bump job pushes a tag, tag triggers a build workflow" design
+# silently does nothing. Chaining the build job onto the bump job with
+# `needs:` sidesteps that entirely and keeps the whole release visible as a
+# single run.
+#
+#   workflow_dispatch (choose patch/minor/major)
+#     └─ cut    (ubuntu): compute next version from the latest v* tag,
+#                         scripts/set-version.sh, commit, tag, push to main
+#     └─ build  (macos):  checkout that tag, build agent + CLI + daemon,
+#                         SHA256SUMS, create the GitHub release
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # need the tag history to compute the next version
+
+      - name: Compute next version
+        id: ver
+        run: |
+          latest="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          latest="${latest:-v0.0.0}"
+          IFS=. read -r major minor patch <<< "${latest#v}"
+          case "${{ inputs.bump }}" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="${major}.$((minor + 1)).0" ;;
+            patch) version="${major}.${minor}.$((patch + 1))" ;;
+          esac
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "bumping ${latest} -> v${version}"
+
+      - name: Bump, commit, tag, push
+        run: |
+          scripts/set-version.sh "${{ steps.ver.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release ${{ steps.ver.outputs.tag }}"
+          git tag "${{ steps.ver.outputs.tag }}"
+          git push origin main "${{ steps.ver.outputs.tag }}"
+
+  build:
+    needs: cut
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.cut.outputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build phantom-agent
+        run: |
+          cd phantom-agent
+          swift build -c release
+          cp .build/release/phantom-agent ../dist-agent
+          ../dist-agent --version
+
+      - name: Build phantom CLI
+        run: |
+          cd phantom-cli
+          bun install --frozen-lockfile
+          bun build src/main.ts --compile --minify --outfile ../dist-phantom
+          bun build src/main-admin.ts --compile --minify --outfile ../dist-phantom-admin
+          ../dist-phantom --version
+          ../dist-phantom-admin --version
+
+      # Ad-hoc signed: the runner has no signing identity for the hardcoded
+      # team. Entitlements (virtualization) survive ad-hoc signing; Gatekeeper
+      # quarantine on downloaded copies is a known caveat until the app is
+      # signed and notarized with a real Developer ID.
+      - name: Build phantom daemon
+        run: |
+          # ARCHS=arm64: Release otherwise also builds x86_64, where the
+          # VZMac* API family (macOS guests) doesn't exist at all.
+          xcodebuild -project phantom.xcodeproj -scheme phantom \
+            -configuration Release ARCHS=arm64 \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            build
+          # The project pins its build location (products land in the repo's
+          # DerivedData/, and -derivedDataPath is ignored) — ask xcodebuild
+          # where the app actually went instead of hardcoding it.
+          app_dir="$(xcodebuild -project phantom.xcodeproj -scheme phantom \
+            -configuration Release -showBuildSettings 2>/dev/null \
+            | awk -F' = ' '/ TARGET_BUILD_DIR =/{print $2; exit}')"
+          ditto -c -k --keepParent "${app_dir}/phantom.app" dist-phantom-app.zip
+
+      - name: Assemble and checksum
+        run: |
+          mkdir release
+          cp dist-agent           release/phantom-agent
+          cp dist-phantom         release/phantom
+          cp dist-phantom-admin   release/phantom-admin
+          cp dist-phantom-app.zip release/phantom-app.zip
+          cd release
+          shasum -a 256 * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.cut.outputs.tag }}" \
+            release/* \
+            --title "${{ needs.cut.outputs.tag }}" \
+            --generate-notes

@@ -120,7 +120,9 @@ struct APIHandlers {
     // MARK: - Handlers
 
     private func handleHealth() async throws -> AnyCodable {
-        AnyCodable(["status": "ok", "version": "1.0.0"])
+        // MARKETING_VERSION, set by scripts/set-version.sh at release time.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        return AnyCodable(["status": "ok", "version": version])
     }
 
     private func handleIpswList() async throws -> AnyCodable {
