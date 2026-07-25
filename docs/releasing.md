@@ -27,7 +27,7 @@ never fire.
 | `phantom-cli` | user CLI (arm64, `bun --compile`) |
 | `phantom-admin-cli` | admin CLI — adds image authoring/publishing commands |
 | `phantom-agent` | guest agent (arm64), what the guest bootstrap fetches |
-| `phantom-daemon.zip` | the daemon app, ad-hoc signed |
+| `phantom-daemon.zip` | the daemon app, Developer ID signed and notarized |
 
 Each asset's SHA-256 is computed by GitHub at upload and served as
 `asset.digest`:
@@ -59,10 +59,18 @@ curl -fsSLO https://github.com/phantom-vm/phantom/releases/latest/download/phant
 (`/latest/download/<asset>` follows the newest release; pin one with
 `/download/vX.Y.Z/<asset>`. `gh release download` works too.)
 
+## Signing
+
+The daemon app is signed with a Developer ID Application certificate and
+notarized (stapled, so Gatekeeper verifies offline). The workflow needs five
+repo secrets: `MACOS_CERT_P12` (base64 .p12) + `MACOS_CERT_PASSWORD`, and
+`NOTARY_KEY_ID` / `NOTARY_ISSUER_ID` / `NOTARY_KEY_P8` (App Store Connect API
+key). A release fails rather than ship if notarization is not `Accepted`.
+
+The CLI and agent binaries are not notarized on purpose: they are fetched with
+`curl`, which sets no quarantine attribute, so Gatekeeper never evaluates them.
+
 ## Caveats
 
-- The daemon app is **ad-hoc signed**: a downloaded copy is quarantined by
-  Gatekeeper (`xattr -d com.apple.quarantine` to clear). Proper Developer ID
-  signing + notarization is future work.
 - Everything is arm64-only, deliberately — macOS guests
   (Virtualization.framework's `VZMac*`) exist only on Apple Silicon.

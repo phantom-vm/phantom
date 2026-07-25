@@ -95,17 +95,40 @@ jobs:
           ../dist-phantom --version
           ../dist-phantom-admin --version
 
-      # Ad-hoc signed: the runner has no signing identity for the hardcoded
-      # team. Entitlements (virtualization) survive ad-hoc signing; Gatekeeper
-      # quarantine on downloaded copies is a known caveat until the app is
-      # signed and notarized with a real Developer ID.
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          # Throwaway keychain, dies with the runner. The partition-list step
+          # is what lets codesign use the key without a UI prompt.
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          keychain_pass="$(uuidgen)"
+          security create-keychain -p "$keychain_pass" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_pass" "$keychain"
+          echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$keychain_pass" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain-db
+
       - name: Build phantom daemon
         run: |
           # ARCHS=arm64: Release otherwise also builds x86_64, where the
           # VZMac* API family (macOS guests) doesn't exist at all.
+          # CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO: plain `xcodebuild build`
+          # (as opposed to archive/export) injects get-task-allow otherwise,
+          # and notarization rejects it.
           xcodebuild -project phantom.xcodeproj -scheme phantom \
             -configuration Release ARCHS=arm64 \
-            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Developer ID Application" \
+            DEVELOPMENT_TEAM=5FP33J8924 \
+            OTHER_CODE_SIGN_FLAGS=--timestamp \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
             build
           # The project pins its build location (products land in the repo's
           # DerivedData/, and -derivedDataPath is ignored) — ask xcodebuild
@@ -113,6 +136,40 @@ jobs:
           app_dir="$(xcodebuild -project phantom.xcodeproj -scheme phantom \
             -configuration Release -showBuildSettings 2>/dev/null \
             | awk -F' = ' '/ TARGET_BUILD_DIR =/{print $2; exit}')"
+          echo "app_dir=$app_dir" >> "$GITHUB_ENV"
+          # Belt and braces: a debug entitlement in a release is a build bug.
+          if codesign -d --entitlements :- "${app_dir}/Phantom.app" 2>/dev/null \
+            | grep -q get-task-allow; then
+            echo "::error::release app carries get-task-allow" >&2
+            exit 1
+          fi
+
+      - name: Notarize and staple
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$NOTARY_KEY_P8" > "$key"
+          ditto -c -k --keepParent "${app_dir}/Phantom.app" notarize.zip
+          out="$(xcrun notarytool submit notarize.zip \
+            --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m --output-format json)"
+          echo "$out"
+          status="$(echo "$out" | jq -r .status)"
+          sub_id="$(echo "$out" | jq -r .id)"
+          # notarytool's exit code is not a reliable verdict — gate on the
+          # status field, and surface Apple's log when it isn't Accepted.
+          if [ "$status" != "Accepted" ]; then
+            xcrun notarytool log "$sub_id" \
+              --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+            echo "::error::notarization $status" >&2
+            exit 1
+          fi
+          xcrun stapler staple "${app_dir}/Phantom.app"
+          # Re-zip after stapling: the ticket must ship inside the asset so
+          # Gatekeeper can verify offline.
           ditto -c -k --keepParent "${app_dir}/Phantom.app" dist-phantom-app.zip
 
       # No checksum file: GitHub computes an immutable SHA-256 per asset at
