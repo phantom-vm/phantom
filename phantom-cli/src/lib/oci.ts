@@ -46,9 +46,13 @@ export interface Credentials {
   password: string;
 }
 
-/// Credentials for a registry, from the environment or the Docker config that
-/// `docker login` writes — the same sources the daemon uses, so logging in once
-/// covers both.
+/// Credentials for a registry: explicit environment variables first, then
+/// whatever `docker login` left behind.
+///
+/// The CLI resolves these and hands them to the daemon in the request, rather
+/// than letting the daemon look them up: the daemon is a GUI app launched by
+/// Launch Services, so it never inherits the shell environment these usually
+/// live in.
 export async function credentialsFor(registry: string): Promise<Credentials | undefined> {
   const envUser = process.env.PHANTOM_REGISTRY_USERNAME;
   const envPass = process.env.PHANTOM_REGISTRY_PASSWORD;
@@ -56,13 +60,49 @@ export async function credentialsFor(registry: string): Promise<Credentials | un
 
   const file = Bun.file(`${process.env.HOME}/.docker/config.json`);
   if (!(await file.exists())) return undefined;
+
+  let config: {
+    auths?: Record<string, { auth?: string }>;
+    credsStore?: string;
+    credHelpers?: Record<string, string>;
+  };
   try {
-    const config = (await file.json()) as { auths?: Record<string, { auth?: string }> };
-    const auth = config.auths?.[registry]?.auth;
-    if (!auth) return undefined;
+    config = await file.json();
+  } catch {
+    return undefined;
+  }
+
+  const candidates = [registry, `https://${registry}`, `http://${registry}`];
+
+  for (const candidate of candidates) {
+    const auth = config.auths?.[candidate]?.auth;
+    if (!auth) continue;
     const [username, ...rest] = Buffer.from(auth, "base64").toString().split(":");
-    if (!username || rest.length === 0) return undefined;
-    return { username, password: rest.join(":") };
+    if (username && rest.length > 0) return { username, password: rest.join(":") };
+  }
+
+  // Docker Desktop on macOS defaults to credsStore "osxkeychain", which leaves
+  // the auths entry empty and keeps the secret in the Keychain. The helper
+  // protocol is a subprocess that takes the registry on stdin.
+  const helper = config.credHelpers?.[registry] ?? config.credsStore;
+  if (!helper) return undefined;
+  if (!candidates.some((c) => config.auths?.[c] !== undefined) && !config.credHelpers?.[registry]) {
+    return undefined; // not logged in to this registry
+  }
+
+  try {
+    const proc = Bun.spawn([`docker-credential-${helper}`, "get"], {
+      stdin: new TextEncoder().encode(registry),
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    if ((await proc.exited) !== 0) return undefined;
+    const out = (await new Response(proc.stdout).json()) as {
+      Username?: string;
+      Secret?: string;
+    };
+    if (!out.Username || !out.Secret) return undefined;
+    return { username: out.Username, password: out.Secret };
   } catch {
     return undefined;
   }

@@ -7,7 +7,7 @@ import {
   type Catalog,
   type CatalogEntry,
 } from "../lib/catalog";
-import { RegistryClient, pushArtifact } from "../lib/oci";
+import { RegistryClient, credentialsFor, pushArtifact, parseRef } from "../lib/oci";
 
 // MARK: - image publish
 //
@@ -65,10 +65,29 @@ async function run(opts: PublishOptions) {
   const reference = `${repository}:${opts.tag}`;
 
   const local = await localImage(opts.imageName);
+  const registry = parseRef(reference).registry;
+
+  // Resolved here and passed through: the daemon can read a Docker config, but
+  // not a Keychain-backed one, and being a GUI app it never sees the shell's
+  // PHANTOM_REGISTRY_* either. Fail before a multi-hour upload, not after.
+  const creds = await credentialsFor(registry);
+  if (!creds && !registry.startsWith("localhost")) {
+    throw new Error(
+      `no credentials for ${registry} — run 'docker login ${registry}' or set PHANTOM_REGISTRY_USERNAME/PASSWORD`
+    );
+  }
+
   console.log(`[1/3] ${opts.catalogOnly ? "Skipping push" : `Pushing ${opts.imageName}`} → ${reference}`);
   if (!opts.catalogOnly) {
     console.log(`      ${formatGB(local.totalSize)} across ${local.layerCount} layers`);
-    const res = await sendRequest({ method: "image.push", params: { name: opts.imageName, reference } });
+    const res = await sendRequest({
+      method: "image.push",
+      params: {
+        name: opts.imageName,
+        reference,
+        ...(creds && { username: creds.username, password: creds.password }),
+      },
+    });
     if (res.error) throw new Error(res.error.message);
     await waitForPush();
   }
@@ -125,21 +144,57 @@ async function existingDescription(name: string): Promise<string | undefined> {
   return catalog?.images.find((i) => i.name === name)?.description;
 }
 
+const BAR_WIDTH = 28;
+
+/// Single line, redrawn in place. Only when stdout is a terminal — piped into a
+/// file or a CI log, carriage returns just pile up, so there we print each new
+/// message on its own line instead.
+function renderProgress(fraction: number, message: string, elapsedMs: number) {
+  const filled = Math.max(0, Math.min(BAR_WIDTH, Math.round(fraction * BAR_WIDTH)));
+  const bar = "█".repeat(filled) + "·".repeat(BAR_WIDTH - filled);
+  const pct = `${Math.floor(fraction * 100)}`.padStart(3);
+  const mins = Math.floor(elapsedMs / 60_000);
+  const secs = Math.floor((elapsedMs % 60_000) / 1000);
+  const clock = `${mins}:${`${secs}`.padStart(2, "0")}`;
+  const line = `      [${bar}] ${pct}%  ${clock}  ${message}`;
+  process.stdout.write(`\r${line.slice(0, 120).padEnd(78)}`);
+}
+
 async function waitForPush(maxMs = 6 * 3600_000) {
-  const deadline = Date.now() + maxMs;
+  const started = Date.now();
+  const deadline = started + maxMs;
+  const tty = process.stdout.isTTY;
   let lastMessage = "";
+  let drew = false;
+
   while (Date.now() < deadline) {
     const res = await sendRequest({ method: "image.status" });
     const status = res.result as { state?: string; progress?: number; message?: string } | undefined;
     const state = status?.state ?? "";
-    if (status?.message && status.message !== lastMessage) {
-      const pct = status.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
-      console.log(`      ${status.message}${pct}`);
-      lastMessage = status.message;
+    const message = status?.message ?? "";
+
+    // Terminal states first: the daemon resets progress to 0 when it finishes,
+    // so drawing before this check flashes an empty bar at the very end.
+    if (state === "completed" || state === "error") {
+      if (tty && drew) {
+        if (state === "completed") renderProgress(1, message, Date.now() - started);
+        process.stdout.write("\n");
+      }
+      if (state === "error") throw new Error(message || "push failed");
+      return;
     }
-    if (state === "completed") return;
-    if (state === "error") throw new Error(status?.message ?? "push failed");
-    await sleep(5_000);
+
+    if (tty) {
+      renderProgress(status?.progress ?? 0, message, Date.now() - started);
+      drew = true;
+    } else if (message && message !== lastMessage) {
+      const pct = status?.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
+      console.log(`      ${message}${pct}`);
+      lastMessage = message;
+    }
+
+    // 1s rather than 5s: the bar should move, and image.status is a cheap read.
+    await sleep(1_000);
   }
   throw new Error("push timed out");
 }
