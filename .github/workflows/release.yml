@@ -123,9 +123,9 @@ jobs:
         run: |
           mkdir release
           cp dist-agent           release/phantom-agent
-          cp dist-phantom         release/phantom
-          cp dist-phantom-admin   release/phantom-admin
-          cp dist-phantom-app.zip release/phantom-app.zip
+          cp dist-phantom         release/phantom-cli
+          cp dist-phantom-admin   release/phantom-admin-cli
+          cp dist-phantom-app.zip release/phantom-daemon.zip
 
       - name: Create release
         env:

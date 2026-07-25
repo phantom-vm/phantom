@@ -24,10 +24,10 @@ never fire.
 
 | Asset | What |
 | --- | --- |
-| `phantom` | user CLI (arm64, `bun --compile`) |
-| `phantom-admin` | admin CLI — adds image authoring/publishing commands |
+| `phantom-cli` | user CLI (arm64, `bun --compile`) |
+| `phantom-admin-cli` | admin CLI — adds image authoring/publishing commands |
 | `phantom-agent` | guest agent (arm64), what the guest bootstrap fetches |
-| `phantom-app.zip` | the daemon app, ad-hoc signed |
+| `phantom-daemon.zip` | the daemon app, ad-hoc signed |
 
 Each asset's SHA-256 is computed by GitHub at upload and served as
 `asset.digest`:
@@ -48,22 +48,16 @@ bumping. `set-version.sh` writes the version into:
   endpoint (a dev build built from Xcode reports whatever the tree says;
   release binaries report their tag's version)
 
-## Downloading from a private repo
+## Downloading
 
-Browser asset URLs 404 without a session. Fetch via the API with a token:
+Assets are plain anonymous URLs:
 
 ```bash
-# find the asset id
-curl -H "Authorization: Bearer $GH_TOKEN" \
-  https://api.github.com/repos/phantom-vm/phantom/releases/latest
-
-# download (the Accept header is what turns the API URL into the binary)
-curl -L -H "Authorization: Bearer $GH_TOKEN" \
-  -H "Accept: application/octet-stream" \
-  https://api.github.com/repos/phantom-vm/phantom/releases/assets/<id> -o phantom
+curl -fsSLO https://github.com/phantom-vm/phantom/releases/latest/download/phantom-cli
 ```
 
-`gh release download` wraps the same calls.
+(`/latest/download/<asset>` follows the newest release; pin one with
+`/download/vX.Y.Z/<asset>`. `gh release download` works too.)
 
 ## Caveats
 
