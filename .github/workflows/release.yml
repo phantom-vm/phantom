@@ -177,7 +177,7 @@ jobs:
       # 2025-06) — a SHA256SUMS.txt in the same release would duplicate that
       # from inside the same trust domain.
       #
-      # agent-install.sh is the guest bootstrap: a fresh VM fetches it from
+      # phantom-agent-install.sh is the guest bootstrap: a fresh VM fetches it from
       # `releases/latest/download/` and pipes it to root sh, so it embeds the
       # agent's SHA-256 and downloads the binary from this release's
       # *versioned* URL — `latest` resolving mid-publish must not mix a new
@@ -191,7 +191,7 @@ jobs:
           cp dist-phantom-app.zip release/phantom-daemon.zip
           phantom-agent/make-install-script.sh dist-agent \
             "https://github.com/${{ github.repository }}/releases/download/${{ needs.cut.outputs.tag }}/phantom-agent" \
-            > release/agent-install.sh
+            > release/phantom-agent-install.sh
 
       - name: Create release
         env:
