@@ -3,6 +3,10 @@
 One manual trigger cuts a whole release. In the GitHub repo: **Actions →
 Release → Run workflow**, pick a bump (`patch` / `minor` / `major`).
 
+**House rule: pick `minor`.** Routine releases go v1.1.0 → v1.2.0 → v1.3.0.
+`patch` is reserved for shipping a fix on its own, `major` for a break in the
+API or image/CLI compatibility.
+
 The run has two jobs ([.github/workflows/release.yml](../.github/workflows/release.yml)):
 
 1. **cut** — computes the next version from the latest `v*` tag, rewrites it
