@@ -53,10 +53,10 @@ You should see the output from inside the VM.
 Stop the VM, then save it as a named local image for use as a CI base:
 ```bash
 phantom vm stop <vm-id>
-phantom image save <vm-id> macos-sequoia-base
+phantom image save <vm-id> tahoe-base
 ```
 
-This image can be used directly as `PHANTOM_BASE_IMAGE` in the [GitLab runner integration](integration/gitlab.md).
+This image is what a toolchain image is layered onto (step 9), and can be named directly in a job's `image:` for the [GitLab runner integration](integration/gitlab.md).
 
 ## Step 9: Layer Xcode on top
 
@@ -65,7 +65,7 @@ Xcode image from it — this reuses the installed, provisioned macOS instead of
 starting over from the IPSW:
 
 ```bash
-phantom image build xcode-26-6 --image macos-sequoia-base \
+phantom image build xcode-26-6 --image tahoe-base \
   --xcode http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
 ```
 
@@ -92,6 +92,18 @@ lists it in the catalog `phantom image list` reads:
 ```bash
 docker login ghcr.io     # credentials also picked up from PHANTOM_REGISTRY_USERNAME/PASSWORD
 phantom image publish xcode-26-6 --description "macOS 26 + Xcode 26.6 + all simulator runtimes"
+```
+
+A newly created ghcr package is **private**, so this one-time step is needed
+before anyone else can pull: open the package's settings on GitHub and change
+its visibility to public — for both the image and the `catalog` package. Until
+then anonymous requests get a 403, which is worth checking rather than assuming:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=repository:phantom-vm/xcode-26-6:pull&service=ghcr.io' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')" \
+  -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+  https://ghcr.io/v2/phantom-vm/xcode-26-6/manifests/latest      # expect 200
 ```
 
 Afterwards any machine can `phantom image pull xcode-26-6`, which resolves the

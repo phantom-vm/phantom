@@ -33,7 +33,15 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
 ## Prerequisites
 
 1. **Phantom daemon running** on the host Mac
-2. **A base image** with `phantom-agent` installed (see [create-image.md](../create-image.md))
+2. **An image with `phantom-agent` installed** — pull a published one, which is
+   the usual case:
+
+   ```bash
+   phantom image list
+   phantom image pull xcode-26-6
+   ```
+
+   Authoring your own instead is covered in [create-image.md](../create-image.md).
 
 ## Setup
 
@@ -58,12 +66,15 @@ That's it. The daemon downloads `gitlab-runner` (pinned version, stored under `~
 3. Point your jobs at a phantom image with the `image:` keyword (job-level or `default:`), using a local image name from `phantom image list`:
 
 ```yaml
-build:
-  image: tahoe-base
+test:
+  image: xcode-26-6
   tags: [phantom]
   script:
-    - xcodebuild ...
+    - xcodebuild test -scheme MyApp -destination 'platform=macOS'
 ```
+
+The image must already be pulled on the host — a job's `image:` names a **local**
+image and does not trigger a pull.
 
 Jobs without an `image:` fail with a clear error — the runner itself has no image configuration.
 

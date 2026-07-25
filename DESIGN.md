@@ -584,8 +584,8 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 3. Push manifest with tag (`PUT`)
 
 **Pull (Registry → Local Image)**:
-1. Fetch manifest from registry (`GET`)
-2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`, naming each chunk file after its layer's `chunk-index` so restore can find its offset
+1. Fetch manifest from registry (`GET`), verified against the requested digest when the reference is one
+2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`, naming each chunk file after its layer's `chunk-index` so restore can find its offset. Disk chunks download concurrently, bounded by the same `min(cores, 6)` cap as save/restore — one connection to a registry CDN is the bottleneck, not the link: serial pulls measured ~9MB/s against ghcr where the same link pushed at ~23MB/s, and concurrency took a 58.9GB image from an estimated two hours to 41 minutes
 3. Save manifest locally
 
 **Create from Image (Local Image → VM)**:
