@@ -72,8 +72,21 @@ class VMManager {
 
     // MARK: - Public API
 
-    func createAndStartVM(vmId: String? = nil) async {
-        guard let ipswPath = ipswManager.downloadedPath else { return }
+    func createAndStartVM(vmId: String? = nil, ipswId: String? = nil) async {
+        // The API always names an IPSW; only the GUI's "Create & Start VM"
+        // button (no picker) falls back to whichever download exists.
+        let ipswPath: URL
+        if let ipswId {
+            guard let info = ipswManager.list().first(where: { $0.id == ipswId }) else {
+                log("IPSW not found: \(ipswId)")
+                return
+            }
+            ipswPath = URL(fileURLWithPath: info.path)
+        } else if let fallback = ipswManager.downloadedPath {
+            ipswPath = fallback
+        } else {
+            return
+        }
 
         let generatedId = vmId ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
 

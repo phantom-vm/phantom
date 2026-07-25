@@ -227,7 +227,7 @@ struct APIHandlers {
             // Install runs in the background (~20 min); return the vmId now so
             // callers can poll vm.list for its state (creating → installing → running).
             let vmId = "vm-\(UUID().uuidString.prefix(8).lowercased())"
-            Task { await vmManager.createAndStartVM(vmId: vmId) }
+            Task { await vmManager.createAndStartVM(vmId: vmId, ipswId: ipswId) }
 
             return AnyCodable([
                 "status": "started",
