@@ -7,10 +7,11 @@
 #
 #   phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt
 #
-# Prerequisite: stage the agent into the shared folder first, so the guest can
-# install it from /Volumes/phantom-shared:
-#
-#   cd phantom-agent && ./init-host-shared-folder.sh
+# No host-side prerequisite: the agent is installed by fetching the published
+# agent-install.sh release asset over the guest's NAT network (the installer
+# verifies the binary against a SHA-256 pinned inside it at release time).
+# When iterating on the agent locally, point the fetch at a dev-served
+# installer instead with `image build --agent-url` (see phantom-agent/README.md).
 #
 # Screens are matched by on-screen text, so exact button coordinates don't
 # matter, but timings assume a cold first boot. Setup Assistant wording differs
@@ -78,10 +79,11 @@
 # Open Terminal via Spotlight
 <leftAltOn><spacebar><leftAltOff><wait2s>Terminal<wait2s><enter><wait8s>
 
-# Mount the host shared folder and install the agent. sudo reads the password
-# from stdin; the first access to the virtiofs volume triggers a TCC prompt.
-echo admin | sudo -S mkdir -p /Volumes/phantom-shared && echo admin | sudo -S mount_virtiofs phantom-shared /Volumes/phantom-shared && sudo /Volumes/phantom-shared/install.sh<enter><wait5s>
-<click 'Allow'><wait10s>
+# Fetch the published agent installer and run it as root; it downloads the
+# binary, checks the pinned SHA-256, and loads the launchd daemon. sudo reads
+# the password from stdin. The retries wait out a NAT link that is still
+# settling on first use.
+curl -fsSL --retry 5 --retry-connrefused --retry-all-errors -o /tmp/agent-install.sh https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh && echo admin | sudo -S sh /tmp/agent-install.sh<enter><wait20s>
 
 # Quit Terminal so the saved image boots to a clean desktop (Alt = Command in
 # the guest). The shell is idle now, so Cmd+Q closes it without a prompt.

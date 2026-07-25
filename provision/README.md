@@ -10,16 +10,18 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
 ```
 
 1. **Install** — `phantom vm deploy --ipsw <id>` installs macOS headlessly.
-2. **Stage the agent** — `cd phantom-agent && ./init-host-shared-folder.sh`
-   builds `phantom-agent` and copies it into the shared folder.
-3. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
+2. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
    drives Setup Assistant over VNC (keystrokes + OCR clicks): creates a local
    admin account `admin`/`admin`, skips every online step, reaches the
-   desktop, and installs the agent. After this the agent answers on vsock.
-4. **Provision** — `phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"`
+   desktop, and installs the agent by fetching the published `agent-install.sh`
+   release asset over the guest's NAT network (the installer checks the
+   binary against a SHA-256 pinned at release time). After this the agent
+   answers on vsock. For a dev agent, see `image build --agent-url` in
+   [phantom-agent/README.md](../phantom-agent/README.md).
+3. **Provision** — `phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"`
    (or copy the script in) configures passwordless sudo, auto-login, and
    disables sleep / screensaver / screen lock — all over vsock.
-5. **Save** — `phantom vm stop <vm-id>` then `phantom image save <vm-id> macos-tahoe-base`.
+4. **Save** — `phantom vm stop <vm-id>` then `phantom image save <vm-id> macos-tahoe-base`.
 
 ## Toolchain images
 
@@ -37,10 +39,10 @@ phantom image build xcode-26-6 --image tahoe-base \
 ```
 
 The `--xcode` value is either a URL the guest can reach — downloaded inside the
-guest, so 10GB never passes through the shared folder — or a local `.xip` path,
-which is copied into the shared folder and read from `/Volumes/phantom-shared`.
-Apple's signature on the archive is checked by `xip --expand`, which is also
-what makes the download safe to trust.
+guest, so 10GB never passes through the host — or a local `.xip` path, which
+the CLI serves to the guest over an ephemeral HTTP server on the vmnet bridge
+for the duration of the install. Apple's signature on the archive is checked by
+`xip --expand`, which is also what makes the download safe to trust.
 
 Every simulator runtime is downloaded too (`xcodebuild -downloadAllPlatforms`),
 since Xcode ships with none — that is tens of GB once at build time instead of

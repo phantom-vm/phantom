@@ -3,9 +3,9 @@
 # phantom-agent over vsock), after provision.sh has run and the desktop is up.
 #
 # The .xip is named by XCODE_SRC (or $1), either an http(s) URL the guest can
-# reach or a path already visible inside the guest — typically a file staged
-# into /Volumes/phantom-shared. A URL is downloaded straight into the guest so
-# no 10GB copy has to pass through the shared folder.
+# reach or a path already visible inside the guest. A URL is downloaded
+# straight into the guest — `image build --xcode <local path>` serves the file
+# to the guest over an ephemeral HTTP server on the host for exactly this.
 #
 #   XCODE_SRC=http://host:9001/xcodes/Xcode-26.6.0+17F113.xip sh install-xcode.sh
 #
@@ -42,7 +42,7 @@ case "$SRC" in
   *)
     XIP="$SRC"
     [ -f "$XIP" ] || { echo "Not found in guest: $XIP"; exit 1; }
-    echo "Using staged .xip $XIP"
+    echo "Using guest-local .xip $XIP"
     ;;
 esac
 

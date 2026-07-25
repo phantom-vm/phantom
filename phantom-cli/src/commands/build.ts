@@ -4,7 +4,8 @@ import { waitForVMRunning } from "../lib/wait";
 // MARK: - image build orchestrator
 //
 // Two ways in, one way out. From scratch:
-//   ipsw → vm.create → boot-script (Setup Assistant) → provision (vsock)
+//   ipsw → vm.create → boot-script (Setup Assistant + agent bootstrap via
+//        curl | sudo sh of the published agent-install.sh) → provision (vsock)
 //        → gitlab-runner → [install Xcode] → vm.stop → image.save
 //
 // Or on top of an image built that way — the fast path for layering a toolchain
@@ -21,7 +22,7 @@ interface BuildOptions {
   fromImage?: string;
   bootScript: string;
   provision: string;
-  agentDir?: string;
+  agentUrl?: string;
   xcode?: string;
   xcodeScript: string;
   gitlabRunner: boolean;
@@ -49,7 +50,7 @@ function parseArgs(args: string[]): BuildOptions | null {
     else if (a === "--image") opts.fromImage = args[++i];
     else if (a === "--boot-script") opts.bootScript = args[++i]!;
     else if (a === "--provision") opts.provision = args[++i]!;
-    else if (a === "--agent-dir") opts.agentDir = args[++i];
+    else if (a === "--agent-url") opts.agentUrl = args[++i];
     else if (a === "--xcode") opts.xcode = args[++i];
     else if (a === "--xcode-script") opts.xcodeScript = args[++i]!;
     else if (a === "--no-gitlab-runner") opts.gitlabRunner = false;
@@ -64,6 +65,10 @@ function parseArgs(args: string[]): BuildOptions | null {
 }
 
 const isURL = (s: string) => /^https?:\/\//.test(s);
+
+// The installer URL setup-tahoe.txt fetches; --agent-url rewrites it in place.
+const RELEASE_AGENT_INSTALL_URL =
+  "https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -91,9 +96,10 @@ export async function imageBuild(...args: string[]) {
     console.error("                         (skips Setup Assistant and provisioning)");
     console.error("  --boot-script <path>   Setup Assistant script (default: provision/setup-tahoe.txt)");
     console.error("  --provision <path>     Provision script (default: provision/provision.sh)");
-    console.error("  --agent-dir <path>     phantom-agent dir to stage into the shared folder first");
+    console.error("  --agent-url <url>      agent-install.sh for the boot script to fetch, instead of");
+    console.error("                         the latest GitHub release asset (for agent development)");
     console.error("  --xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,");
-    console.error("                         local path staged through the shared folder)");
+    console.error("                         local path served to the guest over HTTP)");
     console.error("  --xcode-script <path>  Xcode installer script (default: provision/install-xcode.sh)");
     console.error("  --no-gitlab-runner     Skip baking gitlab-runner into the image");
     console.error("  --gitlab-runner-version <v>  Runner version to bake in (default: the script's pin)");
@@ -116,15 +122,30 @@ async function run(opts: BuildOptions) {
     throw new Error("--image and --ipsw are mutually exclusive");
   }
 
-  // Getting to a booted, agent-answering VM takes five steps from an IPSW and
+  // Getting to a booted, agent-answering VM takes four steps from an IPSW and
   // one from an image; everything after that is shared.
   const total =
-    (opts.fromImage ? 1 : 5) + (opts.gitlabRunner ? 1 : 0) + (opts.xcode ? 1 : 0) + 3;
+    (opts.fromImage ? 1 : 4) + (opts.gitlabRunner ? 1 : 0) + (opts.xcode ? 1 : 0) + 3;
   let n = 0;
   const step = (msg: string) => console.log(`\n[${++n}/${total}] ${msg}`);
 
   // Read scripts up front so a typo fails before the 20-minute install.
-  const bootCommands = opts.fromImage ? [] : await readScriptLines(opts.bootScript);
+  let bootCommands = opts.fromImage ? [] : await readScriptLines(opts.bootScript);
+
+  // Agent development override: retarget the boot script's installer fetch
+  // from the published release asset to a dev-served agent-install.sh.
+  if (opts.agentUrl && !opts.fromImage) {
+    const before = bootCommands;
+    bootCommands = bootCommands.map((l) =>
+      l.split(RELEASE_AGENT_INSTALL_URL).join(opts.agentUrl!)
+    );
+    if (bootCommands.every((l, i) => l === before[i])) {
+      throw new Error(
+        `--agent-url given, but ${opts.bootScript} does not fetch ${RELEASE_AGENT_INSTALL_URL}`
+      );
+    }
+  }
+
   let provisionBody = "";
   if (!opts.fromImage) {
     provisionBody = await Bun.file(opts.provision).text();
@@ -168,15 +189,7 @@ async function run(opts: BuildOptions) {
     const ipswId = await resolveIpsw(opts.fromIpsw);
     console.log(`    using IPSW ${ipswId}`);
 
-    // 2. Stage the agent into the shared folder (optional)
-    if (opts.agentDir) {
-      step(`Staging phantom-agent from ${opts.agentDir}`);
-      await stageAgent(opts.agentDir);
-    } else {
-      step("Skipping agent staging (assuming shared folder is already staged)");
-    }
-
-    // 3. Create the VM and wait out the macOS install
+    // 2. Create the VM and wait out the macOS install
     step("Installing macOS from IPSW (this takes a while)");
     const createRes = await call("vm.create", { ipswId }, 60_000);
     vmId = createRes.vmId;
@@ -189,13 +202,13 @@ async function run(opts: BuildOptions) {
     });
     console.log(`    install complete, VM running`);
 
-    // 4. Drive Setup Assistant + install the agent over VNC
+    // 3. Drive Setup Assistant + install the agent over VNC
     step(`Running boot script (${bootCommands.length} commands)`);
     await call("vm.bootScript", { vmId, commands: bootCommands }, 60_000);
     await waitForBootScript(vmId);
     console.log(`    boot script complete`);
 
-    // 5. Provision over vsock (agent is up now)
+    // 4. Provision over vsock (agent is up now)
     step("Provisioning over vsock");
     // 30 min: provisioning includes the headless CLT download + install
     const provRes = await call(
@@ -280,35 +293,64 @@ async function installGitLabRunner(vmId: string, scriptBody: string, version?: s
 // would land them on the last line.
 async function installXcode(vmId: string, source: string, scriptBody: string) {
   let guestSrc = source;
+  let server: ReturnType<typeof serveXip> | undefined;
   if (!isURL(source)) {
-    guestSrc = await stageXip(source);
-    console.log(`    staged into the shared folder as ${guestSrc}`);
+    server = serveXip(source);
+    guestSrc = server.url;
+    console.log(`    serving ${source} to the guest at ${guestSrc}`);
   }
 
-  const command = `XCODE_SRC='${guestSrc.replace(/'/g, "'\\''")}'\n${scriptBody}`;
-  // 3h: a ~10GB download plus xip expansion, first launch and every runtime.
-  const res = await call("vm.exec", { vmId, command, waitForAgent: true }, 3 * 3600_000);
-  const log = (res.stdout as string) ?? "";
-  for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
-  if (res.exitCode !== 0) {
-    throw new Error(`Xcode install exited ${res.exitCode}: ${res.stderr ?? ""}`);
-  }
-  if (!log.includes("XCODE_INSTALL_DONE")) {
-    throw new Error("Xcode install did not report completion");
+  try {
+    const command = `XCODE_SRC='${guestSrc.replace(/'/g, "'\\''")}'\n${scriptBody}`;
+    // 3h: a ~10GB download plus xip expansion, first launch and every runtime.
+    const res = await call("vm.exec", { vmId, command, waitForAgent: true }, 3 * 3600_000);
+    const log = (res.stdout as string) ?? "";
+    for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
+    if (res.exitCode !== 0) {
+      throw new Error(`Xcode install exited ${res.exitCode}: ${res.stderr ?? ""}`);
+    }
+    if (!log.includes("XCODE_INSTALL_DONE")) {
+      throw new Error("Xcode install did not report completion");
+    }
+  } finally {
+    server?.stop();
   }
 }
 
-// Copies a local .xip into the host's shared folder, which the guest sees at
-// /Volumes/phantom-shared. Returns the guest-side path.
-async function stageXip(path: string): Promise<string> {
+// Serves a local .xip to the guest over an ephemeral HTTP server bound to the
+// host side of the NAT network, so no 10GB copy is made and no shared folder
+// is needed. Lives only for the duration of the install.
+function serveXip(path: string): { url: string; stop: () => void } {
+  const hostIP = natBridgeAddress();
   const name = path.split("/").pop()!;
-  const shared = `${process.env.HOME}/Library/Application Support/phantom/shared`;
-  const proc = Bun.spawn(["cp", path, `${shared}/${name}`], {
-    stdout: "inherit",
-    stderr: "inherit",
+  const server = Bun.serve({
+    hostname: hostIP,
+    port: 0,
+    // Only the .xip itself is served, whatever the path — nothing else on the
+    // host is reachable through this.
+    fetch: () => new Response(Bun.file(path)),
   });
-  if ((await proc.exited) !== 0) throw new Error(`failed to stage ${path} into ${shared}`);
-  return `/Volumes/phantom-shared/${name}`;
+  return {
+    url: `http://${hostIP}:${server.port}/${encodeURIComponent(name)}`,
+    stop: () => server.stop(true),
+  };
+}
+
+// The vmnet NAT network's host-side address — a NAT guest reaches the host
+// there. The bridge interface only exists while a NAT VM is running, which it
+// is by the time Xcode is installed.
+function natBridgeAddress(): string {
+  const proc = Bun.spawnSync(["ifconfig"]);
+  const blocks = proc.stdout.toString().split(/^(?=\S)/m);
+  for (const block of blocks) {
+    if (block.startsWith("bridge")) {
+      const m = block.match(/inet (\d+\.\d+\.\d+\.\d+)/);
+      if (m) return m[1]!;
+    }
+  }
+  throw new Error(
+    "cannot find the vmnet bridge address (is the VM running?) — pass --xcode as a URL instead"
+  );
 }
 
 async function resolveIpsw(fromIpsw?: string): Promise<string> {
@@ -327,16 +369,6 @@ async function resolveIpsw(fromIpsw?: string): Promise<string> {
     );
   }
   return ipsws[0]!.id;
-}
-
-async function stageAgent(agentDir: string) {
-  const proc = Bun.spawn(["./init-host-shared-folder.sh"], {
-    cwd: agentDir,
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const code = await proc.exited;
-  if (code !== 0) throw new Error(`init-host-shared-folder.sh exited ${code}`);
 }
 
 async function waitForBootScript(vmId: string, maxMs = 20 * 60_000) {

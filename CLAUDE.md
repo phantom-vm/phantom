@@ -80,12 +80,9 @@ cd phantom-cli
 bun run src/main.ts health
 ```
 
-**Deploy guest agent**:
-```bash
-cd phantom-agent
-./init-host-shared-folder.sh
-# Then install in VM
-```
+**Deploy guest agent**: VMs bootstrap it from the published `agent-install.sh`
+release asset; see [phantom-agent/README.md](phantom-agent/README.md) for the
+dev override.
 
 ## Additional Resources
 

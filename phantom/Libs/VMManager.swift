@@ -834,13 +834,9 @@ class VMManager {
         // Vsock for host-guest communication
         config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
 
-        // Shared directory (host → guest) - common across all VMs
-        let sharedDir = baseDir.appendingPathComponent("shared", isDirectory: true)
-        try? FileManager.default.createDirectory(at: sharedDir, withIntermediateDirectories: true)
-        let share = VZSingleDirectoryShare(directory: VZSharedDirectory(url: sharedDir, readOnly: false))
-        let fsConfig = VZVirtioFileSystemDeviceConfiguration(tag: "phantom-shared")
-        fsConfig.share = share
-        config.directorySharingDevices = [fsConfig]
+        // No directory sharing devices: everything the guest needs arrives
+        // over the network or vsock, and a host share exposed read-write to a
+        // CI VM running untrusted code would be a hole.
 
         return config
     }

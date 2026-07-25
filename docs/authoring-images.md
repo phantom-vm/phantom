@@ -16,7 +16,7 @@ resolve:
 phantom ipsw list                                   # catalog of macOS restore images
 phantom ipsw pull 26.3                              # ~14GB from Apple's CDN
 
-phantom image build tahoe-base --agent-dir phantom-agent
+phantom image build tahoe-base
 phantom image build xcode-26-6 --image tahoe-base --xcode <url-or-path-to-xip>
 phantom image publish xcode-26-6 --description "macOS 26 + Xcode 26.6 + all simulator runtimes"
 ```
@@ -40,9 +40,13 @@ ipsw → vm.create (headless install) → Setup Assistant automation over VNC
 Setup Assistant is driven with no guest-side software: the daemon serves the VM's
 framebuffer from the host via `_VZVNCServer` (a private API, invoked by
 reflection) and a Swift VNC client injects keystrokes and clicks on-screen text
-located with Vision.framework OCR. Once the agent is installed by VNC-typed
-Terminal commands, everything after that runs through `vm.exec` over vsock — no
-SSH.
+located with Vision.framework OCR. The agent is bootstrapped by one VNC-typed
+Terminal command that fetches the published `agent-install.sh` release asset
+over the guest's NAT network and runs it as root — the installer verifies the
+binary against a SHA-256 pinned into it at release time. Everything after that
+runs through `vm.exec` over vsock — no SSH. To build with an unreleased agent,
+`--agent-url` points that fetch at a dev-served installer instead
+([phantom-agent/README.md](../phantom-agent/README.md)).
 
 The boot script is **per macOS version**, because Setup Assistant's wording
 changes between releases: [provision/setup-tahoe.txt](../provision/setup-tahoe.txt)
@@ -78,7 +82,8 @@ published again.
 `--image <name>` boots a VM from a finished image instead of installing macOS, so
 Setup Assistant and provisioning are already done. `--xcode <url|path>` then
 installs Xcode from a `.xip`: a URL is fetched by the guest itself (no 10GB
-detour through the host), a local path is staged through the shared folder.
+detour through the host), a local path is served to the guest over an ephemeral
+HTTP server on the vmnet bridge.
 `xip --expand` verifies Apple's signature on the archive, which doubles as the
 integrity check. Every simulator runtime is downloaded too, since Xcode ships
 with none and otherwise every CI job would pay for that.
@@ -127,24 +132,22 @@ changed wording.
 4. **Walk through Setup Assistant** — `phantom vm vnc <vm-id>` (or "Show Display"),
    skip Apple ID, create a local admin account. This is the part being scripted,
    so note the exact wording of each screen.
-5. **Stage the agent** — on the host, `cd phantom-agent && ./init-host-shared-folder.sh`
-   builds it into the shared folder.
-6. **Install the agent** — in the guest:
+5. **Install the agent** — in the guest's Terminal:
 
    ```bash
-   sudo mkdir -p /Volumes/phantom-shared
-   sudo mount_virtiofs phantom-shared /Volumes/phantom-shared
-   cd /Volumes/phantom-shared && sudo ./install.sh
+   curl -fsSL https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh \
+     -o /tmp/agent-install.sh
+   sudo sh /tmp/agent-install.sh
    ```
 
-   It installs `/usr/local/bin/phantom-agent` and a launchd daemon
-   (`com.monk.phantom-agent`) that starts on boot.
-7. **Check vsock works** — `phantom vm exec <vm-id> -- whoami` should answer from
+   It downloads `/usr/local/bin/phantom-agent`, verifies its pinned SHA-256,
+   and loads a launchd daemon (`com.monk.phantom-agent`) that starts on boot.
+6. **Check vsock works** — `phantom vm exec <vm-id> -- whoami` should answer from
    inside the VM.
-8. **Provision and save** — apply [provision/provision.sh](../provision/provision.sh),
+7. **Provision and save** — apply [provision/provision.sh](../provision/provision.sh),
    then `phantom vm stop <vm-id>` and `phantom image save <vm-id> <name>`.
 
-Steps 2–8 are exactly what `phantom image build --ipsw` does unattended.
+Steps 2–7 are exactly what `phantom image build --ipsw` does unattended.
 
 ## Related
 

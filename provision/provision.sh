@@ -4,7 +4,7 @@
 # installed. Prepares a hands-off CI-friendly macOS: passwordless sudo, auto
 # login, and no sleep / screensaver / screen lock.
 #
-#   phantom vm exec <vm-id> -- sh /Volumes/phantom-shared/provision.sh
+#   phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"
 #
 # Assumes an admin account "admin" with password "admin".
 set -e
