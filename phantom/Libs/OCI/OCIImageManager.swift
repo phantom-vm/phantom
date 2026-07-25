@@ -49,7 +49,13 @@ class OCIImageManager {
     /// - Parameters:
     ///   - name: Image name
     ///   - bundlePath: Path to the VM bundle directory
-    func save(name: String, bundlePath: URL) async {
+    ///   - replace: Overwrite an image of the same name instead of failing.
+    ///     Rebuilding an image in place is the normal way to refresh one (its
+    ///     name is what jobs and `image publish` refer to), and there is no
+    ///     rename — so the new copy is written beside the old one and swapped
+    ///     in only once it is complete. A failed save leaves the old image
+    ///     untouched, at the cost of needing room for both while it runs.
+    func save(name: String, bundlePath: URL, replace: Bool = false) async {
         guard state == .idle || isTerminalState else {
             state = .error("An operation is already in progress")
             return
@@ -58,8 +64,13 @@ class OCIImageManager {
         state = .saving(progress: 0, message: "Preparing...")
         log("Saving VM to image '\(name)'...")
 
-        let imageDir = imagesDir.appendingPathComponent(name)
+        let finalDir = imagesDir.appendingPathComponent(name)
+        let replacing = replace && FileManager.default.fileExists(atPath: finalDir.path)
+        let imageDir = replacing
+            ? imagesDir.appendingPathComponent(".\(name).saving-\(UUID().uuidString)")
+            : finalDir
         let diskDir = imageDir.appendingPathComponent("disk")
+        if replacing { log("Image '\(name)' exists — building a replacement alongside it") }
 
         do {
             // Run all heavy I/O on a background thread
@@ -143,6 +154,13 @@ class OCIImageManager {
             let manifestData = try manifest.toJSON()
             try manifestData.write(to: imageDir.appendingPathComponent("manifest.json"))
             try ociConfigData.write(to: imageDir.appendingPathComponent("oci-config.json"))
+
+            // The replacement is complete — swap it in. The old image (and its
+            // pulled.json, which no longer describes these bytes) goes away.
+            if replacing {
+                try? FileManager.default.removeItem(at: finalDir)
+                try FileManager.default.moveItem(at: imageDir, to: finalDir)
+            }
 
             log("Image '\(name)' saved successfully (\(chunkMetadata.count) disk chunks, all-zero chunks omitted)")
             state = .completed(message: "Image '\(name)' saved")

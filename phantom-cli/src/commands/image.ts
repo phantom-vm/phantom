@@ -117,17 +117,20 @@ export async function imageDelete(name?: string) {
 }
 
 export async function imageSave(...args: string[]) {
-  if (args.length < 2) {
-    console.error("Usage: phantom image save <vmId> <imageName>");
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const replace = args.includes("--replace");
+
+  if (positional.length < 2) {
+    console.error("Usage: phantom image save <vmId> <imageName> [--replace]");
     process.exit(1);
   }
 
-  const vmId = args[0];
-  const name = args[1];
+  const vmId = positional[0];
+  const name = positional[1];
 
   const response = await sendRequest({
     method: "image.save",
-    params: { vmId, name },
+    params: { vmId, name, replace },
   });
 
   if (response.error) {
@@ -135,8 +138,14 @@ export async function imageSave(...args: string[]) {
     process.exit(1);
   }
 
-  console.log(`Saving VM '${vmId}' as image '${name}'...`);
-  console.log("Use 'phantom image list' to check progress.");
+  console.log(`Saving VM '${vmId}' as image '${name}'${replace ? " (replacing)" : ""}...`);
+  // A replacement is built beside the existing image and swapped in at the end,
+  // so the name is in `image list` throughout — watch the daemon log instead.
+  console.log(
+    replace
+      ? "The old image stays in place until the new one is complete."
+      : "Use 'phantom image list' to check progress."
+  );
 }
 
 export async function imagePush(...args: string[]) {

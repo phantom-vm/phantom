@@ -512,9 +512,13 @@ struct APIHandlers {
             throw APIHandlerError.invalidParams("VM must be stopped before saving as image")
         }
 
+        let replace = params?["replace"]?.value as? Bool ?? false
+
         // Start save (async operation)
         Task {
-            await vmManager.imageManager.save(name: name, bundlePath: instance.bundlePath)
+            await vmManager.imageManager.save(
+                name: name, bundlePath: instance.bundlePath, replace: replace
+            )
         }
 
         return AnyCodable([

@@ -4,11 +4,15 @@ import { sendRequest, type VM } from "../lib/api";
 //
 // Two ways in, one way out. From scratch:
 //   ipsw → vm.create → boot-script (Setup Assistant) → provision (vsock)
-//        → [install Xcode] → vm.stop → image.save
+//        → gitlab-runner → [install Xcode] → vm.stop → image.save
 //
 // Or on top of an image built that way — the fast path for layering a toolchain
 // onto an existing base, since macOS is already installed and provisioned:
-//   vm.create --fromImage → [install Xcode] → vm.stop → image.save
+//   vm.create --fromImage → gitlab-runner → [install Xcode] → vm.stop → image.save
+//
+// The gitlab-runner step runs on both paths, so a published image can be
+// refreshed with nothing but that step: build it from itself with --replace and
+// no --xcode.
 
 interface BuildOptions {
   imageName: string;
@@ -19,6 +23,10 @@ interface BuildOptions {
   agentDir?: string;
   xcode?: string;
   xcodeScript: string;
+  gitlabRunner: boolean;
+  gitlabRunnerScript: string;
+  gitlabRunnerVersion?: string;
+  replace: boolean;
   keepVm: boolean;
 }
 
@@ -28,6 +36,9 @@ function parseArgs(args: string[]): BuildOptions | null {
     bootScript: "provision/setup-tahoe.txt",
     provision: "provision/provision.sh",
     xcodeScript: "provision/install-xcode.sh",
+    gitlabRunner: true,
+    gitlabRunnerScript: "provision/install-gitlab-runner.sh",
+    replace: false,
     keepVm: false,
   };
 
@@ -40,6 +51,10 @@ function parseArgs(args: string[]): BuildOptions | null {
     else if (a === "--agent-dir") opts.agentDir = args[++i];
     else if (a === "--xcode") opts.xcode = args[++i];
     else if (a === "--xcode-script") opts.xcodeScript = args[++i]!;
+    else if (a === "--no-gitlab-runner") opts.gitlabRunner = false;
+    else if (a === "--gitlab-runner-script") opts.gitlabRunnerScript = args[++i]!;
+    else if (a === "--gitlab-runner-version") opts.gitlabRunnerVersion = args[++i];
+    else if (a === "--replace") opts.replace = true;
     else if (a === "--keep-vm") opts.keepVm = true;
     else if (!a!.startsWith("--") && !opts.imageName) opts.imageName = a!;
   }
@@ -79,6 +94,10 @@ export async function imageBuild(...args: string[]) {
     console.error("  --xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,");
     console.error("                         local path staged through the shared folder)");
     console.error("  --xcode-script <path>  Xcode installer script (default: provision/install-xcode.sh)");
+    console.error("  --no-gitlab-runner     Skip baking gitlab-runner into the image");
+    console.error("  --gitlab-runner-version <v>  Runner version to bake in (default: the script's pin)");
+    console.error("  --gitlab-runner-script <path>  (default: provision/install-gitlab-runner.sh)");
+    console.error("  --replace              Overwrite an existing image of the same name");
     console.error("  --keep-vm              Keep the intermediate VM after saving");
     process.exit(1);
   }
@@ -98,7 +117,8 @@ async function run(opts: BuildOptions) {
 
   // Getting to a booted, agent-answering VM takes five steps from an IPSW and
   // one from an image; everything after that is shared.
-  const total = (opts.fromImage ? 1 : 5) + (opts.xcode ? 1 : 0) + 3;
+  const total =
+    (opts.fromImage ? 1 : 5) + (opts.gitlabRunner ? 1 : 0) + (opts.xcode ? 1 : 0) + 3;
   let n = 0;
   const step = (msg: string) => console.log(`\n[${++n}/${total}] ${msg}`);
 
@@ -108,6 +128,12 @@ async function run(opts: BuildOptions) {
   if (!opts.fromImage) {
     provisionBody = await Bun.file(opts.provision).text();
     if (!provisionBody.trim()) throw new Error(`empty provision script: ${opts.provision}`);
+  }
+
+  let runnerBody = "";
+  if (opts.gitlabRunner) {
+    runnerBody = await Bun.file(opts.gitlabRunnerScript).text();
+    if (!runnerBody.trim()) throw new Error(`empty gitlab-runner script: ${opts.gitlabRunnerScript}`);
   }
 
   // Same for the Xcode installer and, when it is a local .xip, the archive
@@ -175,6 +201,13 @@ async function run(opts: BuildOptions) {
     console.log(`    provisioned`);
   }
 
+  // Bake in gitlab-runner (before Xcode: a 60MB download that fails fast beats
+  // finding out after three hours of Xcode install)
+  if (opts.gitlabRunner) {
+    step("Installing gitlab-runner");
+    await installGitLabRunner(vmId, runnerBody, opts.gitlabRunnerVersion);
+  }
+
   // Install Xcode (optional)
   if (opts.xcode) {
     step(`Installing Xcode from ${opts.xcode} (+ every simulator runtime)`);
@@ -192,9 +225,9 @@ async function run(opts: BuildOptions) {
   await call("vm.stop", { vmId }, 60_000);
 
   // Save the image
-  step(`Saving image '${opts.imageName}'`);
-  await call("image.save", { vmId, name: opts.imageName }, 60_000);
-  await waitForImage(opts.imageName);
+  step(`Saving image '${opts.imageName}'${opts.replace ? " (replacing)" : ""}`);
+  await call("image.save", { vmId, name: opts.imageName, replace: opts.replace }, 60_000);
+  await waitForSave(opts.imageName);
   console.log(`    image saved`);
 
   // Clean up the intermediate VM
@@ -206,6 +239,29 @@ async function run(opts: BuildOptions) {
   }
 
   console.log(`\n✓ Image '${opts.imageName}' built successfully`);
+}
+
+// MARK: - gitlab-runner
+
+// Puts `gitlab-runner` on PATH in the guest, so a job declaring artifacts: or
+// cache: gets its upload stages run instead of silently skipped — the custom
+// executor runs those inside the job environment too.
+async function installGitLabRunner(vmId: string, scriptBody: string, version?: string) {
+  // Same trick as the Xcode installer: the version is prepended as an
+  // assignment rather than passed as an argument, which vm.exec would append
+  // after the script's last line.
+  const command = version
+    ? `RUNNER_VERSION='${version.replace(/'/g, "'\\''")}'\n${scriptBody}`
+    : scriptBody;
+  const res = await call("vm.exec", { vmId, command, waitForAgent: true }, 15 * 60_000);
+  const log = (res.stdout as string) ?? "";
+  for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
+  if (res.exitCode !== 0) {
+    throw new Error(`gitlab-runner install exited ${res.exitCode}: ${res.stderr ?? ""}`);
+  }
+  if (!log.includes("GITLAB_RUNNER_INSTALL_DONE")) {
+    throw new Error("gitlab-runner install did not report completion");
+  }
 }
 
 // MARK: - Xcode
@@ -315,12 +371,38 @@ async function waitForBootScript(vmId: string, maxMs = 20 * 60_000) {
   throw new Error("boot script timed out");
 }
 
-async function waitForImage(name: string, maxMs = 10 * 60_000) {
+// Waits out image.save, which is fire-and-forget on the daemon side.
+//
+// This tracks image.status rather than watching for the name to turn up in
+// image.list: with --replace the name is there the whole time (that is the
+// point — the old image stays usable until the new one is complete), so a
+// list-based wait returns immediately and the VM gets deleted out from under
+// the save that is still reading its disk.
+//
+// A save is only over once the state leaves `saving`, so wait for that state to
+// appear first — a stale `completed` from an earlier operation would otherwise
+// end the wait before the save had begun. Chunking a real VM disk takes minutes,
+// so the window cannot be missed at this poll interval.
+async function waitForSave(name: string, maxMs = 60 * 60_000) {
   const deadline = Date.now() + maxMs;
+  let started = false;
+  let lastMsg = "";
   while (Date.now() < deadline) {
-    const res = await call("image.list");
-    if ((res.images as { name: string }[]).some((i) => i.name === name)) return;
+    const { state, message } = (await call("image.status")) as {
+      state: string;
+      message?: string;
+    };
+    if (state === "saving") {
+      started = true;
+      if (message && message !== lastMsg) {
+        console.log(`    ${message}`);
+        lastMsg = message;
+      }
+    } else if (started) {
+      if (state === "completed") return;
+      throw new Error(`image save failed (${state}): ${message ?? ""}`);
+    }
     await sleep(3_000);
   }
-  throw new Error("image save timed out");
+  throw new Error(`image save of '${name}' timed out`);
 }

@@ -27,6 +27,7 @@ Three steps, three different jobs:
 |---|---|---|
 | `image build <name> --ipsw` | IPSW → installed, provisioned, agent-equipped base image | ~1 hour |
 | `image build <name> --image <base>` | Layers a toolchain onto a finished image, skipping install and provisioning | Depends on the toolchain |
+| `image build <name> --image <name> --replace` | Rebuilds an image in place — the cheap way to add one thing | Decompress + save |
 | `image publish <name>` | Pushes to the registry and rewrites the catalog users read | ~40 min for 55GB |
 
 ## Building a base image
@@ -49,6 +50,28 @@ targets Tahoe 26.x and creates a local admin `admin`/`admin` with passwordless
 sudo and auto-login. Authoring one for a new release is the one case
 where [doing it by hand](#doing-it-by-hand) earns its keep.
 [provision/README.md](../provision/README.md) covers the scripts themselves.
+
+## gitlab-runner
+
+Both build paths install `gitlab-runner` into the guest's `/usr/local/bin`
+([provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh)),
+because GitLab's custom executor runs a job's artifact and cache stages *inside*
+the VM — without the binary they are silently skipped and `artifacts:` never
+uploads anything. `--no-gitlab-runner` skips it, `--gitlab-runner-version <v>`
+overrides the pin.
+
+An image built before this can be refreshed without redoing its toolchain, by
+layering it onto itself:
+
+```bash
+phantom image build xcode-26-6 --image xcode-26-6 --replace
+```
+
+`--replace` writes the new copy alongside the old one and swaps it in only when
+it is complete, so a failed build leaves the old image where it was. Budget disk
+for both at once, and note the replacement is a **local** image — it carries no
+`pulled.json`, so `image list` reports it as origin unknown until it is
+published again.
 
 ## Layering a toolchain
 

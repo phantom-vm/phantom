@@ -470,9 +470,9 @@ Or on error:
 - **Response**: `{"status": "deleted", "vmId": "vm-abc"}`
 
 ### image.save
-- **Params**: `vmId` (string), `name` (string)
+- **Params**: `vmId` (string), `name` (string), `replace` (bool, optional — default false)
 - **Purpose**: Save a stopped VM as a local OCI image
-- **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json.
+- **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json. An existing name is an error unless `replace` is set, in which case the new copy is built in a hidden staging directory and moved into place only once the manifest is written — a failed save leaves the old image intact, at the cost of room for both while it runs. Replacing drops the old `pulled.json`, since the locally built bytes no longer come from that digest.
 - **Response**: `{"status": "started", "message": "Saving VM '...' as image '...'"}`
 
 ### image.list
@@ -607,12 +607,15 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 3. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
 4. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also installs the agent inside the guest via VNC-typed Terminal commands
 5. **Provision** — `vm.exec` runs `provision/provision.sh` over vsock (passwordless sudo, auto-login, no sleep)
-6. **Install Xcode** (optional `--xcode <url|path>`) — see below
-7. **Stop** — `vm.stop` (preceded by `sync` over vsock, since `vm.stop` is a force stop)
-8. **Save** — `image.save`, poll `image.list` until the image appears
-9. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
+6. **Install gitlab-runner** (unless `--no-gitlab-runner`) — see below
+7. **Install Xcode** (optional `--xcode <url|path>`) — see below
+8. **Stop** — `vm.stop` (preceded by `sync` over vsock, since `vm.stop` is a force stop)
+9. **Save** — `image.save` (`--replace` to overwrite the same name), poll `image.list` until the image appears
+10. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
 
-**Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage`, since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive.
+**gitlab-runner** is baked into every image by default, by running [provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh) in the guest (`RUNNER_VERSION=` prepended the same way as `XCODE_SRC=`). It curls the pinned `gitlab-runner-darwin-arm64` to `/usr/local/bin`. This is not optional cosmetics: GitLab's custom executor runs *every* stage of a job inside the job environment, so `upload_artifacts_on_success` and the cache stages shell out to `gitlab-runner artifacts-uploader` / `cache-archiver` **in the guest**. Without the binary there, those stages log `Missing gitlab-runner. Uploading artifacts is disabled.`, the job still passes, and the artifact never arrives. The step runs before Xcode so a 60MB failure surfaces in seconds rather than after a three-hour install. The guest version is pinned in the script and deliberately independent of the host runner the daemon manages — the two only need to agree on the artifact/cache protocol, not on a build.
+
+**Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage`, since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive. An image can also be layered onto *itself* (`--image <name> <name> --replace`), which is how a finished image gets a small addition — a runner bump, say — without rebuilding the toolchain.
 
 **Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](../provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
 

@@ -48,6 +48,33 @@ several GB in every CI job. The build log ends with `simctl list runtimes` and
 `simctl list devices available` so you can see which destinations the image can
 test against.
 
+## gitlab-runner in the guest
+
+Every image `phantom image build` produces gets `gitlab-runner` installed into
+`/usr/local/bin` (skip it with `--no-gitlab-runner`). GitLab's custom executor
+runs *every* stage of a job inside the job environment, so a job declaring
+`artifacts:` or `cache:` invokes `gitlab-runner artifacts-uploader` /
+`cache-archiver` **inside the VM**. When the binary isn't there the stage prints
+
+```
+Missing gitlab-runner. Uploading artifacts is disabled.
+```
+
+and is skipped — the job still passes and the artifact never reaches GitLab.
+Baking it in keeps that out of every project's `before_script`, and off the
+network on every job.
+
+The version is pinned in `install-gitlab-runner.sh`; `--gitlab-runner-version`
+overrides it for one build. It does not have to match the host runner the daemon
+manages — only the artifact/cache protocol has to line up — but keep the two
+roughly in step.
+
+To add it to an image that predates this, rebuild that image from itself:
+
+```bash
+phantom image build xcode-26-6 --image xcode-26-6 --replace
+```
+
 ## Files
 
 - **setup-tahoe.txt** — boot-script for macOS Tahoe (26.x) Setup Assistant.
@@ -55,6 +82,9 @@ test against.
   layout shifts but tied to a macOS version's wording.
 - **provision.sh** — post-install system configuration, run inside the guest as
   root through the agent.
+- **install-gitlab-runner.sh** — puts the pinned `gitlab-runner` binary on the
+  guest's PATH. Reads `RUNNER_VERSION` (or `$1`), defaulting to the pin in the
+  script. See [gitlab-runner in the guest](#gitlab-runner-in-the-guest).
 - **install-xcode.sh** — installs Xcode from a `.xip` into the guest, licenses
   it and runs first launch. Reads `XCODE_SRC` (or `$1`).
 

@@ -78,6 +78,32 @@ image and does not trigger a pull.
 
 Jobs without an `image:` fail with a clear error — the runner itself has no image configuration.
 
+### Artifacts and cache
+
+`artifacts:` and `cache:` work with no per-project setup:
+
+```yaml
+test:
+  image: xcode-26-6
+  tags: [phantom]
+  script:
+    - xcodebuild test -scheme MyApp -destination 'platform=macOS' -resultBundlePath test-results/macos.xcresult
+  artifacts:
+    paths:
+      - test-results/
+```
+
+The custom executor runs a job's upload stages *inside* the VM, so they need
+`gitlab-runner` there — every phantom-built image bakes it in. If a job logs
+
+```
+Missing gitlab-runner. Uploading artifacts is disabled.
+```
+
+the image predates that (or was built with `--no-gitlab-runner`): rebuild it
+with `phantom image build <name> --image <name> --replace`, rather than curling
+the binary in a `before_script`.
+
 > **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. This is slower than a VM clone but guarantees a clean, reproducible environment from a pinned image.
 
 ### Managing the runner
