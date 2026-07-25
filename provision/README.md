@@ -42,8 +42,11 @@ which is copied into the shared folder and read from `/Volumes/phantom-shared`.
 Apple's signature on the archive is checked by `xip --expand`, which is also
 what makes the download safe to trust.
 
-Simulator runtimes are not installed; `xcodebuild -runFirstLaunch` only adds
-Xcode's bundled packages, which is enough for `platform=macOS` builds and tests.
+Every simulator runtime is downloaded too (`xcodebuild -downloadAllPlatforms`),
+since Xcode ships with none — that is tens of GB once at build time instead of
+several GB in every CI job. The build log ends with `simctl list runtimes` and
+`simctl list devices available` so you can see which destinations the image can
+test against.
 
 ## Files
 

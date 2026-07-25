@@ -9,8 +9,13 @@
 #
 #   XCODE_SRC=http://host:9001/xcodes/Xcode-26.6.0+17F113.xip sh install-xcode.sh
 #
-# Expects ~50GB free: ~10GB for the .xip plus ~35GB for the expanded app. The
-# .xip is deleted the moment expansion succeeds, before first launch runs.
+# Xcode 26 ships with no simulator runtimes, so every one of them is downloaded
+# here — an image that has to run simulator tests would otherwise make each CI
+# job fetch several GB before it could start.
+#
+# Expects ~60GB free: ~10GB for the .xip, ~35GB for the expanded app and the
+# rest for the runtimes. The .xip is deleted the moment expansion succeeds, so
+# first launch and the runtime downloads get that space back.
 set -e
 
 SRC="${1:-$XCODE_SRC}"
@@ -28,8 +33,11 @@ case "$SRC" in
   http://*|https://*)
     XIP="$WORK/Xcode.xip"
     echo "Downloading $SRC..."
-    # --retry survives a flaky LAN mid-download.
-    curl -fL --retry 3 --retry-delay 5 -o "$XIP" "$SRC"
+    # A guest that has only just booted may not have finished DHCP, so the first
+    # connect can fail outright; --retry-connrefused waits that out, and the
+    # other retries survive a flaky LAN mid-download.
+    curl -fL --retry 10 --retry-delay 5 --retry-connrefused --retry-all-errors \
+      --connect-timeout 10 -o "$XIP" "$SRC"
     ;;
   *)
     XIP="$SRC"
@@ -72,6 +80,13 @@ xcodebuild -runFirstLaunch
 # there is nobody to click it in a headless CI VM.
 DevToolsSecurity -enable 2>/dev/null || true
 
+echo "Downloading simulator runtimes for every platform..."
+xcodebuild -downloadAllPlatforms
+
 xcodebuild -version
 xcrun --find clang
+xcrun simctl list runtimes
+# CoreSimulator seeds a default device set per installed runtime; print it so the
+# build log shows which destinations the image can actually test against.
+xcrun simctl list devices available
 echo "XCODE_INSTALL_DONE"

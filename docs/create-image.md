@@ -70,8 +70,10 @@ phantom image build xcode-26-6 --image macos-sequoia-base \
 ```
 
 `--xcode` also accepts a local `.xip` path, which is staged through the shared
-folder instead of being fetched by the guest. Verify the result by starting a VM
-from the image and building something in it:
+folder instead of being fetched by the guest. Every simulator runtime is
+installed as part of this step, so the image can run iOS/watchOS/tvOS tests as
+well as macOS ones. Verify the result by starting a VM from the image and
+building something in it:
 
 ```bash
 phantom vm deploy --image xcode-26-6

@@ -177,7 +177,7 @@ async function run(opts: BuildOptions) {
 
   // Install Xcode (optional)
   if (opts.xcode) {
-    step(`Installing Xcode from ${opts.xcode}`);
+    step(`Installing Xcode from ${opts.xcode} (+ every simulator runtime)`);
     await installXcode(vmId, opts.xcode, xcodeBody);
   }
 
@@ -222,8 +222,8 @@ async function installXcode(vmId: string, source: string, scriptBody: string) {
   }
 
   const command = `XCODE_SRC='${guestSrc.replace(/'/g, "'\\''")}'\n${scriptBody}`;
-  // 2h: a ~10GB download plus xip expansion and first launch.
-  const res = await call("vm.exec", { vmId, command, waitForAgent: true }, 2 * 3600_000);
+  // 3h: a ~10GB download plus xip expansion, first launch and every runtime.
+  const res = await call("vm.exec", { vmId, command, waitForAgent: true }, 3 * 3600_000);
   const log = (res.stdout as string) ?? "";
   for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
   if (res.exitCode !== 0) {
