@@ -248,6 +248,9 @@ struct VMRow: View {
                 } else if case .installing(let progress) = vmInstance.state {
                     ProgressView(value: progress)
                         .frame(width: 60)
+                } else if case .restoring(let progress) = vmInstance.state {
+                    ProgressView(value: progress)
+                        .frame(width: 60)
                 }
             }
 
@@ -270,6 +273,8 @@ struct VMRow: View {
             Label("Creating...", systemImage: "gear")
         case .installing:
             Label("Installing...", systemImage: "arrow.triangle.2.circlepath")
+        case .restoring:
+            Label("Restoring...", systemImage: "arrow.down.doc")
         case .running:
             Label("Running", systemImage: "play.circle.fill")
                 .foregroundStyle(.green)

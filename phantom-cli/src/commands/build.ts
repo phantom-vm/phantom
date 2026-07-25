@@ -1,4 +1,5 @@
-import { sendRequest, type VM } from "../lib/api";
+import { sendRequest } from "../lib/api";
+import { waitForVMRunning } from "../lib/wait";
 
 // MARK: - image build orchestrator
 //
@@ -151,13 +152,15 @@ async function run(opts: BuildOptions) {
 
   if (opts.fromImage) {
     // The base image already went through Setup Assistant, the agent install
-    // and provisioning, so one step gets us a booted VM. vm.create decompresses
-    // the image chunks and starts the VM before it answers, hence the long
-    // timeout; the guest is still booting when it returns, which the
-    // waitForAgent on the next exec absorbs.
+    // and provisioning, so one step gets us a booted VM. vm.create answers with
+    // the vmId right away and decompresses in the background — the restore of a
+    // 90GB disk takes minutes, and holding a socket open across it only creates
+    // ways to lose the vmId. The guest is still booting when the VM reports
+    // running, which the waitForAgent on the next exec absorbs.
     step(`Creating VM from image '${opts.fromImage}'`);
-    const createRes = await call("vm.create", { fromImage: opts.fromImage }, 30 * 60_000);
+    const createRes = await call("vm.create", { fromImage: opts.fromImage });
     vmId = createRes.vmId;
+    await waitForVMRunning(vmId, { onState: (state) => console.log(`    state: ${state}`) });
     console.log(`    VM ${vmId} running`);
   } else {
     // 1. Resolve IPSW
@@ -178,7 +181,12 @@ async function run(opts: BuildOptions) {
     const createRes = await call("vm.create", { ipswId }, 60_000);
     vmId = createRes.vmId;
     console.log(`    VM ${vmId} created; waiting for install...`);
-    await waitForRunning(vmId);
+    // 15s between polls: the install's progress percentage moves constantly and
+    // every distinct value is a line of build output.
+    await waitForVMRunning(vmId, {
+      pollMs: 15_000,
+      onState: (state) => console.log(`    state: ${state}`),
+    });
     console.log(`    install complete, VM running`);
 
     // 4. Drive Setup Assistant + install the agent over VNC
@@ -329,28 +337,6 @@ async function stageAgent(agentDir: string) {
   });
   const code = await proc.exited;
   if (code !== 0) throw new Error(`init-host-shared-folder.sh exited ${code}`);
-}
-
-async function findVM(vmId: string): Promise<VM | undefined> {
-  const res = await call("vm.list");
-  return (res.vms as VM[]).find((v) => v.id === vmId);
-}
-
-async function waitForRunning(vmId: string, maxMs = 45 * 60_000) {
-  const deadline = Date.now() + maxMs;
-  let lastState = "";
-  while (Date.now() < deadline) {
-    const vm = await findVM(vmId);
-    if (!vm) throw new Error(`VM ${vmId} disappeared during install`);
-    if (vm.state !== lastState) {
-      console.log(`    state: ${vm.state}`);
-      lastState = vm.state;
-    }
-    if (vm.state === "running") return;
-    if (vm.state.startsWith("error")) throw new Error(`install failed: ${vm.state}`);
-    await sleep(15_000);
-  }
-  throw new Error("install timed out");
 }
 
 async function waitForBootScript(vmId: string, maxMs = 20 * 60_000) {

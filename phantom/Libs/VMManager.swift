@@ -11,6 +11,7 @@ class VMManager {
         case none
         case creating
         case installing(progress: Double)
+        case restoring(progress: Double)
         case running
         case stopping
         case stopped
@@ -435,16 +436,21 @@ class VMManager {
             return
         }
 
-        do {
-            try FileManager.default.removeItem(at: instance.bundlePath)
-            log("Deleted VM bundle: \(vmId)")
-            vmInstances.removeValue(forKey: vmId)
-
-            // Update hasExistingVM flag
-            hasExistingVM = !vmInstances.isEmpty
-        } catch {
-            log("Failed to delete VM: \(error.localizedDescription)")
+        // A VM whose restore failed has no bundle left — unregister it anyway,
+        // otherwise the failed entry is stuck in `vm list` until the daemon
+        // restarts, with no way to clear it.
+        if FileManager.default.fileExists(atPath: instance.bundlePath.path) {
+            do {
+                try FileManager.default.removeItem(at: instance.bundlePath)
+                log("Deleted VM bundle: \(vmId)")
+            } catch {
+                log("Failed to delete VM: \(error.localizedDescription)")
+                return
+            }
         }
+
+        vmInstances.removeValue(forKey: vmId)
+        hasExistingVM = !vmInstances.isEmpty
     }
 
     func cloneVM(sourceVmId: String) async throws -> String {
@@ -502,16 +508,57 @@ class VMManager {
 
     // MARK: - Create from Image
 
-    func createVMFromImage(imageName: String) async throws -> String {
-        let result = try await imageManager.createVM(fromImage: imageName, vmsDir: vmsDir)
-        vmInstances[result.vmId] = VMInstance(
-            vmId: result.vmId,
-            bundlePath: result.bundlePath,
-            state: .stopped,
+    /// Restores a VM bundle from a local image and boots it, in the background.
+    ///
+    /// Returns as soon as the image is known to exist, so the caller gets a vmId
+    /// after a few milliseconds instead of after a 90GB decompression. The
+    /// instance is registered *before* the restore starts, so the VM is in
+    /// `vm.list` (as `restoring(N%)`, then `running`) the whole way through — a
+    /// caller that times out or disconnects mid-restore can still find it, and
+    /// the bundle can't sit unregistered until the next daemon start.
+    ///
+    /// Progress lives on the VM's own state rather than `imageManager.state`:
+    /// that slot is single-occupancy and would make a restore and a concurrent
+    /// pull overwrite each other's progress.
+    func createVMFromImage(imageName: String) throws -> String {
+        guard imageManager.imageExists(imageName) else {
+            throw OCIError.imageNotFound(imageName)
+        }
+
+        let vmId = "vm-\(UUID().uuidString.prefix(8).lowercased())"
+        let bundlePath = vmsDir.appendingPathComponent(vmId, isDirectory: true)
+        vmInstances[vmId] = VMInstance(
+            vmId: vmId,
+            bundlePath: bundlePath,
+            state: .restoring(progress: 0),
             virtualMachine: nil
         )
         hasExistingVM = true
-        return result.vmId
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.imageManager.restore(
+                    image: imageName,
+                    into: bundlePath,
+                    progress: { progress in
+                        Task { @MainActor [weak self] in
+                            self?.vmInstances[vmId]?.state = .restoring(progress: progress)
+                        }
+                    }
+                )
+                self.vmInstances[vmId]?.state = .stopped
+                await self.startExistingVM(vmId: vmId)
+            } catch {
+                self.log("Failed to create VM from image '\(imageName)': \(error.localizedDescription)")
+                // The bundle is gone (restore cleans up after itself), but the
+                // instance stays so a poller learns why instead of watching the
+                // VM vanish. `vm delete` clears it.
+                self.vmInstances[vmId]?.state = .error(error.localizedDescription)
+            }
+        }
+
+        return vmId
     }
 
     // MARK: - Guest Command Execution
@@ -846,6 +893,7 @@ extension VMManager.VMState {
         case .none: return "none"
         case .creating: return "creating"
         case .installing(let progress): return "installing(\(Int(progress * 100))%)"
+        case .restoring(let progress): return "restoring(\(Int(progress * 100))%)"
         case .running: return "running"
         case .stopping: return "stopping"
         case .stopped: return "stopped"

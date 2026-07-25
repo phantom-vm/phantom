@@ -1,4 +1,5 @@
 import { sendRequest, sendStreamingRequest } from "../lib/api";
+import { waitForVMRunning } from "../lib/wait";
 import { unlinkSync } from "node:fs";
 import { basename } from "node:path";
 import { homedir } from "node:os";
@@ -43,27 +44,27 @@ async function prepare() {
 
   // 1. Create VM from image
   console.error(`[phantom] Creating VM from image ${baseImage} for job ${jobId}...`);
-  const createResp = await sendRequest(
-    {
-      method: "vm.create",
-      params: { fromImage: baseImage },
-    },
-    { timeoutMs: 1800_000 } // 30 min — image decompression can take several minutes
-  );
+  const createResp = await sendRequest({
+    method: "vm.create",
+    params: { fromImage: baseImage },
+  });
   if (createResp.error) {
     console.error(`[phantom] VM create failed: ${createResp.error.message}`);
     process.exit(SYSTEM_FAILURE);
   }
   const vmId = createResp.result?.vmId as string;
 
-  // 2. Start VM
-  console.error(`[phantom] Starting ${vmId}...`);
-  const startResp = await sendRequest(
-    { method: "vm.start", params: { vmId } },
-    { timeoutMs: 120_000 }
-  );
-  if (startResp.error) {
-    console.error(`[phantom] Start failed: ${startResp.error.message}`);
+  // 2. Wait out the restore, which the daemon runs in the background and
+  // finishes by booting the VM. Decompressing a 90GB disk takes minutes, so the
+  // states are echoed into the job log — a silent prepare looks like a hang.
+  console.error(`[phantom] Restoring ${vmId}...`);
+  try {
+    await waitForVMRunning(vmId, {
+      maxMs: 60 * 60_000,
+      onState: (state) => console.error(`[phantom] ${vmId}: ${state}`),
+    });
+  } catch (err) {
+    console.error(`[phantom] VM never came up: ${err instanceof Error ? err.message : err}`);
     await sendRequest({ method: "vm.delete", params: { vmId } });
     process.exit(SYSTEM_FAILURE);
   }

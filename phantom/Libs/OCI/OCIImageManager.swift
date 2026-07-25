@@ -247,29 +247,26 @@ class OCIImageManager {
         log("Deleted image '\(name)'")
     }
 
-    // MARK: - Create VM from Image
+    // MARK: - Restore a VM Bundle from an Image
 
-    /// Create a new VM bundle from a local OCI image.
-    /// - Parameters:
-    ///   - name: Image name
-    ///   - vmsDir: Directory where VM bundles are stored
-    /// - Returns: The new VM ID
-    func createVM(fromImage name: String, vmsDir: URL) async throws -> (vmId: String, bundlePath: URL) {
+    /// Write a local OCI image out as a VM bundle at `bundlePath`.
+    ///
+    /// Progress (0…1) is reported through `progress` rather than `state`: the
+    /// caller owns a VM, and `state` is a single slot shared by save/push/pull,
+    /// so parking restore progress there would have a restore and a concurrent
+    /// pull scribble over each other. Cleans up the half-written bundle if it
+    /// fails, and leaves nothing behind that `loadExistingVMs` would adopt.
+    func restore(
+        image name: String,
+        into bundlePath: URL,
+        progress updateProgress: @escaping @Sendable (Double) -> Void
+    ) async throws {
         let imageDir = imagesDir.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: imageDir.path) else {
             throw OCIError.imageNotFound(name)
         }
 
-        state = .saving(progress: 0, message: "Creating VM from image...")
-
-        let updateProgress: @Sendable (Double, String) -> Void = { [weak self] progress, message in
-            Task { @MainActor [weak self] in
-                self?.state = .saving(progress: progress, message: message)
-            }
-        }
-
-        let vmId = "vm-\(UUID().uuidString.prefix(8).lowercased())"
-        let bundlePath = vmsDir.appendingPathComponent(vmId, isDirectory: true)
+        let vmId = bundlePath.lastPathComponent
 
         do {
             let bgLog: @Sendable (String) -> Void = { [weak self] msg in
@@ -284,22 +281,18 @@ class OCIImageManager {
                 try FileManager.default.createDirectory(at: bundlePath, withIntermediateDirectories: true)
 
                 // Write HardwareModel
-                updateProgress(0.05, "Writing hardware model...")
+                updateProgress(0.05)
                 let hwData = try vmConfig.hardwareModelData()
                 try hwData.write(to: bundlePath.appendingPathComponent("HardwareModel"))
 
                 // Copy NVRAM
-                updateProgress(0.1, "Copying NVRAM...")
+                updateProgress(0.1)
                 let nvramSrc = imageDir.appendingPathComponent("nvram.bin")
                 try FileManager.default.copyItem(at: nvramSrc, to: bundlePath.appendingPathComponent("AuxiliaryStorage"))
 
-                // Generate new MachineIdentifier
-                let machineIdentifier = VZMacMachineIdentifier()
-                try machineIdentifier.dataRepresentation.write(to: bundlePath.appendingPathComponent("MachineIdentifier"))
-
                 // Reconstruct disk from chunks in parallel using pwrite
                 // pwrite allows concurrent writes at different offsets without seeking
-                updateProgress(0.15, "Reconstructing disk...")
+                updateProgress(0.15)
                 let diskDir = imageDir.appendingPathComponent("disk")
                 // Each file's name carries its chunk index; all-zero chunks were
                 // never stored, so position in the directory means nothing.
@@ -336,8 +329,7 @@ class OCIImageManager {
                             _ = try await group.next()
                             inFlight -= 1
                             completedCount += 1
-                            let progress = 0.15 + Double(completedCount) / Double(chunkCount) * 0.8
-                            updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
+                            updateProgress(0.15 + Double(completedCount) / Double(chunkCount) * 0.8)
                         }
 
                         let chunkFile = chunk.url
@@ -366,16 +358,19 @@ class OCIImageManager {
 
                     for try await _ in group {
                         completedCount += 1
-                        let progress = 0.15 + Double(completedCount) / Double(chunkCount) * 0.8
-                        updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
+                        updateProgress(0.15 + Double(completedCount) / Double(chunkCount) * 0.8)
                     }
                 }
 
-                bgLog("Created VM '\(vmId)' from image '\(name)'")
-            }.value
+                // Written last, once the disk is whole: a bundle is only a VM
+                // to `loadExistingVMs` when all four files are present, so a
+                // daemon killed mid-restore leaves a directory that won't come
+                // back as a VM with a half-decompressed disk.
+                let machineIdentifier = VZMacMachineIdentifier()
+                try machineIdentifier.dataRepresentation.write(to: bundlePath.appendingPathComponent("MachineIdentifier"))
 
-            state = .completed(message: "VM '\(vmId)' created from image '\(name)'")
-            return (vmId: vmId, bundlePath: bundlePath)
+                bgLog("Restored VM '\(vmId)' from image '\(name)'")
+            }.value
 
         } catch {
             try? FileManager.default.removeItem(at: bundlePath)

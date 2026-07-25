@@ -397,9 +397,9 @@ Or on error:
 - **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
 - **Implementation**:
   - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`). After the install finishes, the installer's VM instance is torn down and a **fresh** `VZVirtualMachine` is booted from the bundle — the installer's own instance flakily hangs on a black screen instead of reaching Setup Assistant; a clean restart is reliable.
-  - `sourceVmId`: APFS CoW clone of existing VM bundle
-  - `fromImage`: Decompresses image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier
-- **Response**: `{"status": "started"|"success", "message": "...", "vmId": "vm-..."}`
+  - `sourceVmId`: APFS CoW clone of existing VM bundle — the one synchronous source, since a CoW clone is instant
+  - `fromImage`: Same shape as `ipswId` — the `vmId` comes back as soon as the image is confirmed to exist, and a background task decompresses the image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier and boots it. Poll `vm.list` for the state (`restoring(N%)` → `creating` → `running`). Restoring the 58.9GB `xcode-26-6` into a 90GB disk takes minutes, so the caller must not be holding a socket open across it: the VM instance is registered *before* the restore begins, so it is listed the whole way through and a caller that times out or disconnects can still find it. Restore progress rides on the VM's own state rather than `image.status` — that slot is single-occupancy, and a restore has no business colliding with a concurrent pull.
+- **Response**: `{"status": "started"|"running", "message": "...", "vmId": "vm-..."}`
 
 ### vm.start
 - **Params**: `vmId` (string)
@@ -589,14 +589,14 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`, naming each chunk file after its layer's `chunk-index` so restore can find its offset. Disk chunks download concurrently, bounded by the same `min(cores, 6)` cap as save/restore — one connection to a registry CDN is the bottleneck, not the link: serial pulls measured ~9MB/s against ghcr where the same link pushed at ~23MB/s, and concurrency took a 58.9GB image from an estimated two hours to 41 minutes
 3. Save manifest locally
 
-**Create from Image (Local Image → VM)**:
-1. Read config JSON, decode base64 HardwareModel
-2. Create new VM bundle directory
+**Create from Image (Local Image → VM)** — steps 2–6 run in a background task, with the VM registered in `vmInstances` up front so it is listable throughout:
+1. Register in `vmInstances` as `restoring(0%)`, return the `vmId`
+2. Read config JSON, decode base64 HardwareModel
 3. Write HardwareModel file
 4. Copy nvram.bin → AuxiliaryStorage
 5. Decompress disk chunks → `pwrite` each at `chunk-index × 512MB` → `disk.img` (sparse; slots with no chunk stay holes)
-6. Generate fresh MachineIdentifier
-7. Register in `vmInstances`
+6. Generate fresh MachineIdentifier — **last**, because `loadExistingVMs` takes the four bundle files as proof of a usable VM, and a daemon killed mid-restore would otherwise leave a half-decompressed disk to be adopted on the next launch
+7. Boot the VM; a failure anywhere above removes the bundle and leaves the instance in `error` (which `vm.delete` clears)
 
 ### Automated Image Building (`image build`)
 
@@ -615,7 +615,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 **gitlab-runner** is baked into every image by default, by running [provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh) in the guest (`RUNNER_VERSION=` prepended the same way as `XCODE_SRC=`). It curls the pinned `gitlab-runner-darwin-arm64` to `/usr/local/bin`. This is not optional cosmetics: GitLab's custom executor runs *every* stage of a job inside the job environment, so `upload_artifacts_on_success` and the cache stages shell out to `gitlab-runner artifacts-uploader` / `cache-archiver` **in the guest**. Without the binary there, those stages log `Missing gitlab-runner. Uploading artifacts is disabled.`, the job still passes, and the artifact never arrives. The step runs before Xcode so a 60MB failure surfaces in seconds rather than after a three-hour install. The guest version is pinned in the script and deliberately independent of the host runner the daemon manages — the two only need to agree on the artifact/cache protocol, not on a build.
 
-**Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage`, since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive. An image can also be layered onto *itself* (`--image <name> <name> --replace`), which is how a finished image gets a small addition — a runner bump, say — without rebuilding the toolchain.
+**Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage` (plus the same `vm.list` poll, now watching `restoring(N%)`), since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive. An image can also be layered onto *itself* (`--image <name> <name> --replace`), which is how a finished image gets a small addition — a runner bump, say — without rebuilding the toolchain.
 
 **Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](../provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
 
@@ -819,7 +819,7 @@ class OCIImageManager {
     func save(name:bundlePath:) async { ... }
     func list() -> [ImageInfo] { ... }
     func delete(name:) throws { ... }
-    func createVM(fromImage:vmsDir:) async throws -> (String, URL) { ... }
+    func restore(image:into:progress:) async throws { ... }
     func push(name:reference:username:password:) async { ... }
     func pull(reference:name:username:password:) async { ... }
 }
@@ -859,11 +859,20 @@ class VMManager {
                               .error(message)
 ```
 
-**VM Creation**:
+**VM Creation** — from an IPSW:
 ```
 .none → .creating → .installing(0.0) → ... → .installing(1.0) → .running
                                     ↓
                                .error(message)
+```
+
+**VM Creation** — from an image (`vm.create --fromImage`). The instance exists in
+this state from the moment `vm.create` answers, so the restore is visible in
+`vm.list` rather than happening inside a call the caller is blocked on:
+```
+.restoring(0.0) → ... → .restoring(0.95) → .stopped → .creating → .running
+                     ↓
+                .error(message)
 ```
 
 **VM Lifecycle**:

@@ -196,15 +196,15 @@ struct APIHandlers {
             throw APIHandlerError.invalidParams("Must specify exactly one of 'ipswId', 'sourceVmId', or 'fromImage'")
         }
 
-        // Create from image
+        // Create from image. The restore runs in the background (a 90GB disk
+        // takes minutes); the vmId comes back now, and `vm.list` carries the
+        // state from restoring(N%) through to running.
         if let fromImage = fromImage {
             do {
-                let vmId = try await vmManager.createVMFromImage(imageName: fromImage)
-                await vmManager.startVM(vmId: vmId)
-                try ensureStarted(vmId)
+                let vmId = try vmManager.createVMFromImage(imageName: fromImage)
                 return AnyCodable([
-                    "status": "running",
-                    "message": "VM created from image and started",
+                    "status": "started",
+                    "message": "Restoring VM from image '\(fromImage)'",
                     "vmId": vmId
                 ])
             } catch let error as APIHandlerError {

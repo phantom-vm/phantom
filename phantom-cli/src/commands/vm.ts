@@ -1,4 +1,5 @@
 import { sendRequest, type VM } from "../lib/api";
+import { waitForVMRunning } from "../lib/wait";
 import type { Command } from "../command";
 
 export async function vmDeploy(...args: string[]) {
@@ -53,9 +54,11 @@ export async function vmDeploy(...args: string[]) {
 
   console.log(`Creating VM from ${sourceType} ${sourceId}...`);
 
+  // Cloning is the only synchronous one left, and it is an APFS copy-on-write
+  // clone — fast enough that a 60s budget is generous.
   const response = await sendRequest(
     { method: "vm.create", params },
-    { timeoutMs: 600_000 }
+    { timeoutMs: 60_000 }
   );
 
   if (response.error) {
@@ -64,10 +67,28 @@ export async function vmDeploy(...args: string[]) {
   }
 
   console.log(response.result?.message || "VM creation started");
-  if (response.result?.vmId) {
-    console.log(`VM ID: ${response.result.vmId}`);
+  const vmId = response.result?.vmId as string | undefined;
+  if (vmId) {
+    console.log(`VM ID: ${vmId}`);
   }
-  // IPSW installs run in the background; image/clone deploys return running.
+
+  // Restoring an image runs in the background on the daemon — follow it here so
+  // the command still returns a booted VM, but from polling rather than from
+  // holding a connection open for the whole decompression.
+  if (fromImage && vmId) {
+    try {
+      await waitForVMRunning(vmId, {
+        onState: (state) => console.log(`  ${state}`),
+      });
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+    console.log(`VM ${vmId} running`);
+    return;
+  }
+
+  // An IPSW install takes ~20 minutes; leave the waiting to the user.
   if (response.result?.status === "started") {
     console.log(
       "\nNote: installation runs in the background. Use 'phantom vm list' to check status."
