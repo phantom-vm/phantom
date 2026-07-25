@@ -28,7 +28,10 @@ cd "$(dirname "$0")/.."
 # path, sed expression, pattern that must appear afterwards
 rewrite() {
     local file="$1" expr="$2" expect="$3"
-    sed -i '' -E "$expr" "$file"
+    # -i.bak (suffix attached) is the one in-place form BSD and GNU sed agree
+    # on — the cut job runs this on Linux, local runs are macOS.
+    sed -i.bak -E "$expr" "$file"
+    rm -f "$file.bak"
     if ! grep -qF "$expect" "$file"; then
         echo "error: $file does not contain '$expect' after rewrite" >&2
         exit 1
