@@ -9,7 +9,7 @@ The run has two jobs ([.github/workflows/release.yml](../.github/workflows/relea
    everywhere via [scripts/set-version.sh](../scripts/set-version.sh), commits
    `Release vX.Y.Z` to `main`, tags it, pushes both.
 2. **build** — on a macOS runner, checked out at that tag: builds the three
-   binaries, checksums them, and creates the GitHub release.
+   binaries and creates the GitHub release.
 
 They are chained with `needs:` inside one run on purpose. A tag pushed with the
 workflow's own `GITHUB_TOKEN` never triggers other workflows (GitHub's
@@ -24,7 +24,14 @@ never fire.
 | `phantom-admin` | admin CLI — adds image authoring/publishing commands |
 | `phantom-agent` | guest agent (arm64), what PHANTOM-5's bootstrap fetches |
 | `phantom-app.zip` | the daemon app, ad-hoc signed |
-| `SHA256SUMS.txt` | checksums of all of the above |
+
+There is no checksum file: GitHub computes an immutable SHA-256 per asset at
+upload time and serves it as `asset.digest`:
+
+```bash
+gh api repos/phantom-vm/phantom/releases/tags/v1.0.0 \
+  -q '.assets[] | .name + "  " + .digest'
+```
 
 ## Versioning
 

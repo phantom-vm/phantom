@@ -113,16 +113,17 @@ jobs:
             | awk -F' = ' '/ TARGET_BUILD_DIR =/{print $2; exit}')"
           ditto -c -k --keepParent "${app_dir}/phantom.app" dist-phantom-app.zip
 
-      - name: Assemble and checksum
+      # No checksum file: GitHub computes an immutable SHA-256 per asset at
+      # upload and serves it as `asset.digest` (REST/GraphQL/gh, since
+      # 2025-06) — a SHA256SUMS.txt in the same release would duplicate that
+      # from inside the same trust domain.
+      - name: Assemble
         run: |
           mkdir release
           cp dist-agent           release/phantom-agent
           cp dist-phantom         release/phantom
           cp dist-phantom-admin   release/phantom-admin
           cp dist-phantom-app.zip release/phantom-app.zip
-          cd release
-          shasum -a 256 * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
 
       - name: Create release
         env:
