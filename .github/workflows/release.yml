@@ -58,7 +58,12 @@ jobs:
           scripts/set-version.sh "${{ steps.ver.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "Release ${{ steps.ver.outputs.tag }}"
+          # The tree can already be at the target version (e.g. the very first
+          # release, where the sources start out saying what the tag will say)
+          # — then there is nothing to commit and the tag goes on HEAD as-is.
+          if ! git diff --quiet; then
+            git commit -am "Release ${{ steps.ver.outputs.tag }}"
+          fi
           git tag "${{ steps.ver.outputs.tag }}"
           git push origin main "${{ steps.ver.outputs.tag }}"
 
