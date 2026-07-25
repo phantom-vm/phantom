@@ -525,23 +525,49 @@ class OCIImageManager {
                 let nvramData = try await client.pullBlob(digest: nvramLayer.digest)
                 try nvramData.write(to: imageDir.appendingPathComponent("nvram.bin"))
 
-                // Pull disk chunk layers
+                // Pull disk chunk layers.
+                //
+                // Concurrently, because a single connection to a registry CDN is
+                // the bottleneck, not the link: pulling 138 chunks one at a time
+                // measured ~9MB/s against ghcr while the same link pushed at
+                // ~23MB/s. The cap is shared with restore, and bounds peak RAM
+                // the same way — each in-flight chunk buffers up to 512MB.
                 let diskLayers = manifest.layers.filter { $0.mediaType == PhantomMediaType.disk }
+                let total = diskLayers.count
+                var completed = 0
 
-                for (i, layer) in diskLayers.enumerated() {
-                    let progress = 0.15 + Double(i) / Double(diskLayers.count) * 0.8
-                    updateProgress(progress, "Pulling chunk \(i + 1)/\(diskLayers.count)...")
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    var next = 0
+                    var inFlight = 0
 
-                    let chunkData = try await client.pullBlob(digest: layer.digest)
-                    // Preserve the layer's own index in the file name — restore
-                    // derives its write offset from it.
-                    let chunkPath = diskDir.appendingPathComponent(
-                        OCIDiskLayerizer.chunkFileName(index: layer.chunkIndex ?? i)
-                    )
-                    try chunkData.write(to: chunkPath)
+                    func schedule(_ i: Int) {
+                        let layer = diskLayers[i]
+                        // Preserve the layer's own index in the file name —
+                        // restore derives its write offset from it.
+                        let chunkPath = diskDir.appendingPathComponent(
+                            OCIDiskLayerizer.chunkFileName(index: layer.chunkIndex ?? i)
+                        )
+                        group.addTask {
+                            let chunkData = try await client.pullBlob(digest: layer.digest)
+                            try chunkData.write(to: chunkPath)
+                        }
+                        next += 1
+                        inFlight += 1
+                    }
 
-                    bgLog("Pulled chunk \(i + 1)/\(diskLayers.count)")
+                    while next < total && inFlight < OCIDiskLayerizer.maxConcurrency { schedule(next) }
+
+                    while inFlight > 0 {
+                        try await group.next()
+                        inFlight -= 1
+                        completed += 1
+                        let progress = 0.15 + Double(completed) / Double(total) * 0.8
+                        updateProgress(progress, "Pulling chunk \(completed)/\(total)...")
+                        if next < total { schedule(next) }
+                    }
                 }
+
+                bgLog("Pulled \(total) disk chunks")
 
                 bgLog("Image '\(imageName)' pulled from \(reference)")
                 return imageName
