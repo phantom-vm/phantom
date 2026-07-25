@@ -113,7 +113,7 @@ jobs:
           app_dir="$(xcodebuild -project phantom.xcodeproj -scheme phantom \
             -configuration Release -showBuildSettings 2>/dev/null \
             | awk -F' = ' '/ TARGET_BUILD_DIR =/{print $2; exit}')"
-          ditto -c -k --keepParent "${app_dir}/phantom.app" dist-phantom-app.zip
+          ditto -c -k --keepParent "${app_dir}/Phantom.app" dist-phantom-app.zip
 
       # No checksum file: GitHub computes an immutable SHA-256 per asset at
       # upload and serves it as `asset.digest` (REST/GraphQL/gh, since
