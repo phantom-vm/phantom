@@ -38,6 +38,10 @@ phantom vm screenshot <id>       # capture its framebuffer
 phantom image list | pull | delete
 ```
 
+`image list` marks an image `(update available)` when the catalog has moved on
+from the copy you pulled; `image pull <name>` then replaces it, and says so
+rather than re-downloading when your copy is already current.
+
 A VM can also come from an existing one, as a fast APFS copy-on-write clone:
 
 ```

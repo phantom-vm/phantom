@@ -260,9 +260,10 @@ Daemon                    Guest Agent           Shell
 │   │   ├── manifest.json     # OCI manifest (layers + digests)
 │   │   ├── config.json       # VM config (HardwareModel as base64)
 │   │   ├── nvram.bin         # AuxiliaryStorage
-│   │   └── disk/             # LZ4-compressed disk chunks
+│   │   ├── pulled.json       # Pulled images only: reference, digest, date
+│   │   └── disk/             # LZ4-compressed disk chunks (zero chunks absent)
 │   │       ├── 000.lz4
-│   │       ├── 001.lz4
+│   │       ├── 002.lz4
 │   │       └── ...
 │   └── macos-dev/
 │       └── ...
@@ -630,6 +631,8 @@ The catalog is a one-layer OCI artifact (`vnd.monk-studio.phantom.catalog.v1+jso
 ```
 
 **Why the digest matters**: `image pull <name>` resolves through the catalog and pulls `repository@sha256:…`, never a tag. A digest names exact bytes, so the daemon verifies the manifest against it ([OCIRegistry.swift](../phantom/Libs/OCI/OCIRegistry.swift)), and since every layer is already verified against its own digest, that check extends integrity to the whole image. A tag pull has nothing to compare against — hence the catalog records digests. Like the IPSW catalog, the catalog only *points*.
+
+**Staying current**: a pull writes `pulled.json` (reference, digest, date) beside the image, because nothing else preserves the digest it came from — pushing re-encodes the manifest, so the local `manifest.json` hashes to something other than what the registry stored. `image list` compares that against the catalog and reports one of three things: current, `(update available)`, or `(Downloaded, origin unknown)` for an image built locally or pulled before this record existed. `image pull <name>` then exits early when current, replaces when the digest differs, and refuses rather than guessing when the origin is unknown (`--force` overrides). Replacement deletes the local copy before downloading — no second copy on disk, so a failed pull leaves the name empty. The catalog holds one digest per name, so there is no version history to roll back to.
 
 **Publishing** (`phantom image publish <name>`, admin-only): push the image, read the stored manifest digest back from the registry with a `HEAD` (the daemon re-encodes the manifest when pushing, so only the registry knows the bytes it kept), then rewrite the catalog artifact with that entry. The CLI speaks OCI directly for the catalog ([phantom-cli/src/lib/oci.ts](../phantom-cli/src/lib/oci.ts)) — it is a small JSON blob, and the daemon's client exists for multi-gigabyte layers. Credentials come from `PHANTOM_REGISTRY_USERNAME`/`PASSWORD` or `~/.docker/config.json`, the same sources the daemon uses.
 
