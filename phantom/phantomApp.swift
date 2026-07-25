@@ -12,6 +12,15 @@ struct phantomApp: App {
         WindowGroup {
             ContentView(vm: vm)
                 .task {
+                    // Under XCTest this app is only a host for the test bundle.
+                    // Binding the daemon's port then collides with a running
+                    // daemon, and the failing listener takes the host process
+                    // down — which xcodebuild reports as the tests never
+                    // finishing, after restarting the host twice.
+                    if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+                        return
+                    }
+
                     // Start TCP server on app launch
                     if tcpServer == nil {
                         tcpServer = TCPServer(vmManager: vm)

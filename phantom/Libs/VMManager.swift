@@ -61,7 +61,12 @@ class VMManager {
         ensureDirectories()
         ipswManager.loadExisting()
         loadExistingVMs()
-        Task { await gitlabRunnerManager.autostart() }
+        // Not under test: the runner is a long-lived child process, so starting
+        // it from a test host both fights the real daemon's runner and keeps the
+        // host alive after the tests finish, which xcodebuild waits out.
+        if !ProcessInfo.processInfo.isRunningTests {
+            Task { await gitlabRunnerManager.autostart() }
+        }
     }
 
     // MARK: - Public API
@@ -877,3 +882,17 @@ enum PhantomError: LocalizedError {
     }
 }
 
+
+// MARK: - Test Environment
+
+extension ProcessInfo {
+    /// True when this process is hosting an XCTest bundle.
+    ///
+    /// The unit tests exercise pure logic (chunking, references, types) and get
+    /// the app only because `@testable import` needs it as a host. The daemon's
+    /// side effects — binding the API port, supervising the GitLab runner — must
+    /// stay off in that case: both collide with an already-running daemon, and
+    /// either one keeps the host process alive past the end of the tests, which
+    /// xcodebuild reports as the run never finishing.
+    var isRunningTests: Bool { environment["XCTestConfigurationFilePath"] != nil }
+}
