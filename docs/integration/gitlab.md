@@ -41,7 +41,7 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
    phantom image pull xcode-26-6
    ```
 
-   Authoring your own instead is covered in [create-image.md](../create-image.md).
+   Authoring your own instead is covered in [authoring-images.md](../authoring-images.md).
 
 ## Setup
 
@@ -122,7 +122,7 @@ Check the daemon logs (runner output is forwarded with a `[gitlab-runner]` prefi
 Check that the phantom daemon is running and the image name is correct (`phantom image list`).
 
 **`Agent unavailable`**
-The template VM must have `phantom-agent` installed and configured to start on boot. See [create-image.md](../create-image.md) for installation steps.
+The image must have `phantom-agent` installed and starting on boot, which every published image does. See [authoring-images.md](../authoring-images.md) if you built the image yourself.
 
 **Jobs hang during script execution**
 Check that the phantom agent is running inside the VM (`phantom vm exec <vmId> -- launchctl list com.monk.phantom-agent`). The agent must be installed and started on boot in the template VM.

@@ -1,4 +1,9 @@
-# Create a Ready-to-Use Phantom Image
+# Create an Image by Hand
+
+`phantom image build` automates all of this ([authoring-images.md](authoring-images.md)),
+so the only reason to work through it manually is to author a boot script for a
+macOS version that doesn't have one yet — you need to see each Setup Assistant
+screen to script it.
 
 ## Step 1: Build the host app
 1. Open `phantom.xcodeproj` in Xcode
