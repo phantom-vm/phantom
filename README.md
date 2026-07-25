@@ -103,16 +103,5 @@ Tahoe 26.x, creating a local admin `admin`/`admin` with passwordless sudo and
 auto-login). Disk save/restore compress into 512 MB LZ4 chunks in parallel across
 cores — a 24 GB VM saves in ~16s and restores in ~12s.
 
-Supporting APIs/commands added along the way: `vm.vnc.start`/`stop`,
-`vm.bootScript`/`.status`, `vm.screenshot`, and `phantom vm vnc | boot-script |
-screenshot`.
-
-## Roadmap
-
-- [x] **Publish base image** — `xcode-26-6` is live at `ghcr.io/phantom-vm/xcode-26-6` (58.9GB, 138 layers). `image publish` pushes and rewrites a catalog artifact; `image list`/`image pull <name>` read it anonymously and pull by manifest digest. Verified from the outside: pulled with every credential source removed, all 138 layer digests matched the source image, and the VM it booted had Xcode 26.6 plus all four simulator runtimes.
-- [ ] **`vm deploy --image` async** — fire-and-forget + status polling like `image.save`; also fixes a CLI-timeout race that can leave the bundle unregistered until a daemon restart. Low priority now that create is ~12s.
-- [x] **Don't store all-zero chunks** — skipped at chunk time. 114 of `tahoe-base`'s 180 chunks were all-zero, so this removes ~63% of an image's layers (registry objects, push/pull round trips) though only ~1.4% of its bytes. Layers now carry a `chunk-index` annotation, since position no longer implies offset.
-- [ ] **GitLab: registry-backed base image** — let the job's `image:` reference a registry image (e.g. `registry.gitlab.com/org/macos-ci:latest`) and auto-pull before `vm.create`.
-
-Notes: `_VZVNCServer` is a private API (tart has shipped it for years); Setup
-Assistant wording differs across macOS versions, so boot scripts are per-version.
+Supporting APIs/commands: `vm.vnc.start`/`stop`, `vm.bootScript`/`.status`,
+`vm.screenshot`, and `phantom vm vnc | boot-script | screenshot`.
