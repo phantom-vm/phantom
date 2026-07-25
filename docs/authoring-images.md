@@ -41,7 +41,7 @@ Setup Assistant is driven with no guest-side software: the daemon serves the VM'
 framebuffer from the host via `_VZVNCServer` (a private API, invoked by
 reflection) and a Swift VNC client injects keystrokes and clicks on-screen text
 located with Vision.framework OCR. The agent is bootstrapped by one VNC-typed
-Terminal command that fetches the published `agent-install.sh` release asset
+Terminal command that fetches the published `phantom-agent-install.sh` release asset
 over the guest's NAT network and runs it as root — the installer verifies the
 binary against a SHA-256 pinned into it at release time. Everything after that
 runs through `vm.exec` over vsock — no SSH. To build with an unreleased agent,
@@ -135,9 +135,9 @@ changed wording.
 5. **Install the agent** — in the guest's Terminal:
 
    ```bash
-   curl -fsSL https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh \
-     -o /tmp/agent-install.sh
-   sudo sh /tmp/agent-install.sh
+   curl -fsSL https://github.com/phantom-vm/phantom/releases/latest/download/phantom-agent-install.sh \
+     -o /tmp/phantom-agent-install.sh
+   sudo sh /tmp/phantom-agent-install.sh
    ```
 
    It downloads `/usr/local/bin/phantom-agent`, verifies its pinned SHA-256,

@@ -5,7 +5,7 @@ import { waitForVMRunning } from "../lib/wait";
 //
 // Two ways in, one way out. From scratch:
 //   ipsw → vm.create → boot-script (Setup Assistant + agent bootstrap via
-//        curl | sudo sh of the published agent-install.sh) → provision (vsock)
+//        curl | sudo sh of the published phantom-agent-install.sh) → provision (vsock)
 //        → gitlab-runner → [install Xcode] → vm.stop → image.save
 //
 // Or on top of an image built that way — the fast path for layering a toolchain
@@ -68,7 +68,7 @@ const isURL = (s: string) => /^https?:\/\//.test(s);
 
 // The installer URL setup-tahoe.txt fetches; --agent-url rewrites it in place.
 const RELEASE_AGENT_INSTALL_URL =
-  "https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh";
+  "https://github.com/phantom-vm/phantom/releases/latest/download/phantom-agent-install.sh";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -96,7 +96,7 @@ export async function imageBuild(...args: string[]) {
     console.error("                         (skips Setup Assistant and provisioning)");
     console.error("  --boot-script <path>   Setup Assistant script (default: provision/setup-tahoe.txt)");
     console.error("  --provision <path>     Provision script (default: provision/provision.sh)");
-    console.error("  --agent-url <url>      agent-install.sh for the boot script to fetch, instead of");
+    console.error("  --agent-url <url>      phantom-agent-install.sh for the boot script to fetch, instead of");
     console.error("                         the latest GitHub release asset (for agent development)");
     console.error("  --xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,");
     console.error("                         local path served to the guest over HTTP)");
@@ -133,7 +133,7 @@ async function run(opts: BuildOptions) {
   let bootCommands = opts.fromImage ? [] : await readScriptLines(opts.bootScript);
 
   // Agent development override: retarget the boot script's installer fetch
-  // from the published release asset to a dev-served agent-install.sh.
+  // from the published release asset to a dev-served phantom-agent-install.sh.
   if (opts.agentUrl && !opts.fromImage) {
     const before = bootCommands;
     bootCommands = bootCommands.map((l) =>

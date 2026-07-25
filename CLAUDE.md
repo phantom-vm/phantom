@@ -80,7 +80,7 @@ cd phantom-cli
 bun run src/main.ts health
 ```
 
-**Deploy guest agent**: VMs bootstrap it from the published `agent-install.sh`
+**Deploy guest agent**: VMs bootstrap it from the published `phantom-agent-install.sh`
 release asset; see [phantom-agent/README.md](phantom-agent/README.md) for the
 dev override.
 

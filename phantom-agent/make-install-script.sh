@@ -1,16 +1,16 @@
 #!/bin/sh
 # Emits a self-contained phantom-agent installer to stdout.
 #
-#   make-install-script.sh <binary> <binary-url> > agent-install.sh
+#   make-install-script.sh <binary> <binary-url> > phantom-agent-install.sh
 #
-# The emitted script is what ships as the `agent-install.sh` release asset:
+# The emitted script is what ships as the `phantom-agent-install.sh` release asset:
 # it downloads <binary-url>, verifies it against the SHA-256 of <binary>
 # (pinned here at generation time — the installer runs as root from a network
 # download, so it must not take the bytes on faith), installs it to
 # /usr/local/bin and loads the launchd daemon. Inside the guest:
 #
-#   curl -fsSL <url-to>/agent-install.sh -o /tmp/agent-install.sh
-#   sudo sh /tmp/agent-install.sh
+#   curl -fsSL <url-to>/phantom-agent-install.sh -o /tmp/phantom-agent-install.sh
+#   sudo sh /tmp/phantom-agent-install.sh
 #
 # The release workflow generates the published asset; for local agent
 # development, generate one against a binary you serve yourself and point

@@ -8,7 +8,7 @@
 #   phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt
 #
 # No host-side prerequisite: the agent is installed by fetching the published
-# agent-install.sh release asset over the guest's NAT network (the installer
+# phantom-agent-install.sh release asset over the guest's NAT network (the installer
 # verifies the binary against a SHA-256 pinned inside it at release time).
 # When iterating on the agent locally, point the fetch at a dev-served
 # installer instead with `image build --agent-url` (see phantom-agent/README.md).
@@ -83,7 +83,7 @@
 # binary, checks the pinned SHA-256, and loads the launchd daemon. sudo reads
 # the password from stdin. The retries wait out a NAT link that is still
 # settling on first use.
-curl -fsSL --retry 5 --retry-connrefused --retry-all-errors -o /tmp/agent-install.sh https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh && echo admin | sudo -S sh /tmp/agent-install.sh<enter><wait20s>
+curl -fsSL --retry 5 --retry-connrefused --retry-all-errors -o /tmp/phantom-agent-install.sh https://github.com/phantom-vm/phantom/releases/latest/download/phantom-agent-install.sh && echo admin | sudo -S sh /tmp/phantom-agent-install.sh<enter><wait20s>
 
 # Quit Terminal so the saved image boots to a clean desktop (Alt = Command in
 # the guest). The shell is idle now, so Cmd+Q closes it without a prompt.

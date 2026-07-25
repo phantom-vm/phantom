@@ -187,7 +187,7 @@ jobs:
           mkdir release
           cp dist-agent           release/phantom-agent
           cp dist-phantom         release/phantom-cli
-          cp dist-phantom-admin   release/phantom-admin-cli
+          cp dist-phantom-admin   release/phantom-cli-admin
           cp dist-phantom-app.zip release/phantom-daemon.zip
           phantom-agent/make-install-script.sh dist-agent \
             "https://github.com/${{ github.repository }}/releases/download/${{ needs.cut.outputs.tag }}/phantom-agent" \

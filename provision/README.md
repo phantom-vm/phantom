@@ -13,7 +13,7 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
 2. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
    drives Setup Assistant over VNC (keystrokes + OCR clicks): creates a local
    admin account `admin`/`admin`, skips every online step, reaches the
-   desktop, and installs the agent by fetching the published `agent-install.sh`
+   desktop, and installs the agent by fetching the published `phantom-agent-install.sh`
    release asset over the guest's NAT network (the installer checks the
    binary against a SHA-256 pinned at release time). After this the agent
    answers on vsock. For a dev agent, see `image build --agent-url` in

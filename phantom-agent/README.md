@@ -9,9 +9,9 @@ asset that downloads the binary, verifies it against a SHA-256 pinned at
 release time, and loads the launchd daemon. Inside the guest:
 
 ```bash
-curl -fsSL https://github.com/phantom-vm/phantom/releases/latest/download/agent-install.sh \
-  -o /tmp/agent-install.sh
-sudo sh /tmp/agent-install.sh
+curl -fsSL https://github.com/phantom-vm/phantom/releases/latest/download/phantom-agent-install.sh \
+  -o /tmp/phantom-agent-install.sh
+sudo sh /tmp/phantom-agent-install.sh
 ```
 
 This is exactly what `provision/setup-tahoe.txt` types into the guest during
@@ -38,7 +38,7 @@ release publishes can be generated locally:
 
 ```bash
 swift build -c release
-./make-install-script.sh .build/release/phantom-agent <url-you-will-serve-the-binary-at> > agent-install.sh
+./make-install-script.sh .build/release/phantom-agent <url-you-will-serve-the-binary-at> > phantom-agent-install.sh
 ```
 
 To get a dev build into a VM:
@@ -66,10 +66,10 @@ To get a dev build into a VM:
   mkdir -p /tmp/agent-serve
   cp .build/release/phantom-agent /tmp/agent-serve/
   ./make-install-script.sh /tmp/agent-serve/phantom-agent \
-    http://192.168.64.1:8642/phantom-agent > /tmp/agent-serve/agent-install.sh
+    http://192.168.64.1:8642/phantom-agent > /tmp/agent-serve/phantom-agent-install.sh
   python3 -m http.server 8642 --directory /tmp/agent-serve &
 
-  phantom image build my-base --agent-url http://192.168.64.1:8642/agent-install.sh
+  phantom image build my-base --agent-url http://192.168.64.1:8642/phantom-agent-install.sh
   ```
 
 ## Management

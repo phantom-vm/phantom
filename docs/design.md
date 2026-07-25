@@ -282,7 +282,7 @@ Daemon                    Guest Agent           Shell
 - `HardwareModel` - CPU/hardware configuration
 
 VMs get no host directory share: everything the guest needs arrives over the
-network (the agent bootstrap fetches the published `agent-install.sh` release
+network (the agent bootstrap fetches the published `phantom-agent-install.sh` release
 asset; a local `--xcode` .xip is served over an ephemeral HTTP server) or over
 vsock. A VirtioFS share would expose a host directory read-write to CI VMs
 running untrusted code.
@@ -598,7 +598,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 1. **Resolve IPSW** — `ipsw.list`; use `--ipsw` or the single downloaded IPSW
 2. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
-3. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also bootstraps the agent inside the guest via one VNC-typed Terminal command that fetches the published `agent-install.sh` release asset and runs it as root (the installer checks the binary against a SHA-256 pinned at release time). `--agent-url` rewrites that fetch to a dev-served installer, so agent development doesn't require cutting a release
+3. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also bootstraps the agent inside the guest via one VNC-typed Terminal command that fetches the published `phantom-agent-install.sh` release asset and runs it as root (the installer checks the binary against a SHA-256 pinned at release time). `--agent-url` rewrites that fetch to a dev-served installer, so agent development doesn't require cutting a release
 4. **Provision** — `vm.exec` runs `provision/provision.sh` over vsock (passwordless sudo, auto-login, no sleep)
 5. **Install gitlab-runner** (unless `--no-gitlab-runner`) — see below
 6. **Install Xcode** (optional `--xcode <url|path>`) — see below

@@ -25,8 +25,9 @@ never fire.
 | Asset | What |
 | --- | --- |
 | `phantom-cli` | user CLI (arm64, `bun --compile`) |
-| `phantom-admin-cli` | admin CLI — adds image authoring/publishing commands |
+| `phantom-cli-admin` | admin CLI — adds image authoring/publishing commands |
 | `phantom-agent` | guest agent (arm64), what the guest bootstrap fetches |
+| `phantom-agent-install.sh` | guest bootstrap installer — fetches `phantom-agent` from this release's versioned URL and verifies its pinned SHA-256 |
 | `phantom-daemon.zip` | the daemon app, Developer ID signed and notarized |
 
 Each asset's SHA-256 is computed by GitHub at upload and served as
