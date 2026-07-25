@@ -1,0 +1,77 @@
+#!/bin/sh
+# Phantom image provisioning — installs Xcode into the guest as root (via the
+# phantom-agent over vsock), after provision.sh has run and the desktop is up.
+#
+# The .xip is named by XCODE_SRC (or $1), either an http(s) URL the guest can
+# reach or a path already visible inside the guest — typically a file staged
+# into /Volumes/phantom-shared. A URL is downloaded straight into the guest so
+# no 10GB copy has to pass through the shared folder.
+#
+#   XCODE_SRC=http://host:9001/xcodes/Xcode-26.6.0+17F113.xip sh install-xcode.sh
+#
+# Expects ~50GB free: ~10GB for the .xip plus ~35GB for the expanded app. The
+# .xip is deleted the moment expansion succeeds, before first launch runs.
+set -e
+
+SRC="${1:-$XCODE_SRC}"
+[ -n "$SRC" ] || { echo "usage: XCODE_SRC=<url-or-path> sh install-xcode.sh"; exit 1; }
+
+WORK=/tmp/phantom-xcode
+APP=/Applications/Xcode.app
+
+df -g / | tail -1 | awk '{print "Free space on /: " $4 "GB"}'
+
+rm -rf "$WORK"
+mkdir -p "$WORK"
+
+case "$SRC" in
+  http://*|https://*)
+    XIP="$WORK/Xcode.xip"
+    echo "Downloading $SRC..."
+    # --retry survives a flaky LAN mid-download.
+    curl -fL --retry 3 --retry-delay 5 -o "$XIP" "$SRC"
+    ;;
+  *)
+    XIP="$SRC"
+    [ -f "$XIP" ] || { echo "Not found in guest: $XIP"; exit 1; }
+    echo "Using staged .xip $XIP"
+    ;;
+esac
+
+ls -lh "$XIP" | awk '{print "Archive size: " $5}'
+
+# xip --expand verifies Apple's signature on the archive and refuses to expand
+# anything tampered with, which doubles as our integrity check on the download.
+echo "Expanding (this takes a while)..."
+cd "$WORK"
+xip --expand "$XIP"
+
+EXPANDED=$(find "$WORK" -maxdepth 1 -name "Xcode*.app" | head -1)
+[ -n "$EXPANDED" ] || { echo "No Xcode*.app after expansion"; exit 1; }
+
+# Free the 10GB archive before first launch needs room for its packages.
+case "$SRC" in http://*|https://*) rm -f "$XIP" ;; esac
+
+echo "Installing to $APP..."
+rm -rf "$APP"
+# Same volume as /tmp, so this is a rename rather than a 35GB copy.
+mv "$EXPANDED" "$APP"
+chown -R root:wheel "$APP"
+rm -rf "$WORK"
+
+echo "Selecting toolchain..."
+xcode-select -s "$APP/Contents/Developer"
+
+echo "Accepting license..."
+xcodebuild -license accept
+
+echo "Running first launch (installs bundled packages)..."
+xcodebuild -runFirstLaunch
+
+# Lets the admin account build and debug without an authorization prompt —
+# there is nobody to click it in a headless CI VM.
+DevToolsSecurity -enable 2>/dev/null || true
+
+xcodebuild -version
+xcrun --find clang
+echo "XCODE_INSTALL_DONE"

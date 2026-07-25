@@ -21,6 +21,30 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
    disables sleep / screensaver / screen lock — all over vsock.
 5. **Save** — `phantom vm stop <vm-id>` then `phantom image save <vm-id> macos-tahoe-base`.
 
+## Toolchain images
+
+Toolchain images are layered onto a finished base image rather than built from
+an IPSW again — macOS is already installed and provisioned there, so the build
+is minutes of decompression instead of an hour of installing:
+
+```
+tahoe-base ─▶ vm.create --fromImage ─▶ install-xcode.sh (vsock) ─▶ image.save
+```
+
+```bash
+phantom image build xcode-26-6 --image tahoe-base \
+  --xcode http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
+```
+
+The `--xcode` value is either a URL the guest can reach — downloaded inside the
+guest, so 10GB never passes through the shared folder — or a local `.xip` path,
+which is copied into the shared folder and read from `/Volumes/phantom-shared`.
+Apple's signature on the archive is checked by `xip --expand`, which is also
+what makes the download safe to trust.
+
+Simulator runtimes are not installed; `xcodebuild -runFirstLaunch` only adds
+Xcode's bundled packages, which is enough for `platform=macOS` builds and tests.
+
 ## Files
 
 - **setup-tahoe.txt** — boot-script for macOS Tahoe (26.x) Setup Assistant.
@@ -28,6 +52,8 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
   layout shifts but tied to a macOS version's wording.
 - **provision.sh** — post-install system configuration, run inside the guest as
   root through the agent.
+- **install-xcode.sh** — installs Xcode from a `.xip` into the guest, licenses
+  it and runs first launch. Reads `XCODE_SRC` (or `$1`).
 
 ## Debugging boot scripts
 

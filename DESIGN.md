@@ -601,9 +601,14 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 3. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
 4. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also installs the agent inside the guest via VNC-typed Terminal commands
 5. **Provision** — `vm.exec` runs `provision/provision.sh` over vsock (passwordless sudo, auto-login, no sleep)
-6. **Stop** — `vm.stop`
-7. **Save** — `image.save`, poll `image.list` until the image appears
-8. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
+6. **Install Xcode** (optional `--xcode <url|path>`) — see below
+7. **Stop** — `vm.stop` (preceded by `sync` over vsock, since `vm.stop` is a force stop)
+8. **Save** — `image.save`, poll `image.list` until the image appears
+9. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
+
+**Layering onto an existing image** — `--image <name>` replaces steps 1–5 with a single `vm.create --fromImage`, since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive.
+
+**Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the shared folder; a local path is copied into the host's shared folder and read from `/Volumes/phantom-shared`. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt.
 
 ### Registry Authentication
 

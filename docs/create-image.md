@@ -57,3 +57,27 @@ phantom image save <vm-id> macos-sequoia-base
 ```
 
 This image can be used directly as `PHANTOM_BASE_IMAGE` in the [GitLab runner integration](integration/gitlab.md).
+
+## Step 9: Layer Xcode on top
+
+The base image has no developer toolchain beyond the command line tools. Build a
+Xcode image from it — this reuses the installed, provisioned macOS instead of
+starting over from the IPSW:
+
+```bash
+phantom image build xcode-26-6 --image macos-sequoia-base \
+  --xcode http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
+```
+
+`--xcode` also accepts a local `.xip` path, which is staged through the shared
+folder instead of being fetched by the guest. Verify the result by starting a VM
+from the image and building something in it:
+
+```bash
+phantom vm deploy --image xcode-26-6
+phantom vm exec <vm-id> -- xcodebuild -version
+```
+
+Note that steps 1–8 above are what `phantom image build <name> --ipsw <id>`
+automates end to end; doing them by hand is only useful when authoring a new
+boot script.
