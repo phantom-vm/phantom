@@ -12,9 +12,10 @@ import { waitForVMRunning } from "../lib/wait";
 // onto an existing base, since macOS is already installed and provisioned:
 //   vm.create --fromImage → gitlab-runner → [install Xcode] → vm.stop → image.save
 //
-// The gitlab-runner step runs on both paths, so a published image can be
-// refreshed with nothing but that step: build it from itself with --replace and
-// no --xcode.
+// gitlab-runner is installed by default only on layered builds — those are the
+// images CI jobs actually run on, and a published one can be refreshed with
+// nothing but that step: build it from itself with --replace and no --xcode.
+// Base builds skip it unless --gitlab-runner asks for it.
 
 interface BuildOptions {
   imageName: string;
@@ -25,7 +26,7 @@ interface BuildOptions {
   agentUrl?: string;
   xcode?: string;
   xcodeScript: string;
-  gitlabRunner: boolean;
+  gitlabRunner?: boolean; // default: layered builds yes, base builds no
   gitlabRunnerScript: string;
   gitlabRunnerVersion?: string;
   replace: boolean;
@@ -38,7 +39,6 @@ function parseArgs(args: string[]): BuildOptions | null {
     bootScript: "provision/setup-tahoe.txt",
     provision: "provision/provision.sh",
     xcodeScript: "provision/install-xcode.sh",
-    gitlabRunner: true,
     gitlabRunnerScript: "provision/install-gitlab-runner.sh",
     replace: false,
     keepVm: false,
@@ -53,6 +53,7 @@ function parseArgs(args: string[]): BuildOptions | null {
     else if (a === "--agent-url") opts.agentUrl = args[++i];
     else if (a === "--xcode") opts.xcode = args[++i];
     else if (a === "--xcode-script") opts.xcodeScript = args[++i]!;
+    else if (a === "--gitlab-runner") opts.gitlabRunner = true;
     else if (a === "--no-gitlab-runner") opts.gitlabRunner = false;
     else if (a === "--gitlab-runner-script") opts.gitlabRunnerScript = args[++i]!;
     else if (a === "--gitlab-runner-version") opts.gitlabRunnerVersion = args[++i];
@@ -101,7 +102,9 @@ export async function imageBuild(...args: string[]) {
     console.error("  --xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,");
     console.error("                         local path served to the guest over HTTP)");
     console.error("  --xcode-script <path>  Xcode installer script (default: provision/install-xcode.sh)");
-    console.error("  --no-gitlab-runner     Skip baking gitlab-runner into the image");
+    console.error("  --gitlab-runner        Bake gitlab-runner into a base build (default: only");
+    console.error("                         layered --image builds get it — those are what CI runs on)");
+    console.error("  --no-gitlab-runner     Skip baking gitlab-runner into a layered build");
     console.error("  --gitlab-runner-version <v>  Runner version to bake in (default: the script's pin)");
     console.error("  --gitlab-runner-script <path>  (default: provision/install-gitlab-runner.sh)");
     console.error("  --replace              Overwrite an existing image of the same name");
@@ -122,10 +125,14 @@ async function run(opts: BuildOptions) {
     throw new Error("--image and --ipsw are mutually exclusive");
   }
 
+  // CI jobs run on layered (toolchain) images, so only those get the runner
+  // by default; a base build is a foundation and stays lean unless asked.
+  const gitlabRunner = opts.gitlabRunner ?? !!opts.fromImage;
+
   // Getting to a booted, agent-answering VM takes four steps from an IPSW and
   // one from an image; everything after that is shared.
   const total =
-    (opts.fromImage ? 1 : 4) + (opts.gitlabRunner ? 1 : 0) + (opts.xcode ? 1 : 0) + 3;
+    (opts.fromImage ? 1 : 4) + (gitlabRunner ? 1 : 0) + (opts.xcode ? 1 : 0) + 3;
   let n = 0;
   const step = (msg: string) => console.log(`\n[${++n}/${total}] ${msg}`);
 
@@ -153,7 +160,7 @@ async function run(opts: BuildOptions) {
   }
 
   let runnerBody = "";
-  if (opts.gitlabRunner) {
+  if (gitlabRunner) {
     runnerBody = await Bun.file(opts.gitlabRunnerScript).text();
     if (!runnerBody.trim()) throw new Error(`empty gitlab-runner script: ${opts.gitlabRunnerScript}`);
   }
@@ -224,7 +231,7 @@ async function run(opts: BuildOptions) {
 
   // Bake in gitlab-runner (before Xcode: a 60MB download that fails fast beats
   // finding out after three hours of Xcode install)
-  if (opts.gitlabRunner) {
+  if (gitlabRunner) {
     step("Installing gitlab-runner");
     await installGitLabRunner(vmId, runnerBody, opts.gitlabRunnerVersion);
   }

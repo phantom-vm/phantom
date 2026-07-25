@@ -57,11 +57,14 @@ where [doing it by hand](#doing-it-by-hand) earns its keep.
 
 ## gitlab-runner
 
-Both build paths install `gitlab-runner` into the guest's `/usr/local/bin`
-([provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh)),
+Layered (`--image`) builds install `gitlab-runner` into the guest's
+`/usr/local/bin` ([provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh)),
 because GitLab's custom executor runs a job's artifact and cache stages *inside*
 the VM — without the binary they are silently skipped and `artifacts:` never
-uploads anything. `--no-gitlab-runner` skips it, `--gitlab-runner-version <v>`
+uploads anything. Base builds from an IPSW skip it: they are foundations to
+layer toolchains onto, not CI targets. `--gitlab-runner` forces it onto a base
+build (do this if CI jobs will run on the base image directly),
+`--no-gitlab-runner` skips it on a layered build, `--gitlab-runner-version <v>`
 overrides the pin.
 
 An image built before this can be refreshed without redoing its toolchain, by

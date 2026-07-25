@@ -52,8 +52,9 @@ test against.
 
 ## gitlab-runner in the guest
 
-Every image `phantom image build` produces gets `gitlab-runner` installed into
-`/usr/local/bin` (skip it with `--no-gitlab-runner`). GitLab's custom executor
+Every layered image `phantom image build --image` produces gets `gitlab-runner`
+installed into `/usr/local/bin` (skip it with `--no-gitlab-runner`; base builds
+skip it by default, `--gitlab-runner` forces it). GitLab's custom executor
 runs *every* stage of a job inside the job environment, so a job declaring
 `artifacts:` or `cache:` invokes `gitlab-runner artifacts-uploader` /
 `cache-archiver` **inside the VM**. When the binary isn't there the stage prints
