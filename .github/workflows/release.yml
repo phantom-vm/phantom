@@ -58,9 +58,11 @@ jobs:
           scripts/set-version.sh "${{ steps.ver.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # The tree can already be at the target version (e.g. the very first
-          # release, where the sources start out saying what the tag will say)
-          # — then there is nothing to commit and the tag goes on HEAD as-is.
+          # The tree can already be at the target version — it happened on the
+          # very first release, and it happens on any re-dispatch after a cut
+          # that pushed the commit to main but failed before the tag landed
+          # (the two refs in the push below are not atomic). Committing nothing
+          # and tagging HEAD makes that rerun self-heal; don't "clean this up".
           if ! git diff --quiet; then
             git commit -am "Release ${{ steps.ver.outputs.tag }}"
           fi
