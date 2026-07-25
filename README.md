@@ -5,8 +5,23 @@ over vsock, so there is nothing in the guest to log into.
 
 ## Quick start
 
-Nothing to build: images are published, and `image list` reads the catalog
-anonymously, so this works on a machine with no credentials and no IPSW.
+Requires an Apple Silicon Mac. Nothing to build: binaries come from
+[Releases](https://github.com/phantom-vm/phantom/releases) (signed and
+notarized), images are published, and `image list` reads the catalog
+anonymously — so this works on a machine with no credentials and no IPSW.
+
+Install the daemon (the app that runs the VMs — keep it running) and the CLI:
+
+```
+curl -fsSLO https://github.com/phantom-vm/phantom/releases/latest/download/phantom-daemon.zip
+ditto -x -k phantom-daemon.zip /Applications && open /Applications/Phantom.app
+
+sudo curl -fsSL -o /usr/local/bin/phantom \
+  https://github.com/phantom-vm/phantom/releases/latest/download/phantom-cli
+sudo chmod +x /usr/local/bin/phantom
+```
+
+Then pull an image and boot a VM from it:
 
 ```
 phantom image list                       # browse the catalog
