@@ -34,7 +34,7 @@ export async function runCli(build: () => CliDefinition) {
 function showHelp(groups: CommandGroup[]) {
   const sections = groups.map(renderGroup).filter(Boolean).join("\n\n");
 
-  console.log(`phantom — macOS VM manager CLI
+  console.log(`phantom — the macOS VM orchestrator
 
 Usage
   phantom <command> <subcommand> [options]

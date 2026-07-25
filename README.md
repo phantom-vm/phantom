@@ -1,6 +1,7 @@
 # Phantom
 
-Run and manage macOS virtual machines on your Mac from the command line.
+The macOS VM orchestrator. Pull an image, boot a VM, run commands inside it —
+over vsock, so there is nothing in the guest to log into.
 
 ## Quick start
 

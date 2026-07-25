@@ -1,6 +1,6 @@
 # Phantom Design Document
 
-A macOS VM manager built on Apple's Virtualization.framework with a TCP API and CLI interface.
+The macOS VM orchestrator — built on Apple's Virtualization.framework, with a TCP API and CLI interface.
 
 ## System Overview
 

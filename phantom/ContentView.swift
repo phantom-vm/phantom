@@ -12,8 +12,15 @@ struct ContentView: View {
         HSplitView {
             // Controls
             VStack(alignment: .leading, spacing: 20) {
-                Text("Phantom VM Manager")
-                    .font(.title2.bold())
+                // Tighter than the surrounding 20pt: the tagline belongs to the
+                // title, not to the sections under it.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Phantom")
+                        .font(.title2.bold())
+                    Text("The macOS VM orchestrator")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 // Image section
                 GroupBox("IPSW Images") {
