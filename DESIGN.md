@@ -548,7 +548,10 @@ Phantom supports saving VMs as OCI-compatible images that can be pushed to and p
     { "mediaType": "...phantom.config.v1", "digest": "sha256:...", "size": 456 },
     { "mediaType": "...phantom.nvram.v1", "digest": "sha256:...", "size": 789 },
     { "mediaType": "...phantom.disk.v1", "digest": "sha256:...", "size": 1024,
-      "annotations": { "vnd.monk-studio.phantom.uncompressed-size": "536870912" }
+      "annotations": {
+        "vnd.monk-studio.phantom.uncompressed-size": "536870912",
+        "vnd.monk-studio.phantom.chunk-index": "0"
+      }
     }
   ]
 }
@@ -559,8 +562,10 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 ### Disk Layerization
 
 - Disk images are split into **512MB chunks**, each LZ4-compressed
-- Each chunk becomes one OCI layer with an `uncompressed-size` annotation
-- On restore: `ftruncate` creates a sparse disk, chunks are decompressed in parallel and `pwrite`-ten at their offsets, all-zero chunks are skipped (stays sparse). All-zero detection uses libc `memcmp` (fast even in unoptimized builds).
+- Each chunk becomes one OCI layer with `uncompressed-size` and `chunk-index` annotations
+- **All-zero chunks are not stored.** A 90GB disk holding ~25GB of data has most of its slots untouched — 114 of `tahoe-base`'s 180 chunks were all-zero — and `ftruncate` alone reproduces them on restore. Dropping them costs little space (each compressed to ~3MB) but removes ~63% of the layers, and with them that share of registry objects and push/pull round trips.
+- Because chunks are missing, **a layer's position no longer implies its offset**: the offset comes from `chunk-index` (or, for local chunk files, the index encoded in the `%03d.lz4` file name). Images written before this annotation existed have every chunk present, so a missing value falls back to the layer's position and they keep restoring, pushing and pulling unchanged.
+- On restore: `ftruncate` creates a sparse disk, chunks are decompressed in parallel and `pwrite`-ten at their indexed offsets. Restore also skips writing any all-zero chunk it does receive (old images), keeping the file sparse. All-zero detection uses libc `memcmp` (fast even in unoptimized builds).
 - Concurrency: `OCIDiskLayerizer` is `nonisolated` so compress/decompress run off the main actor; up to `min(cores, 6)` concurrent chunks (bounds peak RAM). Chunking reads each chunk with `pread` for lock-free parallel reads.
 
 ### Image Flows
@@ -570,8 +575,8 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 2. Create `images/<name>/` directory
 3. Base64-encode HardwareModel into `config.json`
 4. Copy AuxiliaryStorage → `nvram.bin`
-5. Chunk `disk.img` → LZ4 compress → `disk/000.lz4`, `disk/001.lz4`, ...
-6. Compute SHA-256 digests, write `manifest.json`
+5. Chunk `disk.img` → LZ4 compress → `disk/000.lz4`, `disk/002.lz4`, ... (all-zero chunks written nowhere, so the numbering has gaps)
+6. Compute SHA-256 digests, write `manifest.json` with each layer's `chunk-index`
 
 **Push (Local Image → Registry)**:
 1. Read local `manifest.json`
@@ -580,7 +585,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 
 **Pull (Registry → Local Image)**:
 1. Fetch manifest from registry (`GET`)
-2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`
+2. Download all blobs (config, nvram, disk chunks) to `images/<name>/`, naming each chunk file after its layer's `chunk-index` so restore can find its offset
 3. Save manifest locally
 
 **Create from Image (Local Image → VM)**:
@@ -588,7 +593,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 2. Create new VM bundle directory
 3. Write HardwareModel file
 4. Copy nvram.bin → AuxiliaryStorage
-5. Decompress disk chunks → reassemble `disk.img` (sparse, zero-skip)
+5. Decompress disk chunks → `pwrite` each at `chunk-index × 512MB` → `disk.img` (sparse; slots with no chunk stay holes)
 6. Generate fresh MachineIdentifier
 7. Register in `vmInstances`
 

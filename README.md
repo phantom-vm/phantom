@@ -80,7 +80,7 @@ screenshot`.
 
 - [ ] **Publish base image** — push the built base image to a registry so users only ever `image pull` (the build pipeline is done; `push` wiring remains).
 - [ ] **`vm deploy --image` async** — fire-and-forget + status polling like `image.save`; also fixes a CLI-timeout race that can leave the bundle unregistered until a daemon restart. Low priority now that create is ~12s.
-- [ ] **Don't store all-zero chunks** — skip them at chunk time to shrink images (restore already skips writing zeros).
+- [x] **Don't store all-zero chunks** — skipped at chunk time. 114 of `tahoe-base`'s 180 chunks were all-zero, so this removes ~63% of an image's layers (registry objects, push/pull round trips) though only ~1.4% of its bytes. Layers now carry a `chunk-index` annotation, since position no longer implies offset.
 - [ ] **GitLab: registry-backed base image** — let the job's `image:` reference a registry image (e.g. `registry.gitlab.com/org/macos-ci:latest`) and auto-pull before `vm.create`.
 
 Notes: `_VZVNCServer` is a private API (tart has shipped it for years); Setup

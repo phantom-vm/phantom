@@ -28,16 +28,35 @@ nonisolated enum OCIDiskLayerizer {
         let digest: String
     }
 
+    // MARK: - Chunk Files
+
+    /// On-disk name of a chunk, which encodes its index — the only record of
+    /// where a chunk belongs once all-zero chunks stop being stored.
+    static func chunkFileName(index: Int) -> String {
+        String(format: "%03d.lz4", index)
+    }
+
+    /// Index encoded in a chunk file name, or nil if it isn't one of ours.
+    static func chunkIndex(fromFileName name: String) -> Int? {
+        guard name.hasSuffix(".lz4") else { return nil }
+        return Int(name.dropLast(4))
+    }
+
     // MARK: - Chunking (for save/push)
 
     /// Split a disk image into LZ4-compressed chunks, writing each to disk.
     /// Chunks are compressed concurrently across cores; each task reads its own
     /// range with `pread` (thread-safe, doesn't move the shared fd offset).
+    ///
+    /// All-zero chunks are dropped rather than stored: a 90 GB disk is mostly
+    /// untouched space, and restore recreates it by `ftruncate` alone. The
+    /// returned metadata therefore has gaps in `index`, which is what callers
+    /// must key offsets off of.
     /// - Parameters:
     ///   - path: Path to the disk image file
     ///   - outputDir: Directory to write compressed .lz4 files into
     ///   - progress: Callback with fraction complete (0.0...1.0)
-    /// - Returns: Array of chunk metadata (data written to outputDir, not held in memory)
+    /// - Returns: Metadata for the chunks that were written, ascending by index
     static func chunkDisk(at path: URL, outputDir: URL, progress: @escaping (Double) -> Void) async throws -> [ChunkMetadata] {
         let fd = Darwin.open(path.path, O_RDONLY)
         guard fd >= 0 else {
@@ -52,7 +71,7 @@ nonisolated enum OCIDiskLayerizer {
         var results = [ChunkMetadata?](repeating: nil, count: totalChunks)
         var completed = 0
 
-        try await withThrowingTaskGroup(of: (Int, ChunkMetadata).self) { group in
+        try await withThrowingTaskGroup(of: (Int, ChunkMetadata?).self) { group in
             var next = 0
             var inFlight = 0
 
@@ -80,7 +99,8 @@ nonisolated enum OCIDiskLayerizer {
     }
 
     /// Reads one chunk with `pread`, LZ4-compresses it, and writes the `.lz4`.
-    private static func compressChunk(fd: Int32, index: Int, fileSize: UInt64, outputDir: URL) throws -> ChunkMetadata {
+    /// Returns nil for an all-zero chunk, which is left out of the image.
+    private static func compressChunk(fd: Int32, index: Int, fileSize: UInt64, outputDir: URL) throws -> ChunkMetadata? {
         try autoreleasepool {
             let offset = UInt64(index) * UInt64(chunkSize)
             let thisSize = Int(min(UInt64(chunkSize), fileSize - offset))
@@ -93,9 +113,12 @@ nonisolated enum OCIDiskLayerizer {
                 throw OCIError.compressionFailed("Short read at chunk \(index): \(readCount) != \(thisSize)")
             }
 
+            // Untouched space costs nothing to store and nothing to restore.
+            if isAllZeros(raw) { return nil }
+
             let compressed = try compress(raw)
             let digest = Digest.sha256(compressed)
-            let chunkPath = outputDir.appendingPathComponent(String(format: "%03d.lz4", index))
+            let chunkPath = outputDir.appendingPathComponent(chunkFileName(index: index))
             try compressed.write(to: chunkPath)
 
             return ChunkMetadata(

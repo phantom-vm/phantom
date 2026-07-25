@@ -132,7 +132,8 @@ class OCIImageManager {
                     digest: chunk.digest,
                     size: chunk.compressedSize,
                     annotations: [
-                        PhantomAnnotation.uncompressedSize: String(chunk.uncompressedSize)
+                        PhantomAnnotation.uncompressedSize: String(chunk.uncompressedSize),
+                        PhantomAnnotation.chunkIndex: String(chunk.index)
                     ]
                 )
                 layers.append(desc)
@@ -143,7 +144,7 @@ class OCIImageManager {
             try manifestData.write(to: imageDir.appendingPathComponent("manifest.json"))
             try ociConfigData.write(to: imageDir.appendingPathComponent("oci-config.json"))
 
-            log("Image '\(name)' saved successfully (\(chunkMetadata.count) disk chunks)")
+            log("Image '\(name)' saved successfully (\(chunkMetadata.count) disk chunks, all-zero chunks omitted)")
             state = .completed(message: "Image '\(name)' saved")
 
         } catch {
@@ -274,9 +275,16 @@ class OCIImageManager {
                 // pwrite allows concurrent writes at different offsets without seeking
                 updateProgress(0.15, "Reconstructing disk...")
                 let diskDir = imageDir.appendingPathComponent("disk")
-                let chunkFiles = try FileManager.default.contentsOfDirectory(
+                // Each file's name carries its chunk index; all-zero chunks were
+                // never stored, so position in the directory means nothing.
+                let chunkFiles: [(index: Int, url: URL)] = try FileManager.default.contentsOfDirectory(
                     at: diskDir, includingPropertiesForKeys: nil
-                ).filter { $0.pathExtension == "lz4" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+                ).compactMap { url in
+                    guard let index = OCIDiskLayerizer.chunkIndex(fromFileName: url.lastPathComponent) else {
+                        return nil
+                    }
+                    return (index, url)
+                }.sorted { $0.index < $1.index }
 
                 let diskPath = bundlePath.appendingPathComponent("disk.img")
                 FileManager.default.createFile(atPath: diskPath.path, contents: nil)
@@ -297,7 +305,7 @@ class OCIImageManager {
                 var completedCount = 0
 
                 try await withThrowingTaskGroup(of: Int.self) { group in
-                    for (i, chunkFile) in chunkFiles.enumerated() {
+                    for (i, chunk) in chunkFiles.enumerated() {
                         if inFlight >= maxConcurrent {
                             _ = try await group.next()
                             inFlight -= 1
@@ -306,7 +314,8 @@ class OCIImageManager {
                             updateProgress(progress, "Restoring disk \(Int(progress * 100))%")
                         }
 
-                        let offset = off_t(UInt64(i) * UInt64(OCIDiskLayerizer.chunkSize))
+                        let chunkFile = chunk.url
+                        let offset = off_t(UInt64(chunk.index) * UInt64(OCIDiskLayerizer.chunkSize))
                         let fd = diskFD
 
                         group.addTask {
@@ -414,22 +423,25 @@ class OCIImageManager {
                 // Push disk chunk layers
                 let diskLayers = manifest.layers.filter { $0.mediaType == PhantomMediaType.disk }
                 let diskDir = imageDir.appendingPathComponent("disk")
-                let chunkFiles = try FileManager.default.contentsOfDirectory(
-                    at: diskDir, includingPropertiesForKeys: nil
-                ).filter { $0.pathExtension == "lz4" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-                for (i, chunkFile) in chunkFiles.enumerated() {
-                    let progress = 0.1 + Double(i) / Double(chunkFiles.count) * 0.8
-                    updateProgress(progress, "Pushing chunk \(i + 1)/\(chunkFiles.count)...")
+                // Take the file name from each layer's own index rather than
+                // pairing a directory listing with the manifest by position —
+                // with all-zero chunks omitted, only the index is meaningful.
+                for (i, layer) in diskLayers.enumerated() {
+                    let progress = 0.1 + Double(i) / Double(diskLayers.count) * 0.8
+                    updateProgress(progress, "Pushing chunk \(i + 1)/\(diskLayers.count)...")
 
+                    let index = layer.chunkIndex ?? i
+                    let chunkFile = diskDir.appendingPathComponent(
+                        OCIDiskLayerizer.chunkFileName(index: index)
+                    )
                     let chunkData = try Data(contentsOf: chunkFile)
-                    let layer = diskLayers[i]
 
                     if !(try await client.blobExists(digest: layer.digest)) {
                         try await client.pushBlob(data: chunkData, digest: layer.digest)
-                        bgLog("Pushed chunk \(i + 1)/\(chunkFiles.count)")
+                        bgLog("Pushed chunk \(i + 1)/\(diskLayers.count)")
                     } else {
-                        bgLog("Chunk \(i + 1)/\(chunkFiles.count) already exists")
+                        bgLog("Chunk \(i + 1)/\(diskLayers.count) already exists")
                     }
                 }
 
@@ -521,7 +533,11 @@ class OCIImageManager {
                     updateProgress(progress, "Pulling chunk \(i + 1)/\(diskLayers.count)...")
 
                     let chunkData = try await client.pullBlob(digest: layer.digest)
-                    let chunkPath = diskDir.appendingPathComponent(String(format: "%03d.lz4", i))
+                    // Preserve the layer's own index in the file name — restore
+                    // derives its write offset from it.
+                    let chunkPath = diskDir.appendingPathComponent(
+                        OCIDiskLayerizer.chunkFileName(index: layer.chunkIndex ?? i)
+                    )
                     try chunkData.write(to: chunkPath)
 
                     bgLog("Pulled chunk \(i + 1)/\(diskLayers.count)")

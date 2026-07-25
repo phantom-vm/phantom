@@ -73,7 +73,7 @@ struct OCIDiskLayerizerTests {
 
     // MARK: - Chunk and Reconstruct
 
-    @Test func chunkAndReconstructSmallDisk() throws {
+    @Test func chunkAndReconstructSmallDisk() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -94,7 +94,7 @@ struct OCIDiskLayerizerTests {
 
         // Chunk the disk
         var chunkProgress: [Double] = []
-        let chunkMetadata = try OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { p in
+        let chunkMetadata = try await OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { p in
             chunkProgress.append(p)
         })
 
@@ -125,7 +125,7 @@ struct OCIDiskLayerizerTests {
         #expect(reconstructedData == diskData)
     }
 
-    @Test func chunkEmptyDiskReturnsNoChunks() throws {
+    @Test func chunkEmptyDiskReturnsNoChunks() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -135,11 +135,11 @@ struct OCIDiskLayerizerTests {
         try FileManager.default.createDirectory(at: chunkDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: diskPath.path, contents: Data())
 
-        let chunks = try OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { _ in })
+        let chunks = try await OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { _ in })
         #expect(chunks.count == 0)
     }
 
-    @Test func reconstructZeroDiskPreservesSparseness() throws {
+    @Test func allZeroDiskStoresNoChunks() async throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -153,24 +153,75 @@ struct OCIDiskLayerizerTests {
         // Chunk it
         let chunkDir = tempDir.appendingPathComponent("chunks")
         try FileManager.default.createDirectory(at: chunkDir, withIntermediateDirectories: true)
-        let chunkMetadata = try OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { _ in })
-        #expect(chunkMetadata.count == 1)
+        let chunkMetadata = try await OCIDiskLayerizer.chunkDisk(at: diskPath, outputDir: chunkDir, progress: { _ in })
 
-        // Reconstruct
+        // Nothing to store: ftruncate alone reproduces an untouched disk.
+        #expect(chunkMetadata.isEmpty)
+        let written = try FileManager.default.contentsOfDirectory(atPath: chunkDir.path)
+        #expect(written.isEmpty)
+
+        // And it still restores, to a sparse file of the right length.
         let reconstructedPath = tempDir.appendingPathComponent("reconstructed.img")
-        let chunkFile = chunkDir.appendingPathComponent("000.lz4")
-        let compressedData = try Data(contentsOf: chunkFile)
         try OCIDiskLayerizer.reconstructDisk(
             at: reconstructedPath,
             diskSize: diskSize,
-            chunks: [(offset: 0, compressedData: compressedData)],
+            chunks: [],
+            progress: { _ in }
+        )
+        let attrs = try FileManager.default.attributesOfItem(atPath: reconstructedPath.path)
+        #expect(attrs[.size] as! UInt64 == diskSize)
+        #expect(try Data(contentsOf: reconstructedPath) == zeroData)
+    }
+
+    /// A chunk's offset must come from its index, not from where it sits in the
+    /// list — the invariant that lets all-zero chunks be dropped. Uses two small
+    /// payloads at distant offsets so the disk stays a cheap sparse file rather
+    /// than gigabytes of memory.
+    @Test func reconstructWritesEachChunkAtItsOwnOffset() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let chunkSize = UInt64(OCIDiskLayerizer.chunkSize)
+        let first = Data((0..<4096).map { UInt8($0 % 251) })
+        let third = Data((0..<4096).map { UInt8(($0 * 7) % 253) })
+
+        // Slots 0 and 2 are present, slot 1 is a hole.
+        let path = tempDir.appendingPathComponent("holey.img")
+        try OCIDiskLayerizer.reconstructDisk(
+            at: path,
+            diskSize: chunkSize * 3,
+            chunks: [
+                (offset: 0, compressedData: try OCIDiskLayerizer.compress(first)),
+                (offset: chunkSize * 2, compressedData: try OCIDiskLayerizer.compress(third))
+            ],
             progress: { _ in }
         )
 
-        // Check that the file is sparse (allocated size should be much less than logical size)
-        let attrs = try FileManager.default.attributesOfItem(atPath: reconstructedPath.path)
-        let logicalSize = attrs[.size] as! UInt64
-        #expect(logicalSize == diskSize)
+        #expect(try FileManager.default.attributesOfItem(atPath: path.path)[.size] as! UInt64 == chunkSize * 3)
+
+        let handle = try FileHandle(forReadingFrom: path)
+        defer { try? handle.close() }
+
+        try handle.seek(toOffset: 0)
+        #expect(try handle.read(upToCount: first.count) == first)
+
+        // The hole reads back as zeros...
+        try handle.seek(toOffset: chunkSize)
+        #expect(try handle.read(upToCount: 4096) == Data(count: 4096))
+
+        // ...and the second chunk landed at its own offset, not at chunkSize.
+        try handle.seek(toOffset: chunkSize * 2)
+        #expect(try handle.read(upToCount: third.count) == third)
+    }
+
+    @Test func chunkFileNamesRoundTripToIndices() {
+        #expect(OCIDiskLayerizer.chunkFileName(index: 7) == "007.lz4")
+        #expect(OCIDiskLayerizer.chunkFileName(index: 1234) == "1234.lz4")
+        #expect(OCIDiskLayerizer.chunkIndex(fromFileName: "007.lz4") == 7)
+        #expect(OCIDiskLayerizer.chunkIndex(fromFileName: "1234.lz4") == 1234)
+        #expect(OCIDiskLayerizer.chunkIndex(fromFileName: "manifest.json") == nil)
+        #expect(OCIDiskLayerizer.chunkIndex(fromFileName: "nvram.bin") == nil)
     }
 
     @Test func digestsAreDeterministic() throws {

@@ -52,6 +52,12 @@ struct OCIDescriptor: Codable {
         self.annotations = annotations
     }
 
+    /// Disk slot this layer belongs to, or nil on images written before the
+    /// annotation existed (where position and index are the same thing).
+    var chunkIndex: Int? {
+        annotations?[PhantomAnnotation.chunkIndex].flatMap(Int.init)
+    }
+
     static func from(data: Data, mediaType: String, annotations: [String: String]? = nil) -> OCIDescriptor {
         OCIDescriptor(
             mediaType: mediaType,
@@ -112,6 +118,14 @@ struct PhantomVMConfig: Codable {
 
 enum PhantomAnnotation {
     static let uncompressedSize = "vnd.monk-studio.phantom.uncompressed-size"
+
+    /// Which 512 MB slot of the disk a chunk layer belongs to.
+    ///
+    /// All-zero chunks are not stored, so a disk layer's position in the
+    /// manifest no longer implies its offset. Images written before this
+    /// annotation existed have no gaps, so a missing value falls back to the
+    /// layer's position.
+    static let chunkIndex = "vnd.monk-studio.phantom.chunk-index"
 }
 
 // MARK: - Digest
