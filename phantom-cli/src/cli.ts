@@ -1,5 +1,6 @@
 import { renderGroup, type CommandGroup } from "./command";
 import { route } from "./router";
+import { CliError } from "./errors";
 import { VERSION } from "./version";
 
 export interface CliDefinition {
@@ -30,6 +31,15 @@ export async function runCli(build: () => CliDefinition) {
   try {
     await route(commands, args);
   } catch (error) {
+    // A CliError already knows what to say. Anything else is assumed to be a
+    // failed connection, which is what almost every command here does first —
+    // commands that don't talk to the daemon should raise CliError so this
+    // doesn't misreport them.
+    if (error instanceof CliError) {
+      console.error(error.message);
+      for (const line of error.detail) console.error(line);
+      process.exit(1);
+    }
     console.error("Failed to connect to phantom daemon");
     console.error("Make sure the phantom app is running");
     console.error("Error:", error);

@@ -5,6 +5,7 @@ import { commands as ipswCommands } from "./commands/ipsw";
 import { commands as vmCommands, adminCommands as vmAdminCommands } from "./commands/vm";
 import { commands as imageCommands, adminCommands as imageAdminCommands } from "./commands/image";
 import { command as healthCommand } from "./commands/health";
+import { command as updateCommand } from "./commands/update";
 import { commands as gitlabRunnerHelp, gitlabRunner } from "./commands/gitlab-runner";
 import { adminMode, gate, refuse } from "./admin";
 import { runCli } from "./cli";
@@ -24,6 +25,7 @@ runCli(() => ({
     image: { subcommands: imageAll, handler: imageAll.list!.handler },
     "gitlab-runner": { multiArgHandler: gitlabRunner },
     health: healthCommand,
+    update: updateCommand,
   },
   groups: [
     { title: "VMs", prefix: "vm", commands: vmAll },
@@ -33,7 +35,11 @@ runCli(() => ({
     {
       title: "Other",
       prefix: "",
-      commands: { health: healthCommand, help: { usage: "", description: "Show this help" } },
+      commands: {
+        health: healthCommand,
+        update: updateCommand,
+        help: { usage: "", description: "Show this help" },
+      },
     },
   ],
 }));

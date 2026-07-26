@@ -6,9 +6,10 @@ over vsock, so there is nothing in the guest to log into.
 ## Quick start
 
 Requires an Apple Silicon Mac. Nothing to build: binaries come from
-[Releases](https://github.com/phantom-vm/phantom/releases) (signed and
-notarized), images are published, and `image list` reads the catalog
-anonymously — so this works on a machine with no credentials and no IPSW.
+[Releases](https://github.com/phantom-vm/phantom/releases) — the daemon app is
+Developer ID signed and notarized — images are published, and `image list` reads
+the catalog anonymously, so this works on a machine with no credentials and no
+IPSW.
 
 Install the daemon (the app that runs the VMs — keep it running) and the CLI:
 
@@ -16,9 +17,17 @@ Install the daemon (the app that runs the VMs — keep it running) and the CLI:
 curl -fsSLO https://github.com/phantom-vm/phantom/releases/latest/download/phantom-daemon.zip
 unzip -q phantom-daemon.zip -d /Applications && open /Applications/Phantom.app
 
-sudo curl -fsSL -o /usr/local/bin/phantom \
+mkdir -p ~/.local/bin
+curl -fsSL -o ~/.local/bin/phantom \
   https://github.com/phantom-vm/phantom/releases/latest/download/phantom-cli
-sudo chmod +x /usr/local/bin/phantom
+chmod +x ~/.local/bin/phantom
+```
+
+No sudo, so `phantom update` can replace the binary later. `~/.local/bin` isn't
+on macOS's default PATH — add it if it isn't already on yours:
+
+```
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
 ```
 
 Then pull an image and boot a VM from it:
@@ -53,6 +62,10 @@ phantom vm vnc <id>              # open a VNC session to the VM's display
 phantom vm screenshot <id>       # capture its framebuffer
 phantom image list | pull | delete
 ```
+
+Keep the CLI current with `phantom update`, which replaces the binary in place
+with the latest release. The daemon is updated by hand for now — download
+`phantom-daemon.zip` again.
 
 `image list` marks an image `(update available)` when the catalog has moved on
 from the copy you pulled; `image pull <name>` then replaces it, and says so

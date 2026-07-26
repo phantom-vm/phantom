@@ -102,6 +102,10 @@ CLI that sends JSON-RPC requests to the daemon.
 5. Read response until newline
 6. Parse JSON and display formatted output
 
+Not every command follows it: `image list`/`image pull` also read the public image catalog, `ipsw` reads the restore-image catalog, and `update` talks only to GitHub. Those raise `CliError` (`errors.ts`) so `cli.ts`'s catch-all doesn't report their failures as "failed to connect to phantom daemon", which is the right guess for everything else.
+
+**Self-update**: `phantom update` looks up the latest release through the GitHub API, downloads that release's own `phantom-cli` asset by its versioned URL (never `releases/latest/download/`, which could move between the lookup and the fetch), writes it beside the running binary and `rename(2)`s it over `process.execPath` — atomic, and safe while executing, since this process keeps the inode it is already running. There is no signature check: release.yml signs and notarizes the daemon app but not this binary, so HTTPS to github.com is the whole trust anchor, exactly as much as the README's curl install it replaces. Two guards matter: a local version newer than the latest release is reported rather than silently downgraded (`--force` overrides), and the command refuses to run from a source checkout, where `process.execPath` is the *bun* binary and "updating" would overwrite the user's bun. The daemon has no equivalent — updating it is still manual.
+
 ### Guest Agent (Swift)
 
 Lightweight vsock server that executes commands inside the VM.
