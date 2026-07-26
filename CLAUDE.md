@@ -14,32 +14,36 @@ Phantom is the macOS VM orchestrator, built with Apple's Virtualization.framewor
 
 ## Architecture Documentation
 
-**📖 For overall architecture and dataflow, see [docs/design.md](docs/design.md)**
+**📖 For overall architecture and dataflow, see [docs/design/](docs/design/)**
 
-The design.md file contains comprehensive documentation of:
-- System architecture and component interactions
-- Data flow diagrams
-- Storage layout
-- Communication protocols (TCP API, vsock)
-- API endpoints
-- Concurrency model
-- State management
-- Design decisions and trade-offs
+The design docs are split by subject, with [docs/design/README.md](docs/design/README.md)
+holding the system overview, technical stack and design decisions:
+
+- [core.md](docs/design/core.md) — daemon architecture, VM lifecycle and configuration, storage layout, guest agent, concurrency, state management, error handling, security
+- [api.md](docs/design/api.md) — TCP and vsock protocols, every API endpoint, the request lifecycle
+- [images.md](docs/design/images.md) — OCI image format, disk layerization, image flows, the published catalog, automated image building
+- [cli.md](docs/design/cli.md) — command flow, admin mode, self-update
+- [ui.md](docs/design/ui.md) — the three-column GUI and its reactivity
 
 ## Important Guidelines
 
 ### When Making Architecture Changes
 
-**⚠️ Always update [docs/design.md](docs/design.md) when making architectural changes**
+**⚠️ Always update the relevant doc under [docs/design/](docs/design/) when making architectural changes**
 
-This includes:
-- Adding/removing components
-- Changing communication protocols
-- Modifying data flows
-- Adding new API endpoints
-- Changing storage layout
-- Updating threading/concurrency model
-- Modifying state management
+| Change | Doc |
+|--------|-----|
+| Adding/removing components | `README.md` |
+| Design decision or trade-off worth recording | `README.md` |
+| Changing communication protocols | `api.md` |
+| Adding new API endpoints | `api.md` |
+| Modifying data flows | `core.md` (VM lifecycle), `api.md` (request lifecycle) |
+| Changing storage layout | `core.md` |
+| Updating threading/concurrency model | `core.md` |
+| Modifying state management | `core.md` |
+| Changing the image format, catalog or build pipeline | `images.md` |
+| Adding or reshaping CLI commands | `cli.md` |
+| Changing the GUI's structure | `ui.md` |
 
 ### Project Structure
 
@@ -49,15 +53,15 @@ phantom/
 ├── phantom-agent/    # Guest agent (Swift)
 ├── phantom-cli/      # CLI tool (Bun/TypeScript)
 ├── README.md        # User-facing overview
-├── docs/            # design.md, authoring-images.md, integration/
+├── docs/            # design/, authoring-images.md, integration/
 └── CLAUDE.md        # This file
 ```
 
 ## Development Workflow
 
-1. **Before making changes**: Read docs/design.md to understand current architecture
-2. **During development**: Follow existing patterns (see docs/design.md for details)
-3. **After changes**: Update docs/design.md if architecture was modified
+1. **Before making changes**: Read the relevant doc under docs/design/ to understand current architecture
+2. **During development**: Follow existing patterns (see docs/design/ for details)
+3. **After changes**: Update docs/design/ if architecture was modified
 4. **After phantom-cli changes**: Run `cd phantom-cli && bun run install-bin` to rebuild and install the binary
 5. **Committing**: Follow conventional commit format
 
@@ -87,7 +91,7 @@ dev override.
 ## Additional Resources
 
 - [README.md](README.md) - User-facing overview and quick start
-- [docs/design.md](docs/design.md) - **Architecture documentation** (main reference)
+- [docs/design/](docs/design/) - **Architecture documentation** (main reference)
 - [docs/authoring-images.md](docs/authoring-images.md) - Building and publishing images (admin)
 - [docs/releasing.md](docs/releasing.md) - Cutting a release (version bump + GitHub release, one workflow)
 - [phantom-agent/README.md](phantom-agent/README.md) - Guest agent setup

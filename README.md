@@ -99,7 +99,7 @@ jobs select an image.
 
 ## Documentation
 
-- [design.md](docs/design.md) — architecture, storage layout, protocols, image catalog format
+- [Design docs](docs/design/) — architecture, storage layout, protocols, image catalog format
 - [GitLab CI Integration](docs/integration/gitlab.md) — Phantom as a GitLab custom executor
 - [Authoring and Publishing Images](docs/authoring-images.md) — for whoever produces the images (admin)
 

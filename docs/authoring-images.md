@@ -162,5 +162,5 @@ Steps 2–7 are exactly what `phantom image build --ipsw` does unattended.
 
 ## Related
 
-- [design.md](design.md) — the image format, catalog schema, and why pulls pin digests
+- [design/images.md](design/images.md) — the image format, catalog schema, and why pulls pin digests
 - [provision/README.md](../provision/README.md) — boot scripts and provisioning
