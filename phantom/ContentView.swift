@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var section: SidebarSection? = .vms
     @State private var selectedVMId: String?
     @State private var selectedImageName: String?
+    @State private var imageScope: ImageScope = .local
     @State private var showLog = false
 
     /// Listing images walks the images directory, so it is cached here — both
@@ -65,9 +66,13 @@ struct ContentView: View {
                         ImageListView(
                             vm: vm,
                             images: images,
+                            scope: $imageScope,
                             selection: $selectedImageName,
                             onRefresh: reloadImages
                         )
+                        // Local and catalog names live in one selection, so
+                        // switching tabs must not leave a stale one behind.
+                        .onChange(of: imageScope) { selectedImageName = nil }
                     }
                 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
@@ -125,6 +130,14 @@ struct ContentView: View {
                 .id(instance.vmId)
             } else {
                 noSelection("No Selection", description: "Select a virtual machine to see its details.")
+            }
+        case .images where imageScope == .catalog:
+            if let name = selectedImageName,
+               let entry = vm.catalogManager.entries.first(where: { $0.name == name }) {
+                CatalogDetailView(vm: vm, entry: entry, onPullStarted: reloadImages)
+                    .id(entry.name)
+            } else {
+                noSelection("No Selection", description: "Select a published image to see what it contains.")
             }
         case .images:
             if let name = selectedImageName, let info = images.first(where: { $0.name == name }) {

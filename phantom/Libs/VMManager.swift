@@ -40,6 +40,7 @@ class VMManager {
 
     let ipswManager: IPSWManager
     let imageManager: OCIImageManager
+    let catalogManager: CatalogManager
     let gitlabRunnerManager: GitLabRunnerManager
 
     private(set) var vmInstances: [String: VMInstance] = [:]
@@ -57,6 +58,7 @@ class VMManager {
         var logFunc: ((String) -> Void)!
         ipswManager = IPSWManager(ipswsDir: ipswsDir, log: { msg in logFunc(msg) })
         imageManager = OCIImageManager(imagesDir: imagesDir, log: { msg in logFunc(msg) })
+        catalogManager = CatalogManager(log: { msg in logFunc(msg) })
         gitlabRunnerManager = GitLabRunnerManager(runnerDir: runnerDir, log: { msg in logFunc(msg) })
         logFunc = { [weak self] msg in self?.log(msg) }
         ensureDirectories()

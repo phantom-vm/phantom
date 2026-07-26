@@ -71,12 +71,18 @@ struct VMDetailView: View {
                     Button("Stop") {
                         Task { await vm.stopVM(vmId: instance.vmId) }
                     }
-                    Button("Display") { onShowDisplay() }
-                } else if instance.state == .stopped {
+                } else {
                     Button("Start") {
                         Task { await vm.startVM(vmId: instance.vmId) }
                     }
+                    .disabled(instance.state != .stopped)
                 }
+
+                // Kept visible while stopped rather than appearing on start:
+                // the framebuffer is the reason to have a GUI at all, and a
+                // button that comes and goes is harder to find than a dim one.
+                Button("Display") { onShowDisplay() }
+                    .disabled(!isRunning)
 
                 Spacer()
 

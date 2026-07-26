@@ -76,7 +76,8 @@ phantom/
         ├── OCIAuth.swift           # Bearer/Basic auth + Docker config
         ├── OCIRegistry.swift       # OCI Distribution API HTTP client
         ├── OCIDiskLayerizer.swift  # Disk chunking + LZ4 compression
-        └── OCIImageManager.swift   # Image CRUD + push/pull orchestration
+        ├── OCIImageManager.swift   # Image CRUD + push/pull orchestration
+        └── CatalogManager.swift    # Fetches the published image catalog
 ```
 
 **GUI Layout**:
@@ -106,6 +107,11 @@ Finder use:
   the collection rather than to one item (create a VM, rescan images). An image
   operation running anywhere — including one the CLI started, since
   `OCIImageManager.state` is shared — shows as a progress banner above the list.
+  Images has a **Local / Catalog** switch: Catalog lists what the published
+  catalog offers, marking what is already on disk, and its detail pane pulls the
+  entry by `repository@digest`. The catalog is fetched on first visit to that
+  tab, not at launch — a daemon nobody opens the tab on never reaches out to a
+  registry.
 - **Detail pane** — everything about the selected item, including the lifecycle
   buttons and the exec console; `ContentUnavailableView` when nothing is
   selected. Both panes look their item up by id on every render, so one deleted
@@ -121,6 +127,7 @@ on every progress tick.
 - All state mutations happen on `@MainActor`
 - `IPSWManager` owns IPSW download state, referenced by `VMManager.ipswManager`
 - `OCIImageManager` owns image operations state, referenced by `VMManager.imageManager`
+- `CatalogManager` owns the fetched catalog, referenced by `VMManager.catalogManager`
 - `VMManager` tracks multiple VMs via `vmInstances` dictionary
 - Observable properties: `ipswManager.state`, `vmInstances`, `logs`, etc.
 
