@@ -50,7 +50,14 @@ The daemon is a standard macOS SwiftUI application with three main subsystems:
 ```
 phantom/
 ├── phantomApp.swift      # App entry point, initializes TCPServer
-├── ContentView.swift     # SwiftUI GUI
+├── ContentView.swift     # Three-column GUI shell (sidebar / list / detail)
+├── Views/                # The columns and their panes
+│   ├── SidebarView.swift     # Sections (VMs, Images) + restore image footer
+│   ├── VMListView.swift      # VM list column and its rows
+│   ├── VMDetailView.swift    # VM metadata, actions, exec console
+│   ├── ImagesView.swift      # Image list column and image detail pane
+│   ├── LogPane.swift         # Collapsible daemon log below the columns
+│   └── VMDisplayView.swift   # VZVirtualMachineView wrapper
 ├── APIHandlers.swift     # API request routing
 ├── APIModels.swift       # JSON protocol definitions
 └── Libs/
@@ -71,6 +78,43 @@ phantom/
         ├── OCIDiskLayerizer.swift  # Disk chunking + LZ4 compression
         └── OCIImageManager.swift   # Image CRUD + push/pull orchestration
 ```
+
+**GUI Layout**:
+
+The window is a three-column `NavigationSplitView`, the shape OrbStack and the
+Finder use:
+
+```
+┌──────────┬──────────────────┬──────────────────────────┐
+│ VMs      │ vm-a1b2c3d4      │ vm-a1b2c3d4              │
+│ Images   │   Running        │   Running                │
+│          │ vm-e5f6g7h8      │   [Stop] [Display]       │
+│          │   Stopped        │   Details: id, state,    │
+│──────────│                  │   bundle path            │
+│ Restore  │                  │   Run Command …          │
+│ Image    │                  │                          │
+└──────────┴──────────────────┴──────────────────────────┘
+│ Log (collapsible, toggled from the toolbar)            │
+└────────────────────────────────────────────────────────┘
+```
+
+- **Sidebar** — the two things the daemon manages (`SidebarSection`), each with
+  a live count, over a footer for the IPSW restore image. The IPSW sits there
+  rather than in Images because it is a host-level prerequisite for installing a
+  VM from scratch, not one of the OCI images a VM is restored from.
+- **List column** — the selected section's items, and the actions that belong to
+  the collection rather than to one item (create a VM, rescan images). An image
+  operation running anywhere — including one the CLI started, since
+  `OCIImageManager.state` is shared — shows as a progress banner above the list.
+- **Detail pane** — everything about the selected item, including the lifecycle
+  buttons and the exec console; `ContentUnavailableView` when nothing is
+  selected. Both panes look their item up by id on every render, so one deleted
+  over the API falls back to the placeholder instead of going stale.
+- **Log** — collapsed by default, below all three columns.
+
+Image listing walks the images directory, so `ContentView` caches the result and
+reloads it when `OCIImageManager.state` enters or leaves a terminal state, not
+on every progress tick.
 
 **State Management**:
 - Uses `@Observable` macro for reactive state
@@ -880,32 +924,21 @@ SwiftUI views automatically update when observable state changes:
 @Bindable var vm: VMManager
 
 var body: some View {
-    if case .downloading(let progress) = vm.ipswManager.state {
-        ProgressView(value: progress)
+    // The list column re-renders as VM state changes, without any refresh call
+    List(vm.listVMs(), id: \.id, selection: $selection) { info in
+        VMRow(vmInfo: info, instance: vm.vmInstances[info.id])
     }
-
-    // Display all VMs
-    ForEach(vm.listVMs(), id: \.id) { vmInfo in
-        let instance = vm.vmInstances[vmInfo.id]
-        HStack {
-            Text(vmInfo.id)
-            if let instance = instance {
-                Text(instance.state.apiString)
-                if instance.state == .running {
-                    Button("Stop") {
-                        Task { await vm.stopVM(vmId: vmInfo.id) }
-                    }
-                }
-            }
+    .toolbar {
+        Button("Create VM") {
+            Task { await vm.createAndStartVM() }
         }
+        .disabled(!canCreateVM)
     }
-
-    Button("Create VM") {
-        Task { await vm.createAndStartVM() }
-    }
-    .disabled(!canCreateVM)
 }
 ```
+
+The detail pane reads the same observable state, so a VM started over the API
+updates its buttons and status in the GUI with no notification path of its own.
 
 ---
 
@@ -991,7 +1024,8 @@ var body: some View {
 phantom/
 ├── phantom/                   # Daemon app
 │   ├── phantomApp.swift      # Entry point
-│   ├── ContentView.swift     # SwiftUI GUI
+│   ├── ContentView.swift     # Three-column GUI shell (sidebar / list / detail)
+│   ├── Views/                # Sidebar, list columns, detail panes, log pane
 │   ├── APIHandlers.swift     # API request routing
 │   ├── APIModels.swift       # JSON protocol definitions
 │   └── Libs/

@@ -1,316 +1,158 @@
 import SwiftUI
-import Virtualization
+
+/// What the sidebar lists. The daemon manages two kinds of thing, and each gets
+/// a list in the middle column and a detail pane on the right.
+enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
+    case vms
+    case images
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .vms: "VMs"
+        case .images: "Images"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .vms: "desktopcomputer"
+        case .images: "square.stack.3d.up"
+        }
+    }
+}
 
 struct ContentView: View {
     @Bindable var vm: VMManager
     @Environment(\.openWindow) private var openWindow
-    @State private var commandText = ""
+
+    @State private var section: SidebarSection? = .vms
     @State private var selectedVMId: String?
-    @State private var lastExecResult: VMManager.ExecResponse?
+    @State private var selectedImageName: String?
+    @State private var showLog = false
+
+    /// Listing images walks the images directory, so it is cached here — both
+    /// the list and the detail pane read this copy — and reloaded when an image
+    /// operation reaches a terminal state (see `imagesReloadKey`).
+    @State private var images: [ImageInfo] = []
+
+    private var currentSection: SidebarSection { section ?? .vms }
+
+    /// Flips whenever an image operation starts or finishes, without tracking
+    /// the progress inside one — a pull ticking from 1% to 100% must not rescan
+    /// the directory on every update.
+    private var imagesReloadKey: Bool {
+        switch vm.imageManager.state {
+        case .idle, .completed, .error: true
+        case .saving, .pushing, .pulling: false
+        }
+    }
 
     var body: some View {
-        HSplitView {
-            // Controls
-            VStack(alignment: .leading, spacing: 20) {
-                // Tighter than the surrounding 20pt: the tagline belongs to the
-                // title, not to the sections under it.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Phantom")
-                        .font(.title2.bold())
-                    Text("The macOS VM orchestrator")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Image section
-                GroupBox("IPSW Images") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            ipswStatusView
-                            Spacer()
-                            Button("Download") {
-                                Task { await vm.ipswManager.download() }
-                            }
-                            .disabled(!canDownload)
-                        }
-
-                        if case .downloading(let progress) = vm.ipswManager.state {
-                            ProgressView(value: progress)
-                            Text("\(Int(progress * 100))%")
-                                .font(.caption.monospacedDigit())
-                        }
-
-                        if !vm.ipswManager.info.isEmpty {
-                            Text(vm.ipswManager.info).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // VM list section
-                GroupBox("Virtual Machines") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        let vms = vm.listVMs()
-
-                        if vms.isEmpty {
-                            Text("No VMs")
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            ScrollView {
-                                VStack(spacing: 4) {
-                                    ForEach(vms, id: \.id) { vmInfo in
-                                        VMRow(
-                                            vmInfo: vmInfo,
-                                            isSelected: selectedVMId == vmInfo.id,
-                                            vmInstance: vm.vmInstances[vmInfo.id],
-                                            onSelect: { selectedVMId = vmInfo.id },
-                                            onStart: {
-                                                selectedVMId = vmInfo.id
-                                                Task { await vm.startVM(vmId: vmInfo.id) }
-                                            },
-                                            onStop: {
-                                                Task { await vm.stopVM(vmId: vmInfo.id) }
-                                            },
-                                            onDelete: {
-                                                Task { await vm.deleteVM(vmId: vmInfo.id) }
-                                            },
-                                            onShowDisplay: {
-                                                vm.setDisplayedVM(vmId: vmInfo.id)
-                                                openWindow(id: "vm-display")
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                            .frame(maxHeight: 200)
-                        }
-
-                        Divider()
-
-                        HStack {
-                            Button("Create from IPSW") {
-                                Task { await vm.createAndStartVM() }
-                            }
-                            .disabled(!canCreateVM)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // Exec section
-                if let selectedVMId = selectedVMId,
-                   let instance = vm.vmInstances[selectedVMId],
-                   case .running = instance.state {
-                    GroupBox("Run Command on \(selectedVMId)") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                TextField("Command", text: $commandText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .onSubmit { runCommand() }
-                                Button("Run") { runCommand() }
-                                    .disabled(commandText.isEmpty)
-                            }
-
-                            if let result = lastExecResult {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    if !result.stdout.isEmpty {
-                                        Text(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-                                            .font(.system(.caption, design: .monospaced))
-                                            .textSelection(.enabled)
-                                    }
-                                    if !result.stderr.isEmpty {
-                                        Text(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
-                                            .font(.system(.caption, design: .monospaced))
-                                            .foregroundStyle(.red)
-                                            .textSelection(.enabled)
-                                    }
-                                    Text("Exit: \(result.exitCode)")
-                                        .font(.caption)
-                                        .foregroundStyle(result.exitCode == 0 ? .green : .red)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        // The log used to own half the window; it is a debugging aid, so it
+        // sits below the three columns and starts collapsed.
+        VSplitView {
+            NavigationSplitView {
+                SidebarView(vm: vm, imageCount: images.count, selection: $section)
+                    .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 260)
+            } content: {
+                Group {
+                    switch currentSection {
+                    case .vms:
+                        VMListView(vm: vm, selection: $selectedVMId)
+                    case .images:
+                        ImageListView(
+                            vm: vm,
+                            images: images,
+                            selection: $selectedImageName,
+                            onRefresh: reloadImages
+                        )
                     }
                 }
-
-                Spacer()
+                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
+            } detail: {
+                detail
+                    .toolbar {
+                        ToolbarItem {
+                            Button {
+                                showLog.toggle()
+                            } label: {
+                                Label("Log", systemImage: "text.alignleft")
+                            }
+                            .help(showLog ? "Hide the daemon log" : "Show the daemon log")
+                        }
+                    }
             }
-            .padding()
-            .frame(minWidth: 300, idealWidth: 350)
 
-            // Log area
-            GroupBox("Log") {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(vm.logs.enumerated()), id: \.offset) { index, line in
-                                Text(line)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .textSelection(.enabled)
-                                    .id(index)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .onChange(of: vm.logs.count) { _, _ in
-                        if let last = vm.logs.indices.last {
-                            proxy.scrollTo(last, anchor: .bottom)
-                        }
-                    }
-                }
+            if showLog {
+                LogPane(logs: vm.logs)
+                    .frame(minHeight: 100, idealHeight: 160)
             }
-            .padding()
-            .frame(minWidth: 300)
         }
-        .frame(minWidth: 700, minHeight: 400)
+        .frame(minWidth: 820, minHeight: 460)
+        .task(id: imagesReloadKey) {
+            reloadImages()
+        }
         .onChange(of: vm.displayRequestCounter) {
             openWindow(id: "vm-display")
         }
     }
 
-    // MARK: - Status Views
+    private func reloadImages() {
+        images = vm.imageManager.list()
+    }
+
+    // MARK: - Detail Pane
 
     @ViewBuilder
-    private var ipswStatusView: some View {
-        switch vm.ipswManager.state {
-        case .none:
-            Label("No image", systemImage: "arrow.down.circle")
-        case .fetching:
-            Label("Fetching info...", systemImage: "magnifyingglass")
-        case .downloading:
-            Label("Downloading...", systemImage: "arrow.down.circle.fill")
-        case .downloaded:
-            Label("Ready", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .error(let msg):
-            Label(msg, systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
-        }
-    }
-
-    // MARK: - Computed
-
-    private func runCommand() {
-        guard let vmId = selectedVMId else { return }
-        let cmd = commandText
-        commandText = ""
-        Task { lastExecResult = try? await vm.executeCommand(cmd, vmId: vmId) }
-    }
-
-    private var canDownload: Bool {
-        vm.ipswManager.state == .none || {
-            if case .error = vm.ipswManager.state { return true }
-            return false
-        }()
-    }
-
-    private var canCreateVM: Bool {
-        if case .downloaded = vm.ipswManager.state {
-            return true
-        }
-        return false
-    }
-}
-
-// MARK: - VM Row
-
-struct VMRow: View {
-    let vmInfo: VMInfo
-    let isSelected: Bool
-    let vmInstance: VMManager.VMInstance?
-    let onSelect: () -> Void
-    let onStart: () -> Void
-    let onStop: () -> Void
-    let onDelete: () -> Void
-    let onShowDisplay: () -> Void
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(vmInfo.id)
-                    .font(.system(.body, design: .monospaced))
-                if let vmInstance = vmInstance {
-                    vmStatusLabel(vmInstance.state)
-                        .font(.caption)
-                } else {
-                    Text(vmInfo.state)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+    private var detail: some View {
+        switch currentSection {
+        case .vms:
+            // Looking the instance up here rather than holding it means a VM
+            // that disappears (deleted from the GUI or over the API) falls back
+            // to the placeholder instead of showing a stale pane.
+            if let vmId = selectedVMId, let instance = vm.vmInstances[vmId] {
+                VMDetailView(
+                    vm: vm,
+                    instance: instance,
+                    onShowDisplay: {
+                        vm.setDisplayedVM(vmId: instance.vmId)
+                        openWindow(id: "vm-display")
+                    },
+                    onDeleted: { selectedVMId = nil }
+                )
+                .id(instance.vmId)
+            } else {
+                noSelection("No Selection", description: "Select a virtual machine to see its details.")
             }
-
-            Spacer()
-
-            if let vmInstance = vmInstance {
-                if vmInstance.state == .running {
-                    Button("Display") { onShowDisplay() }
-                        .buttonStyle(.bordered)
-                    Button("Stop") { onStop() }
-                        .buttonStyle(.bordered)
-                } else if vmInstance.state == .stopped {
-                    Button("Start") { onStart() }
-                        .buttonStyle(.bordered)
-                } else if case .installing(let progress) = vmInstance.state {
-                    ProgressView(value: progress)
-                        .frame(width: 60)
-                } else if case .restoring(let progress) = vmInstance.state {
-                    ProgressView(value: progress)
-                        .frame(width: 60)
-                }
+        case .images:
+            if let name = selectedImageName, let info = images.first(where: { $0.name == name }) {
+                ImageDetailView(
+                    vm: vm,
+                    info: info,
+                    onDeleted: {
+                        selectedImageName = nil
+                        reloadImages()
+                    },
+                    onVMCreated: { vmId in
+                        selectedVMId = vmId
+                        section = .vms
+                    }
+                )
+                .id(info.name)
+            } else {
+                noSelection("No Selection", description: "Select an image to see its details.")
             }
-
-            Button("Delete", role: .destructive) { onDelete() }
-                .buttonStyle(.bordered)
-        }
-        .padding(8)
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
-        .cornerRadius(6)
-        .contentShape(Rectangle())
-        .onTapGesture { onSelect() }
-    }
-
-    @ViewBuilder
-    private func vmStatusLabel(_ state: VMManager.VMState) -> some View {
-        switch state {
-        case .none:
-            Label("None", systemImage: "circle")
-        case .creating:
-            Label("Creating...", systemImage: "gear")
-        case .installing:
-            Label("Installing...", systemImage: "arrow.triangle.2.circlepath")
-        case .restoring:
-            Label("Restoring...", systemImage: "arrow.down.doc")
-        case .running:
-            Label("Running", systemImage: "play.circle.fill")
-                .foregroundStyle(.green)
-        case .stopping:
-            Label("Stopping...", systemImage: "stop.circle")
-        case .stopped:
-            Label("Stopped", systemImage: "stop.circle.fill")
-                .foregroundStyle(.orange)
-        case .error(let msg):
-            Label(msg, systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
         }
     }
-}
 
-// MARK: - VM Display
-
-struct VMDisplayView: NSViewRepresentable {
-    let virtualMachine: VZVirtualMachine
-
-    func makeNSView(context: Context) -> VZVirtualMachineView {
-        let view = VZVirtualMachineView()
-        view.virtualMachine = virtualMachine
-        view.capturesSystemKeys = true
-        return view
-    }
-
-    func updateNSView(_ nsView: VZVirtualMachineView, context: Context) {
-        nsView.virtualMachine = virtualMachine
+    private func noSelection(_ title: String, description: String) -> some View {
+        ContentUnavailableView(
+            title,
+            systemImage: currentSection.systemImage,
+            description: Text(description)
+        )
     }
 }
 
