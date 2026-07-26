@@ -7,6 +7,12 @@
 export interface Command {
   usage: string;
   description: string;
+  /**
+   * Kept out of `phantom help` but still routable. Used for the admin
+   * commands outside admin mode, so invoking one explains PHANTOM_ADMIN_MODE
+   * instead of answering "unknown subcommand" — see admin.ts.
+   */
+  hidden?: boolean;
   handler?: (arg?: string) => Promise<void> | void;
   multiArgHandler?: (...args: string[]) => Promise<void> | void;
 }
@@ -19,7 +25,9 @@ export interface CommandGroup {
 }
 
 export function renderGroup(group: CommandGroup): string {
-  const entries = Object.entries(group.commands);
+  const entries = Object.entries(group.commands).filter(([, cmd]) => !cmd.hidden);
+  // Also covers a group that is entirely hidden — the admin sections outside
+  // admin mode. cli.ts drops the empty string from the help output.
   if (entries.length === 0) return "";
 
   const rows = entries.map(([name, cmd]) => ({

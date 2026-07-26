@@ -1,10 +1,8 @@
 import { sendRequest, type IPSW } from "../lib/api";
 import type { Command } from "../command";
 
-// This whole module is admin-only — it's imported exclusively by the admin
-// entry (src/main.ts). The user entry (src/main-user.ts) never imports it,
-// so it and its network calls to the IPSW catalog are absent from that
-// build (plain unused-module elimination, not a runtime flag).
+// Image authoring: main.ts registers this whole module only under
+// PHANTOM_ADMIN_MODE.
 
 // IPSW catalog: VirtualBuddy's curated manifest, maintained in a public git
 // repo (auditable history). The catalog only *points* — the daemon refuses

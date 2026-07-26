@@ -88,11 +88,11 @@ phantom/
 
 ### CLI (Bun/TypeScript)
 
-Single-file CLI that sends JSON-RPC requests to the daemon.
+CLI that sends JSON-RPC requests to the daemon.
 
-**Two build flavors, two entry points**: `src/main-admin.ts` (`bun run install-bin`) includes the image-authoring commands (`ipsw`, `image build`, `vm boot-script`); `src/main.ts` (`bun run build-user-bin`) simply never imports `commands/ipsw.ts` or the admin-only exports from `commands/vm.ts`/`commands/image.ts`, so that code is absent from the compiled binary via plain unused-module elimination — regular users start from a published base image. (An earlier version of this gated commands behind a `--define`d runtime flag instead; that doesn't reliably dead-code-eliminate once a module is more than a couple of functions, so it was replaced with this static-import-graph split.) Each `commands/*.ts` module exports `Command` records — usage/description bundled with the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`). This is CLI UX/binary-size only: the daemon API keeps all endpoints regardless of which CLI build talks to it.
+**One binary, one entry point** (`src/main.ts`, built by `bun run build`), with the image-authoring commands (`ipsw`, `image build`, `image publish`, `vm boot-script`) gated behind the `PHANTOM_ADMIN_MODE` env var — `src/admin.ts`. Outside admin mode they are hidden from `phantom help` and answer with an error naming the variable rather than "unknown subcommand". This is presentation only: the commands are compiled into every binary, and the daemon API keeps all endpoints regardless of what the caller is showing in its help. It is explicitly **not** an access-control boundary. (Earlier versions shipped two binaries from two entry points, `main.ts` and `main-admin.ts`, so the user build's import graph excluded the authoring code; that saved 16KB on a 63MB binary — the Bun runtime dominates — and cost two release assets and two build scripts, so it was collapsed.) Each `commands/*.ts` module exports `Command` records — usage/description bundled with the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`).
 
-**File**: `phantom-cli/src/main.ts` (260 lines)
+**Entry point**: `phantom-cli/src/main.ts` — argument routing in `router.ts`, help rendering in `command.ts`/`cli.ts`, handlers under `commands/`.
 
 **Command Flow**:
 1. Parse command-line arguments

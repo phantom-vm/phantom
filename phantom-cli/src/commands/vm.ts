@@ -386,7 +386,6 @@ export async function vmDelete(vmId: string) {
   console.log(`VM ${vmId} deleted`);
 }
 
-// Base commands, wired up by both CLI builds (see registry.ts).
 export const commands: Record<string, Command> = {
   deploy: { usage: "--image <name>", description: "Boot a VM (also: --ipsw <id>, --template-vm <id>)", multiArgHandler: vmDeploy },
   list: { usage: "", description: "List VMs and their state", handler: vmList as Command["handler"] },
@@ -399,13 +398,7 @@ export const commands: Record<string, Command> = {
   delete: { usage: "<id>", description: "Delete a VM", handler: vmDelete as Command["handler"] },
 };
 
-// Only imported by the admin entry (src/main.ts) — the user entry
-// (src/main-user.ts) never references vmBootScript, so it and everything it
-// pulls in (VNC keystroke injection, OCR) are absent from that build. This
-// relies on plain unused-export elimination, not a runtime flag: a ternary
-// gated by a `--define`d constant does NOT reliably fold away in Bun's
-// bundler once the codebase is more than a couple of functions (verified
-// empirically — don't reintroduce that pattern here).
+// Image authoring: main.ts registers these only under PHANTOM_ADMIN_MODE.
 export const adminCommands: Record<string, Command> = {
   "boot-script": {
     usage: "<id> --file <script>",

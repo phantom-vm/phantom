@@ -308,7 +308,6 @@ async function resolveExisting(
   return true;
 }
 
-// Base commands, wired up by both CLI builds (see registry.ts).
 export const commands: Record<string, Command> = {
   list: { usage: "", description: "List local images (default with no subcommand)", handler: imageList as Command["handler"] },
   save: { usage: "<vmId> <name>", description: "Save a stopped VM as a local image", multiArgHandler: imageSave },
@@ -317,9 +316,7 @@ export const commands: Record<string, Command> = {
   delete: { usage: "<name>", description: "Delete a local image", handler: imageDelete as Command["handler"] },
 };
 
-// Only imported by the admin entry (src/main.ts) — see the comment on
-// vm.ts's adminCommands for why this is a separate export rather than a
-// runtime-gated one.
+// Image authoring: main.ts registers these only under PHANTOM_ADMIN_MODE.
 export const adminCommands: Record<string, Command> = {
   build: {
     usage: "<name> [options]",

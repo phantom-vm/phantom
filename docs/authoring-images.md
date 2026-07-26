@@ -3,9 +3,17 @@
 For whoever produces the images everyone else pulls. Users don't need any of
 this — they run `phantom image pull <name>`.
 
-These commands exist only in the **admin** CLI build (`bun run install-bin`); the
-user build (`bun run build-user-bin`) omits `ipsw`, `image build`, and
-`image publish` entirely, so the code behind them isn't shipped to users.
+`ipsw`, `image build`, `image publish` and `vm boot-script` are hidden unless
+`PHANTOM_ADMIN_MODE` is set:
+
+```bash
+export PHANTOM_ADMIN_MODE=1
+```
+
+Without it they are absent from `phantom help` and refuse to run, naming the
+variable. That is decluttering, not access control — the commands are in every
+binary, and each one only asks the local daemon for something it would do for
+any caller. Don't treat the variable as a permission boundary.
 
 ## The whole pipeline
 

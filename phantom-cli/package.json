@@ -7,8 +7,8 @@
     "phantom": "./src/main.ts"
   },
   "scripts": {
-    "install-bin": "rm -rf dist && bun build src/main-admin.ts --compile --minify --outfile dist/phantom && mv dist/phantom ~/.local/bin/phantom",
-    "build-user-bin": "rm -rf dist && bun build src/main.ts --compile --minify --outfile dist/phantom"
+    "build": "rm -rf dist && bun build src/main.ts --compile --minify --outfile dist/phantom",
+    "install-bin": "bun run build && mv dist/phantom ~/.local/bin/phantom"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14"

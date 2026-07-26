@@ -2,6 +2,8 @@ type CommandHandler = (arg?: string) => Promise<void> | void;
 type MultiArgCommandHandler = (...args: string[]) => Promise<void> | void;
 
 interface CommandConfig {
+  /// See Command.hidden in command.ts — routable, but not advertised.
+  hidden?: boolean;
   handler?: CommandHandler;
   multiArgHandler?: MultiArgCommandHandler;
   subcommands?: {
@@ -11,6 +13,15 @@ interface CommandConfig {
 
 interface CommandRegistry {
   [command: string]: CommandConfig;
+}
+
+/// What a "Available: ..." line offers — hidden commands still route, but
+/// suggesting them would undo the point of hiding them.
+function advertised(registry: CommandRegistry): string {
+  return Object.entries(registry)
+    .filter(([, config]) => !config.hidden)
+    .map(([name]) => name)
+    .join(", ");
 }
 
 export async function route(registry: CommandRegistry, args: string[]) {
@@ -39,13 +50,13 @@ export async function route(registry: CommandRegistry, args: string[]) {
         return;
       }
       console.error(`${command} requires a subcommand`);
-      console.error(`Available: ${Object.keys(config.subcommands).join(", ")}`);
+      console.error(`Available: ${advertised(config.subcommands)}`);
       process.exit(1);
     }
     const subConfig = config.subcommands[subcommand];
     if (!subConfig) {
       console.error(`Unknown ${command} subcommand: ${subcommand}`);
-      console.error(`Available: ${Object.keys(config.subcommands).join(", ")}`);
+      console.error(`Available: ${advertised(config.subcommands)}`);
       process.exit(1);
     }
     await route({ [subcommand]: subConfig }, rest);
