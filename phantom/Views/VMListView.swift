@@ -6,19 +6,20 @@ import SwiftUI
 struct VMListView: View {
     @Bindable var vm: VMManager
     @Binding var selection: String?
-    let onCreateVM: () -> Void
 
     var body: some View {
         let vms = vm.listVMs()
 
         Group {
             if vms.isEmpty {
+                // Description only, no button. The '+' over the detail column is
+                // the one way to create a VM, and a second control here would
+                // both duplicate it and teach a spot that stops existing as soon
+                // as this pane has a list in it.
                 ContentUnavailableView {
                     Label("No VMs", systemImage: "desktopcomputer")
                 } description: {
                     Text("Create one with the + button above the detail pane.")
-                } actions: {
-                    Button("New VM…") { onCreateVM() }
                 }
             } else {
                 List(vms, id: \.id, selection: $selection) { info in

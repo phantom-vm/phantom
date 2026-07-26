@@ -62,11 +62,7 @@ struct ContentView: View {
                 Group {
                     switch currentSection {
                     case .vms:
-                        VMListView(
-                            vm: vm,
-                            selection: $selectedVMId,
-                            onCreateVM: { creatingVM = true }
-                        )
+                        VMListView(vm: vm, selection: $selectedVMId)
                     case .images:
                         ImageListView(
                             vm: vm,
