@@ -11,22 +11,29 @@ Finder use:
 
 ```
 ┌──────────┬──────────────────┬──────────────────────────┐
-│ VMs      │ vm-a1b2c3d4      │ vm-a1b2c3d4              │
-│ Images   │   Running        │   Running                │
+│          │  Virtual   [log] │ [+]                      │
+│ VMs      │  Machines        │                          │
+│ Images   │ vm-a1b2c3d4      │ vm-a1b2c3d4              │
+│          │   Running        │   Running                │
 │          │ vm-e5f6g7h8      │   [Stop] [Display]       │
 │          │   Stopped        │   Details: id, state,    │
-│──────────│                  │   bundle path            │
-│ Restore  │                  │   Run Command …          │
-│ Image    │                  │                          │
+│          │                  │   bundle path            │
+│          │                  │   Run Command …          │
 └──────────┴──────────────────┴──────────────────────────┘
 │ Log (collapsible, toggled from the toolbar)            │
 └────────────────────────────────────────────────────────┘
 ```
 
+No IPSW appears anywhere in this window. A user's starting point is a published
+catalog image, pulled ready to boot; a macOS restore image is how those images get
+*built*, which is an authoring concern — the CLI already gates `ipsw` behind
+`PHANTOM_ADMIN_MODE` for the same reason, and the GUI used to contradict that by
+keeping a restore-image panel in the sidebar of every install. The daemon still
+serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
+`phantom image build --ipsw` is how a base image is produced.
+
 - **Sidebar** — the two things the daemon manages (`SidebarSection`), each with
-  a live count, over a footer for the IPSW restore image. The IPSW sits there
-  rather than in Images because it is a host-level prerequisite for installing a
-  VM from scratch, not one of the OCI images a VM is restored from.
+  a live count, and nothing else.
 - **List column** — the selected section's items. Actions that belong to the
   collection rather than to one item live in the toolbar: Images keeps its
   rescan/refresh here, while the VMs **+** sits over the detail column (below).

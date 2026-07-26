@@ -109,7 +109,7 @@ struct ContentView: View {
                                 } label: {
                                     Label("New VM", systemImage: "plus")
                                 }
-                                .help("Create a VM from an image or the restore image")
+                                .help("Create a VM from a local image")
                             }
                         }
                     }

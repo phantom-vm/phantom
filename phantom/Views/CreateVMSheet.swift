@@ -1,9 +1,15 @@
 import SwiftUI
 
-/// The '+' in the VMs column: name the VM, pick what it comes from, and size it.
+/// The '+' over the VM detail pane: name the VM, pick the image it comes from,
+/// and size it.
 ///
 /// Sizing is written into the bundle (`VMSettings`), so the numbers chosen here
 /// survive every later start — see `VMManager.buildVMConfiguration`.
+///
+/// A local image is the only source offered. The daemon can also install a VM
+/// from a macOS restore image (`vm.create --ipswId`), but that is a ~20-minute
+/// bare-macOS install used to *build* images, not to get a working VM — so it
+/// stays with the authoring tools in the CLI and out of the GUI.
 struct CreateVMSheet: View {
     @Bindable var vm: VMManager
     let images: [ImageInfo]
@@ -12,26 +18,13 @@ struct CreateVMSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    /// What the VM is built from. Restoring an image takes minutes; installing
-    /// from the restore image takes ~20, which is why it is the fallback rather
-    /// than the default.
-    enum Source: Hashable {
-        case image(String)
-        case restoreImage
-    }
-
     @State private var name = VMName.generate()
-    @State private var source: Source?
+    @State private var source: String?
     @State private var cpuCount = VMSettings.defaults.cpuCount
     @State private var memoryGB = Int(VMSettings.defaults.memorySize / (1024 * 1024 * 1024))
     @State private var errorMessage: String?
 
-    private var hasRestoreImage: Bool {
-        if case .downloaded = vm.ipswManager.state { return true }
-        return false
-    }
-
-    private var hasSource: Bool { !images.isEmpty || hasRestoreImage }
+    private var hasSource: Bool { !images.isEmpty }
 
     private var maxCPUCount: Int { VMSettings.maximumCPUCount }
     private var minMemoryGB: Int { max(1, Int(VMSettings.minimumMemorySize / (1024 * 1024 * 1024))) }
@@ -100,21 +93,11 @@ struct CreateVMSheet: View {
             }
 
             Section {
-                Picker("Source", selection: $source) {
+                Picker("Image", selection: $source) {
                     ForEach(images, id: \.name) { image in
                         Text("\(image.name) — \(image.totalSize.formatted(.byteCount(style: .file)))")
-                            .tag(Source.image(image.name) as Source?)
+                            .tag(image.name as String?)
                     }
-                    if hasRestoreImage {
-                        Text("Restore image (installs macOS, ~20 min)")
-                            .tag(Source.restoreImage as Source?)
-                    }
-                }
-            } footer: {
-                if images.isEmpty {
-                    Text("No local images. The restore image installs a bare macOS; pull a prepared image from the Catalog for anything more.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -137,15 +120,11 @@ struct CreateVMSheet: View {
             ContentUnavailableView {
                 Label("No Images", systemImage: "square.stack.3d.up")
             } description: {
-                Text("A VM is restored from a local image, or installed from the macOS restore image. This Mac has neither yet.")
+                Text("A VM is restored from a local image, and this Mac has none yet. The Catalog lists prepared images ready to boot.")
             } actions: {
                 Button("Browse Catalog") {
                     dismiss()
                     onBrowseCatalog()
-                }
-                Button("Download Restore Image") {
-                    Task { await vm.ipswManager.download() }
-                    dismiss()
                 }
             }
         }
@@ -156,13 +135,7 @@ struct CreateVMSheet: View {
 
     private func selectDefaultSource() {
         guard source == nil else { return }
-        // An image restores in minutes and boots ready to use; the IPSW is the
-        // fallback for a host that has no image yet.
-        if let first = images.first {
-            source = .image(first.name)
-        } else if hasRestoreImage {
-            source = .restoreImage
-        }
+        source = images.first?.name
     }
 
     private func create() {
@@ -172,19 +145,12 @@ struct CreateVMSheet: View {
             memorySize: UInt64(memoryGB) * 1024 * 1024 * 1024
         ).clamped()
 
-        switch source {
-        case .image(let imageName):
-            do {
-                let vmId = try vm.createVMFromImage(imageName: imageName, vmId: name, settings: settings)
-                onCreated(vmId)
-                dismiss()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        case .restoreImage:
-            Task { await vm.createAndStartVM(vmId: name, settings: settings) }
-            onCreated(name)
+        do {
+            let vmId = try vm.createVMFromImage(imageName: source, vmId: name, settings: settings)
+            onCreated(vmId)
             dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
