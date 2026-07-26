@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import phantom
+@testable import Phantom
 
 struct OCIReferenceTests {
 

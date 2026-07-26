@@ -1,7 +1,7 @@
 //
 
 import Testing
-@testable import phantom
+@testable import Phantom
 
 struct phantomTests {
 

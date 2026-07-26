@@ -24,7 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		076D1AF42F31AA4E00C04393 /* phantom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = phantom.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		076D1AF42F31AA4E00C04393 /* Phantom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Phantom.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		076D1B012F31AA4F00C04393 /* phantomTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = phantomTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		076D1B0B2F31AA4F00C04393 /* phantomUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = phantomUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -85,7 +85,7 @@
 		076D1AF52F31AA4E00C04393 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				076D1AF42F31AA4E00C04393 /* phantom.app */,
+				076D1AF42F31AA4E00C04393 /* Phantom.app */,
 				076D1B012F31AA4F00C04393 /* phantomTests.xctest */,
 				076D1B0B2F31AA4F00C04393 /* phantomUITests.xctest */,
 			);
@@ -114,7 +114,7 @@
 			packageProductDependencies = (
 			);
 			productName = phantom;
-			productReference = 076D1AF42F31AA4E00C04393 /* phantom.app */;
+			productReference = 076D1AF42F31AA4E00C04393 /* Phantom.app */;
 			productType = "com.apple.product-type.application";
 		};
 		076D1B002F31AA4F00C04393 /* phantomTests */ = {
@@ -474,7 +474,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/phantom.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/phantom";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phantom.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phantom";
 			};
 			name = Debug;
 		};
@@ -495,7 +495,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/phantom.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/phantom";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phantom.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phantom";
 			};
 			name = Release;
 		};
