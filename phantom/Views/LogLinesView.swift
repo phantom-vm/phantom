@@ -1,23 +1,27 @@
 import SwiftUI
 
-/// Monospaced log lines that stay pinned to the tail. Shared by the Daemon Log page
-/// and the GitLab Runner's Log tab.
+/// A log viewer: one entry per row, and the selected row's full text below.
 ///
-/// Three things here are about not stalling the window when the log is long — a
-/// runner under load appends steadily, and the buffer holds thousands of lines:
+/// Lines do not wrap. A long entry — the runner's `key=value` output, a VM error with
+/// a path in it — would otherwise become three or four rows, so scanning the log means
+/// reading around reflowed paragraphs instead of down a column of aligned timestamps.
+/// Truncated rows are readable by selecting them, which is what the pane below is for.
 ///
-/// - `ForEach` iterates the lines directly on their stable `id`. The obvious
-///   `Array(lines.enumerated())` allocates a fresh array of tuples on every render,
-///   and identifying rows by offset makes the whole list look changed each time
-///   `LogBuffer` trims from the front.
-/// - `LazyVStack` builds only the rows in view, so cost tracks the viewport rather
-///   than the buffer.
-/// - `defaultScrollAnchor(.bottom)` keeps the tail in view. Doing it by hand —
-///   `ScrollViewReader` plus `scrollTo` on every count change — meant one scroll per
-///   appended line, which is exactly when the runner is noisiest.
+/// The list itself is an `NSTableView` — see [LogTableView](LogTableView.swift) for why
+/// SwiftUI's `List` is not enough here. The short version: `List` re-diffs the whole
+/// buffer on every appended line, and the table can be told exactly what changed.
 struct LogLinesView: View {
     let lines: [LogBuffer.Line]
     var emptyMessage = "Nothing logged yet."
+
+    @State private var selection: LogBuffer.Line.ID?
+
+    /// Looked up on every render rather than held, so a line the buffer trims away
+    /// falls back to the placeholder instead of leaving stale text in the pane.
+    private var selectedLine: LogBuffer.Line? {
+        guard let selection else { return nil }
+        return lines.first { $0.id == selection }
+    }
 
     var body: some View {
         if lines.isEmpty {
@@ -27,18 +31,35 @@ struct LogLinesView: View {
                 description: Text(emptyMessage)
             )
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(lines) { line in
-                        Text(line.text)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(12)
+            VSplitView {
+                LogTableView(lines: lines, selection: $selection)
+                    .frame(minHeight: 120, idealHeight: 400)
+
+                // Capped, not merely given a small ideal: VSplitView does not honour the
+                // ratio between two ideal heights, and without a ceiling this pane takes
+                // half the window from the list it exists to support. Sized for the few
+                // lines a wrapped log entry needs — drag it taller for a long one.
+                detail
+                    .frame(minHeight: 56, idealHeight: 84, maxHeight: 180)
             }
-            .defaultScrollAnchor(.bottom)
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        if let selectedLine {
+            ScrollView {
+                Text(selectedLine.text)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+        } else {
+            Text("No Selection")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

@@ -95,27 +95,56 @@ page that shows it, filling the window right of the sidebar. It used to be a
 collapsible pane under the columns behind a toolbar button, which made it a drawer
 rather than a place and spent the toolbar slot the VM filter now uses.
 
-`LogLinesView` renders the lines monospaced and stays pinned to the tail. It is
-shared with the GitLab Runner's Log tab, which reads the runner's **own** log — see
-[core.md](core.md#logs) for why the runner stores its output separately rather than
-sharing this array.
+The page is a log viewer, not a text dump: **one entry is exactly one row**, truncated
+at the trailing edge, with the selected row's full text in a pane below and a draggable
+split between them. A long entry — the runner's `key=value` output, a VM error carrying
+a path — would otherwise reflow into three or four rows, and scanning a log means
+reading down a column of aligned timestamps, not around paragraphs. Nothing selected
+shows a "No Selection" placeholder.
 
-Three things in that view are about not stalling the window when the log is long:
+The list is an `NSTableView` behind `NSViewRepresentable`
+([LogTableView.swift](../../phantom/Views/LogTableView.swift)), not SwiftUI's `List`.
+SwiftUI's `List` is already NSTableView-backed on macOS, so this is not a change of
+engine — it is a change of control, and the control that matters is **update
+granularity**. `List` hands its whole collection to the diffing machinery on every
+change: to discover ten appended lines it compares every identifier in the buffer, which
+is O(buffer) per append and a ceiling no constant-factor tuning moves.
 
-- `ForEach` iterates the lines on their stable `LogBuffer.Line.id`. The obvious
-  `ForEach(Array(lines.enumerated()), id: \.offset)` allocates a fresh array of tuples
-  on every render, and identifying rows by offset makes the entire list look changed
-  each time the buffer trims from the front — so the cap would have caused periodic
-  full rebuilds.
-- `LazyVStack` builds only the rows in view, so cost tracks the viewport rather than
-  the buffer.
-- `defaultScrollAnchor(.bottom)` keeps the tail visible. Doing it by hand —
-  `ScrollViewReader` plus `scrollTo` on every count change — meant one scroll per
-  appended line, exactly when the runner is noisiest.
+Owning the table makes the update O(changed), and `LogBuffer` makes that easy. Its ids
+are *contiguous* — `nextID` rises by one per append, trimming only removes from the head
+— so the difference between two states is pure arithmetic on each one's first id and
+count. `ChangePlan` computes it without scanning an array or comparing an element, and
+the table applies it with `removeRows` and `insertRows`. There is also no "did the middle
+change" question to get wrong, because the entry with a given id is immutable.
 
-Measured on a Debug build with 6000 lines buffered and 100 lines/second arriving into
-the open page: the old shape ran at 40–56% of a core, this one at 20–33%. Uncapped,
-the old shape degrades further as the array grows.
+The rest of what owning the table buys:
+
+- **No text measurement.** `rowHeight` is explicit and cells truncate rather than wrap,
+  so laying out the list never depends on the length of a line. This is the main reason
+  not wrapping is a performance decision and not only a legibility one.
+- **Recycled cells.** One reused `NSTextField` per visible row instead of a SwiftUI view
+  graph per row.
+- **Follow the tail, unless the reader scrolled up.** Whether to stick to the bottom
+  depends on where the reader currently is, which `defaultScrollAnchor(.bottom)` cannot
+  express — and scrolling by hand on every count change is one scroll per appended line,
+  exactly when the runner is noisiest.
+
+Measured on a Debug build with 6000 lines buffered and 100 lines/second arriving into the
+open page:
+
+| Implementation | CPU (share of one core) |
+|---|---|
+| Wrapping `LazyVStack`, rows keyed by array offset, `scrollTo` per line | 40–56% |
+| `LazyVStack`, stable ids, `defaultScrollAnchor(.bottom)` | 20–33% |
+| `NSTableView`, one row per entry, `ChangePlan` updates | 15–20% |
+
+Some of that remaining share is the harness generating the lines rather than the view
+drawing them. The first row also had no cap on the buffer in production, so it degraded
+further as the log grew.
+
+`LogLinesView` is shared by the Daemon Log page and the GitLab Runner's Log tab, which
+reads the runner's **own** log — see [core.md](core.md#logs) for why the runner stores
+its output separately.
 
 ### Integration
 

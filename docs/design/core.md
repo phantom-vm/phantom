@@ -18,7 +18,8 @@ phantom/
 │   ├── VMDetailView.swift    # VM metadata, actions, exec console
 │   ├── ImagesView.swift      # Local/catalog image columns and detail panes
 │   ├── CreateVMSheet.swift   # New VM: name, local image, CPU, memory
-│   ├── LogLinesView.swift    # Tail-following log lines + the Daemon Log page
+│   ├── LogLinesView.swift    # Log viewer: row list + selected-line detail pane
+│   ├── LogTableView.swift    # NSTableView-backed log list, O(changed) updates
 │   ├── IntegrationView.swift # GitLab Runner (Info/Log tabs), GitHub placeholder
 │   └── VMDisplayView.swift   # VZVirtualMachineView wrapper
 ├── APIHandlers.swift     # API request routing
@@ -459,7 +460,9 @@ recovering them by `contains`. Splitting them fixed four things at once:
   same array.
 
 Both are a `LogBuffer` ([LogBuffer.swift](../../phantom/Libs/LogBuffer.swift)), which
-is bounded and hands out stable per-line ids. Both properties exist for the GUI: a
+is bounded and hands out stable, **contiguous** per-line ids — contiguity is what lets
+the log table compute what changed arithmetically instead of diffing (see
+[ui.md](ui.md#daemon-log)). Both properties exist for the GUI: a
 daemon runs for days and the runner streams continuously, so an unbounded array grows
 for the process lifetime; and identifying rows by array offset would make every
 visible row look changed each time the buffer trims, so the cap itself would have
