@@ -95,10 +95,27 @@ page that shows it, filling the window right of the sidebar. It used to be a
 collapsible pane under the columns behind a toolbar button, which made it a drawer
 rather than a place and spent the toolbar slot the VM filter now uses.
 
-`LogLinesView` renders the lines monospaced and follows the tail as they arrive. It
-is shared with the GitLab Runner's Log tab, which is the same array filtered on the
-`[gitlab-runner]` prefix — the runner's output is not stored separately,
-`GitLabRunnerManager` writes it straight into the daemon log.
+`LogLinesView` renders the lines monospaced and stays pinned to the tail. It is
+shared with the GitLab Runner's Log tab, which reads the runner's **own** log — see
+[core.md](core.md#logs) for why the runner stores its output separately rather than
+sharing this array.
+
+Three things in that view are about not stalling the window when the log is long:
+
+- `ForEach` iterates the lines on their stable `LogBuffer.Line.id`. The obvious
+  `ForEach(Array(lines.enumerated()), id: \.offset)` allocates a fresh array of tuples
+  on every render, and identifying rows by offset makes the entire list look changed
+  each time the buffer trims from the front — so the cap would have caused periodic
+  full rebuilds.
+- `LazyVStack` builds only the rows in view, so cost tracks the viewport rather than
+  the buffer.
+- `defaultScrollAnchor(.bottom)` keeps the tail visible. Doing it by hand —
+  `ScrollViewReader` plus `scrollTo` on every count change — meant one scroll per
+  appended line, exactly when the runner is noisiest.
+
+Measured on a Debug build with 6000 lines buffered and 100 lines/second arriving into
+the open page: the old shape ran at 40–56% of a core, this one at 20–33%. Uncapped,
+the old shape degrades further as the array grows.
 
 ### Integration
 

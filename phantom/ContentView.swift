@@ -225,7 +225,7 @@ struct ContentView: View {
                 noSelection("No Selection", description: "Select an image to see its details.")
             }
         case .log:
-            DaemonLogView(logs: vm.logs)
+            DaemonLogView(lines: vm.logs.lines)
         case .integration:
             switch selectedIntegration {
             case .gitlabRunner:

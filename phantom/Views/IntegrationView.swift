@@ -103,20 +103,13 @@ struct GitLabRunnerDetailView: View {
 
     private var runner: GitLabRunnerManager { vm.gitlabRunnerManager }
 
-    /// The runner's output is not stored separately — `GitLabRunnerManager` writes
-    /// it into the daemon log with this prefix, so the tab is a filtered view of
-    /// the same lines the Daemon > Log page shows in full.
-    private var runnerLog: [String] {
-        vm.logs.filter { $0.contains("[gitlab-runner]") }
-    }
-
     var body: some View {
         Group {
             switch tab {
             case .info: info
             case .log:
                 LogLinesView(
-                    lines: runnerLog,
+                    lines: runner.output.lines,
                     emptyMessage: "The runner logs here once it starts. Register it with 'phantom gitlab-runner setup'."
                 )
             }

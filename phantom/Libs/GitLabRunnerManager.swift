@@ -27,14 +27,46 @@ class GitLabRunnerManager {
 
     private(set) var state: State = .notConfigured
 
+    /// The runner's own log: the process's stdout/stderr plus this manager's
+    /// lifecycle messages.
+    ///
+    /// Separate from `VMManager.logs` because the runner is a separate process. The
+    /// daemon logs sparse discrete events; the runner emits a continuous stream, and
+    /// sharing one array buried the former under the latter. It also starts, stops
+    /// and crashes on its own schedule, so its log has its own beginning and end —
+    /// and the manager that owns the process should own its output rather than
+    /// borrowing the daemon's sink and tagging lines so a view can sniff them back
+    /// out.
+    private(set) var output = LogBuffer()
+
     // MARK: - Private
 
     private let runnerDir: URL
-    private let log: (String) -> Void
+
+    /// Only the runner's state transitions go to the daemon log — someone reading it
+    /// needs to learn the runner died without wading through the runner's output.
+    private let daemonLog: (String) -> Void
+
     private var runnerProcess: Process?
+
+    /// Reassembles whole lines from unaligned pipe reads and strips ANSI codes.
+    private var lineAssembler = LineAssembler()
+
     /// Set when stop() is requested so the termination handler can tell an
     /// intentional stop from a crash
     private var stopRequested = false
+
+    /// The manager's lifecycle messages go to the runner's own log, next to the
+    /// output they explain.
+    private func log(_ message: String) {
+        output.append(message)
+    }
+
+    private func ingest(_ text: String) {
+        for line in lineAssembler.take(text) {
+            output.append(line)
+        }
+    }
 
     private var versionDir: URL { runnerDir.appendingPathComponent(Self.runnerVersion, isDirectory: true) }
     private var binaryPath: URL { versionDir.appendingPathComponent("gitlab-runner") }
@@ -51,9 +83,9 @@ class GitLabRunnerManager {
     var isBinaryDownloaded: Bool { FileManager.default.fileExists(atPath: binaryPath.path) }
     var isRunning: Bool { runnerProcess?.isRunning ?? false }
 
-    init(runnerDir: URL, log: @escaping (String) -> Void) {
+    init(runnerDir: URL, daemonLog: @escaping (String) -> Void) {
         self.runnerDir = runnerDir
-        self.log = log
+        self.daemonLog = daemonLog
         try? FileManager.default.createDirectory(at: runnerDir, withIntermediateDirectories: true)
         if isConfigured { state = .stopped }
 
@@ -83,6 +115,7 @@ class GitLabRunnerManager {
         } catch {
             state = .error(error.localizedDescription)
             log("GitLab runner autostart failed: \(error.localizedDescription)")
+            daemonLog("GitLab runner autostart failed: \(error.localizedDescription)")
         }
     }
 
@@ -232,9 +265,7 @@ class GitLabRunnerManager {
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             Task { @MainActor in
-                for line in text.split(separator: "\n") where !line.isEmpty {
-                    self?.log("[gitlab-runner] \(line)")
-                }
+                self?.ingest(text)
             }
         }
 
@@ -242,13 +273,16 @@ class GitLabRunnerManager {
             pipe.fileHandleForReading.readabilityHandler = nil
             Task { @MainActor in
                 guard let self else { return }
+                if let tail = self.lineAssembler.flush() { self.output.append(tail) }
                 self.runnerProcess = nil
                 if self.stopRequested {
                     self.state = .stopped
                     self.log("GitLab runner stopped")
+                    self.daemonLog("GitLab runner stopped")
                 } else {
                     self.state = .error("Runner exited unexpectedly (status \(proc.terminationStatus))")
                     self.log("GitLab runner exited unexpectedly (status \(proc.terminationStatus))")
+                    self.daemonLog("GitLab runner exited unexpectedly (status \(proc.terminationStatus))")
                 }
             }
         }
@@ -258,6 +292,7 @@ class GitLabRunnerManager {
         runnerProcess = process
         state = .running
         log("GitLab runner started (pid \(process.processIdentifier))")
+        daemonLog("GitLab runner started (pid \(process.processIdentifier))")
     }
 
     /// A daemon instance that died without cleanup leaves an orphaned runner

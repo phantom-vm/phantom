@@ -26,6 +26,8 @@ phantom/
 └── Libs/
     ├── VMManager.swift   # VM lifecycle management
     ├── VMSettings.swift  # Per-VM CPU/memory (vm.json) + VM name rules
+    ├── LogBuffer.swift   # Bounded log with stable line ids
+    ├── LineAssembler.swift # Reassembles piped lines, strips ANSI
     ├── IPSWManager.swift # IPSW download and listing
     ├── GitLabRunnerManager.swift # Managed GitLab Runner (download, register, supervise)
     ├── TCPServer.swift   # Network.framework TCP server
@@ -428,6 +430,53 @@ this state from the moment `vm.create` answers, so the restore is visible in
 
 How the GUI follows this state without a notification path of its own is in
 [ui.md](ui.md).
+
+---
+
+## Logs
+
+There are **two** logs, not one, because the GitLab runner is a separate process:
+
+- `VMManager.logs` — the daemon's own events. VM lifecycle, image operations, IPSW
+  downloads, and the runner's state transitions (started, stopped, exited
+  unexpectedly).
+- `GitLabRunnerManager.output` — the runner's stdout/stderr plus that manager's own
+  lifecycle messages.
+
+They were one array, with the runner's lines tagged `[gitlab-runner]` and the GUI
+recovering them by `contains`. Splitting them fixed four things at once:
+
+- **Volume is asymmetric.** The daemon logs sparse discrete events; the runner emits
+  a continuous stream. Mixed, the daemon's own events were buried — the log page
+  opened on three daemon lines followed by screens of runner output.
+- **Lifecycles are independent.** The runner starts, stops and crashes on its own
+  schedule, so its log has its own beginning and end.
+- **Ownership was inverted.** The manager owns the process, so it should own the
+  output. Borrowing the daemon's sink is why the prefix existed, and the prefix is
+  why a view had to sniff strings — with `contains`, not even a prefix match, so a
+  VM's own output mentioning that literal would have been miscaptured.
+- **It did not generalise.** A GitHub runner would have been a third prefix in the
+  same array.
+
+Both are a `LogBuffer` ([LogBuffer.swift](../../phantom/Libs/LogBuffer.swift)), which
+is bounded and hands out stable per-line ids. Both properties exist for the GUI: a
+daemon runs for days and the runner streams continuously, so an unbounded array grows
+for the process lifetime; and identifying rows by array offset would make every
+visible row look changed each time the buffer trims, so the cap itself would have
+caused periodic full list rebuilds. Trimming happens in blocks so the runner's many
+appends do not each shift the whole array, and the timestamp formatter is made once
+rather than per line.
+
+The runner's pipe goes through `LineAssembler`
+([LineAssembler.swift](../../phantom/Libs/LineAssembler.swift)) on the way in, which
+handles two things `availableData` forces on a reader: read boundaries are not line
+boundaries, so a line spanning two reads would be logged as two; and gitlab-runner
+colours its output, with the escape sequences landing inside the `key=value` pairs it
+logs. Both are dealt with before the text is stored, so every reader gets whole clean
+lines.
+
+Neither log is persisted or exposed over the API — they are in-memory, for the
+current run, readable only in the GUI.
 
 ---
 

@@ -18,7 +18,10 @@ class VMManager {
         case error(String)
     }
 
-    private(set) var logs: [String] = []
+    /// The daemon's own events. The GitLab runner keeps its own log — see
+    /// `GitLabRunnerManager.output` — so a continuous stream of runner output does
+    /// not bury the handful of lines that say what the daemon did.
+    private(set) var logs = LogBuffer()
 
     // MARK: - VM Instance
 
@@ -59,7 +62,7 @@ class VMManager {
         ipswManager = IPSWManager(ipswsDir: ipswsDir, log: { msg in logFunc(msg) })
         imageManager = OCIImageManager(imagesDir: imagesDir, log: { msg in logFunc(msg) })
         catalogManager = CatalogManager(log: { msg in logFunc(msg) })
-        gitlabRunnerManager = GitLabRunnerManager(runnerDir: runnerDir, log: { msg in logFunc(msg) })
+        gitlabRunnerManager = GitLabRunnerManager(runnerDir: runnerDir, daemonLog: { msg in logFunc(msg) })
         logFunc = { [weak self] msg in self?.log(msg) }
         ensureDirectories()
         ipswManager.loadExisting()
@@ -919,8 +922,7 @@ class VMManager {
     }
 
     private func log(_ message: String) {
-        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-        logs.append("[\(timestamp)] \(message)")
+        logs.append(message)
     }
 
     // MARK: - API Support
