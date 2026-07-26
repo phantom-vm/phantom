@@ -162,9 +162,10 @@ async function download(url: string, path: string) {
 
 type Version = [number, number, number];
 
-/// null for anything not x.y.z — a version that can't be ordered is treated as
-/// "unknown", which sends the caller down the --force path rather than
-/// guessing at an upgrade or a downgrade.
+/// null for anything not x.y.z. An unorderable version on either side skips
+/// the comparison entirely and installs the published release, same as
+/// --force: not knowing which is newer is no reason to refuse the thing the
+/// user just asked for.
 function parse(version: string): Version | null {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
   if (!match) return null;
