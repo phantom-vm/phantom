@@ -104,7 +104,13 @@ is shared with the GitLab Runner's Log tab, which is the same array filtered on 
 
 **Daemon › Integration** lists the CI integrations the daemon can host:
 
-- **GitLab Runner** — the one that works. Its detail pane has two tabs. **Info**
+- **GitLab Runner** — the one that works. Its two tabs render in the window toolbar
+  rather than as a header band inside the pane: which view of the runner you are
+  looking at is navigation, not content, and a band inside the pane would cost
+  vertical space on every tab. They sit at the window's trailing edge, because
+  `IntegrationListView` has no toolbar item to anchor them beside the divider (see
+  Toolbar placement below) and there is no control that list of two fixed rows
+  actually wants. **Info**
   shows state, whether it is registered, whether it is running, the pinned version,
   whether the binary is present, and the config path, with start/stop; registering
   needs a URL and a token, so it points at `phantom gitlab-runner setup` rather than

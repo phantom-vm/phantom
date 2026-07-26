@@ -111,18 +111,7 @@ struct GitLabRunnerDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
-
-            Divider()
-
+        Group {
             switch tab {
             case .info: info
             case .log:
@@ -133,6 +122,21 @@ struct GitLabRunnerDetailView: View {
             }
         }
         .navigationTitle("GitLab Runner")
+        // In the toolbar rather than the pane body: which view of the runner you
+        // are looking at is navigation, not content, and a header band inside the
+        // pane costs vertical space on every tab. Declared here, on the detail
+        // column, so it lands at that column's leading edge.
+        .toolbar {
+            ToolbarItem {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
     }
 
     // MARK: Info
