@@ -1,15 +1,12 @@
 import SwiftUI
 
-/// Middle column for the VMs section: one row per VM, actions live in the
-/// detail pane. The only action here is creating a VM, which belongs to the
-/// list rather than to any one row.
+/// Middle column for the VMs section: one row per VM. Every action lives in the
+/// detail pane, including the '+' that creates one — this column is a list and
+/// nothing else.
 struct VMListView: View {
     @Bindable var vm: VMManager
-    let images: [ImageInfo]
     @Binding var selection: String?
-    let onBrowseCatalog: () -> Void
-
-    @State private var creating = false
+    let onCreateVM: () -> Void
 
     var body: some View {
         let vms = vm.listVMs()
@@ -19,9 +16,9 @@ struct VMListView: View {
                 ContentUnavailableView {
                     Label("No VMs", systemImage: "desktopcomputer")
                 } description: {
-                    Text("Create one with the + button.")
+                    Text("Create one with the + button above the detail pane.")
                 } actions: {
-                    Button("New VM…") { creating = true }
+                    Button("New VM…") { onCreateVM() }
                 }
             } else {
                 List(vms, id: \.id, selection: $selection) { info in
@@ -30,24 +27,6 @@ struct VMListView: View {
             }
         }
         .navigationTitle("Virtual Machines")
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    creating = true
-                } label: {
-                    Label("New VM", systemImage: "plus")
-                }
-                .help("Create a VM from an image or the restore image")
-            }
-        }
-        .sheet(isPresented: $creating) {
-            CreateVMSheet(
-                vm: vm,
-                images: images,
-                onCreated: { selection = $0 },
-                onBrowseCatalog: onBrowseCatalog
-            )
-        }
     }
 }
 

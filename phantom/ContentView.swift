@@ -32,6 +32,7 @@ struct ContentView: View {
     @State private var selectedImageName: String?
     @State private var imageScope: ImageScope = .local
     @State private var showLog = false
+    @State private var creatingVM = false
 
     /// Listing images walks the images directory, so it is cached here — both
     /// the list and the detail pane read this copy — and reloaded when an image
@@ -63,13 +64,8 @@ struct ContentView: View {
                     case .vms:
                         VMListView(
                             vm: vm,
-                            images: images,
                             selection: $selectedVMId,
-                            onBrowseCatalog: {
-                                imageScope = .catalog
-                                selectedImageName = nil
-                                section = .images
-                            }
+                            onCreateVM: { creatingVM = true }
                         )
                     case .images:
                         ImageListView(
@@ -85,17 +81,49 @@ struct ContentView: View {
                     }
                 }
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
+                // The log toggle rides the *content* column, and not only to keep
+                // it out of the way: a detail-column item is pinned to that
+                // column's leading edge — just right of the split divider, where
+                // the '+' below wants to be — only while the content column has
+                // an item of its own. With the content column empty, the '+'
+                // drifts to the window's trailing edge instead. No placement
+                // names "the detail column's leading edge" directly; which column
+                // an item is declared on is the whole lever.
+                .toolbar {
+                    ToolbarItem {
+                        Button {
+                            showLog.toggle()
+                        } label: {
+                            Label("Log", systemImage: "text.alignleft")
+                        }
+                        .help(showLog ? "Hide the daemon log" : "Show the daemon log")
+                    }
+                }
             } detail: {
                 detail
                     .toolbar {
-                        ToolbarItem {
-                            Button {
-                                showLog.toggle()
-                            } label: {
-                                Label("Log", systemImage: "text.alignleft")
+                        if currentSection == .vms {
+                            ToolbarItem {
+                                Button {
+                                    creatingVM = true
+                                } label: {
+                                    Label("New VM", systemImage: "plus")
+                                }
+                                .help("Create a VM from an image or the restore image")
                             }
-                            .help(showLog ? "Hide the daemon log" : "Show the daemon log")
                         }
+                    }
+                    .sheet(isPresented: $creatingVM) {
+                        CreateVMSheet(
+                            vm: vm,
+                            images: images,
+                            onCreated: { selectedVMId = $0 },
+                            onBrowseCatalog: {
+                                imageScope = .catalog
+                                selectedImageName = nil
+                                section = .images
+                            }
+                        )
                     }
             }
 

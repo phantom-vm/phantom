@@ -27,11 +27,10 @@ Finder use:
   a live count, over a footer for the IPSW restore image. The IPSW sits there
   rather than in Images because it is a host-level prerequisite for installing a
   VM from scratch, not one of the OCI images a VM is restored from.
-- **List column** — the selected section's items, and the actions that belong to
-  the collection rather than to one item (create a VM, rescan images). The VMs
-  column's **+** opens a sheet for the VM's name, source image, CPU count and
-  memory; with nothing to build from, that sheet offers the catalog and the
-  restore image download instead of an unusable form. An image
+- **List column** — the selected section's items. Actions that belong to the
+  collection rather than to one item live in the toolbar: Images keeps its
+  rescan/refresh here, while the VMs **+** sits over the detail column (below).
+  An image
   operation running anywhere — including one the CLI started, since
   `OCIImageManager.state` is shared — shows as a progress banner above the list.
   Images has a **Local / Catalog** switch: Catalog lists what the published
@@ -48,6 +47,28 @@ Finder use:
 Image listing walks the images directory, so `ContentView` caches the result and
 reloads it when `OCIImageManager.state` enters or leaves a terminal state, not
 on every progress tick.
+
+### Toolbar placement
+
+The **+** that opens the new-VM sheet sits over the detail column, at its leading
+edge, and only in the VMs section; the sheet's own state lives in `ContentView`,
+which already holds the image list and the selections it writes back to.
+
+macOS has no toolbar placement that names "the detail column's leading edge" —
+which column an item is declared on is the whole lever, and the arrangement is
+load-bearing in a way worth writing down:
+
+- An item on the **content** column sits at that column's trailing edge, just
+  left of the split divider.
+- An item on the **detail** column sits just right of the divider — but only
+  while the content column has an item of its own. With the content column
+  empty, it drifts to the window's trailing edge instead.
+
+So the log toggle is declared on the content column, not merely to keep it out of
+the way: without it there, the **+** would not stay put. In the Images section,
+where the detail column has no item, the content column's own items (log toggle
+and refresh) sit at the window's trailing edge — the log toggle is the one control
+whose position depends on the section.
 
 ## GUI Reactivity
 
