@@ -319,7 +319,7 @@ Daemon                    Guest Agent           Shell
 ├── images/                   # Local OCI images
 │   ├── macos-base/
 │   │   ├── manifest.json     # OCI manifest (layers + digests)
-│   │   ├── config.json       # VM config (HardwareModel as base64)
+│   │   ├── config.json       # VM config (HardwareModel + MachineIdentifier as base64)
 │   │   ├── nvram.bin         # AuxiliaryStorage
 │   │   ├── pulled.json       # Pulled images only: reference, digest, date
 │   │   └── disk/             # LZ4-compressed disk chunks (zero chunks absent)
@@ -339,7 +339,7 @@ Daemon                    Guest Agent           Shell
 **VM Bundle Contents**:
 - `disk.img` - Created via `ftruncate()`, 90GB sparse file
 - `AuxiliaryStorage` - VM-specific data, persisted across boots
-- `MachineIdentifier` - Unique VM identity
+- `MachineIdentifier` - The machine identity (an ECID) the guest sees
 - `HardwareModel` - CPU/hardware configuration
 - `vm.json` - `VMSettings`: the VM's CPU count and memory size
 
@@ -350,6 +350,18 @@ VM created before it existed) reads back as 4 CPUs / 16GB, exactly what used to
 be hardcoded, so nothing resizes underneath an existing VM. Values are clamped
 to what the host allows on the way in and on the way out, and a clone inherits
 its source's sizing.
+
+`MachineIdentifier` **travels with the disk** — it is carried into an image on
+save, restored from the image, and copied by a clone, never regenerated. The
+identifier is an ECID, the machine identity the guest reads, and macOS ties part
+of its first-run state to it: hand a disk that already finished Setup Assistant
+to a VM with a fresh ECID and the guest decides it woke up on new hardware, then
+re-runs the hardware-tied panes — Software Update, Apple Account, FileVault — on
+the next login. Every VM off that image lands in Setup Assistant instead of the
+desktop, whatever the disk says. Sharing one identifier across the VMs restored
+from an image is harmless: nothing outside the guest keys off the ECID, and the
+identities that do have to stay unique (bundle id, MAC address) are assigned
+elsewhere.
 
 VMs get no host directory share: everything the guest needs arrives over the
 network (the agent bootstrap fetches the published `phantom-agent-install.sh` release
@@ -463,7 +475,7 @@ Or on error:
 - **Implementation**:
   - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`). After the install finishes, the installer's VM instance is torn down and a **fresh** `VZVirtualMachine` is booted from the bundle — the installer's own instance flakily hangs on a black screen instead of reaching Setup Assistant; a clean restart is reliable.
   - `sourceVmId`: APFS CoW clone of existing VM bundle — the one synchronous source, since a CoW clone is instant
-  - `fromImage`: Same shape as `ipswId` — the `vmId` comes back as soon as the image is confirmed to exist, and a background task decompresses the image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier and boots it. Poll `vm.list` for the state (`restoring(N%)` → `creating` → `running`). Restoring the 58.9GB `xcode-26-6` into a 90GB disk takes minutes, so the caller must not be holding a socket open across it: the VM instance is registered *before* the restore begins, so it is listed the whole way through and a caller that times out or disconnects can still find it. Restore progress rides on the VM's own state rather than `image.status` — that slot is single-occupancy, and a restore has no business colliding with a concurrent pull.
+  - `fromImage`: Same shape as `ipswId` — the `vmId` comes back as soon as the image is confirmed to exist, and a background task decompresses the image chunks (in parallel) into a new VM bundle, restores the image's MachineIdentifier and boots it. Poll `vm.list` for the state (`restoring(N%)` → `creating` → `running`). Restoring the 58.9GB `xcode-26-6` into a 90GB disk takes minutes, so the caller must not be holding a socket open across it: the VM instance is registered *before* the restore begins, so it is listed the whole way through and a caller that times out or disconnects can still find it. Restore progress rides on the VM's own state rather than `image.status` — that slot is single-occupancy, and a restore has no business colliding with a concurrent pull.
 - **Response**: `{"status": "started"|"running", "message": "...", "vmId": "vm-..."}`
 - **CLI**: `phantom vm deploy --image <name> [--name <id>] [--cpu <n>] [--memory <gb>]`
 
@@ -640,7 +652,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 **Save (VM → Local Image)**:
 1. Validate VM exists and is stopped
 2. Create `images/<name>/` directory
-3. Base64-encode HardwareModel into `config.json`
+3. Base64-encode HardwareModel and MachineIdentifier into `config.json`
 4. Copy AuxiliaryStorage → `nvram.bin`
 5. Chunk `disk.img` → LZ4 compress → `disk/000.lz4`, `disk/002.lz4`, ... (all-zero chunks written nowhere, so the numbering has gaps)
 6. Compute SHA-256 digests, write `manifest.json` with each layer's `chunk-index`
@@ -661,7 +673,7 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 3. Write HardwareModel file
 4. Copy nvram.bin → AuxiliaryStorage
 5. Decompress disk chunks → `pwrite` each at `chunk-index × 512MB` → `disk.img` (sparse; slots with no chunk stay holes)
-6. Generate fresh MachineIdentifier — **last**, because `loadExistingVMs` takes the four bundle files as proof of a usable VM, and a daemon killed mid-restore would otherwise leave a half-decompressed disk to be adopted on the next launch
+6. Write the image's MachineIdentifier — **last**, because `loadExistingVMs` takes the four bundle files as proof of a usable VM, and a daemon killed mid-restore would otherwise leave a half-decompressed disk to be adopted on the next launch. An image saved before the identifier was recorded has none to restore, and falls back to a generated one
 7. Boot the VM; a failure anywhere above removes the bundle and leaves the instance in `error` (which `vm.delete` clears)
 
 ### Automated Image Building (`image build`)

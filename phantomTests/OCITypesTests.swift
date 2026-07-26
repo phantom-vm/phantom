@@ -90,6 +90,32 @@ struct OCITypesTests {
         #expect(decodedHW == hwData)
     }
 
+    @Test func vmConfigCarriesMachineIdentifier() throws {
+        let hwData = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        let idData = Data([0x01, 0x02, 0x03, 0x04])
+        let config = PhantomVMConfig(
+            hardwareModel: hwData,
+            diskSize: 68_719_476_736,
+            machineIdentifier: idData
+        )
+
+        let decoded = try PhantomVMConfig.fromJSON(try config.toJSON())
+
+        #expect(try decoded.machineIdentifierData() == idData)
+    }
+
+    // An image saved before the identifier was recorded has no such key; it must
+    // still decode, with nil standing for "restore has to generate one".
+    @Test func vmConfigWithoutMachineIdentifierDecodesToNil() throws {
+        let json = """
+        {"version":1,"hardwareModelBase64":"3q2+7w==","diskSize":0}
+        """.data(using: .utf8)!
+
+        let config = try PhantomVMConfig.fromJSON(json)
+
+        #expect(try config.machineIdentifierData() == nil)
+    }
+
     @Test func vmConfigInvalidBase64Throws() throws {
         // Create a config with invalid base64 by encoding then mutating the JSON
         let json = """

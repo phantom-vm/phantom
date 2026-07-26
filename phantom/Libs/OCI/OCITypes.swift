@@ -89,16 +89,38 @@ struct PhantomVMConfig: Codable {
     let version: Int
     let hardwareModelBase64: String
     let diskSize: UInt64
+    /// The machine identifier (an ECID) of the VM the image was saved from.
+    ///
+    /// Carried in the image so a restored VM presents the same machine identity
+    /// as the one that went through Setup Assistant. Give a VM a fresh ECID and
+    /// macOS reads it as new hardware, and re-runs the hardware-tied Setup
+    /// Assistant panes — Software Update, Apple Account, FileVault — on the next
+    /// login, however complete the setup baked into the disk is.
+    ///
+    /// Optional: images published before this field existed decode with nil, and
+    /// restore falls back to generating an identifier (and to the old behaviour).
+    let machineIdentifierBase64: String?
 
-    init(hardwareModel: Data, diskSize: UInt64) {
+    init(hardwareModel: Data, diskSize: UInt64, machineIdentifier: Data? = nil) {
         self.version = 1
         self.hardwareModelBase64 = hardwareModel.base64EncodedString()
         self.diskSize = diskSize
+        self.machineIdentifierBase64 = machineIdentifier?.base64EncodedString()
     }
 
     func hardwareModelData() throws -> Data {
         guard let data = Data(base64Encoded: hardwareModelBase64) else {
             throw OCIError.invalidConfig("Failed to decode HardwareModel from base64")
+        }
+        return data
+    }
+
+    /// The saved machine identifier, or nil for an image from before the field
+    /// was recorded.
+    func machineIdentifierData() throws -> Data? {
+        guard let machineIdentifierBase64 else { return nil }
+        guard let data = Data(base64Encoded: machineIdentifierBase64) else {
+            throw OCIError.invalidConfig("Failed to decode MachineIdentifier from base64")
         }
         return data
     }

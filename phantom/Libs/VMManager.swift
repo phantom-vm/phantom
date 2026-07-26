@@ -491,10 +491,12 @@ class VMManager {
         let sourceDiskPath = sourceBundle.appendingPathComponent("disk.img")
         let sourceHwPath = sourceBundle.appendingPathComponent("HardwareModel")
         let sourceAuxPath = sourceBundle.appendingPathComponent("AuxiliaryStorage")
+        let sourceIdPath = sourceBundle.appendingPathComponent("MachineIdentifier")
 
         guard FileManager.default.fileExists(atPath: sourceDiskPath.path),
               FileManager.default.fileExists(atPath: sourceHwPath.path),
-              FileManager.default.fileExists(atPath: sourceAuxPath.path) else {
+              FileManager.default.fileExists(atPath: sourceAuxPath.path),
+              FileManager.default.fileExists(atPath: sourceIdPath.path) else {
             throw PhantomError.vmBundleCorrupted
         }
 
@@ -528,11 +530,18 @@ class VMManager {
         // the one it was cloned from.
         try? (settings ?? VMSettings.load(from: sourceBundle)).clamped().write(to: cloneBundle)
 
-        // Generate new MachineIdentifier (required for unique VM identity)
-        let newMachineIdentifier = VZMacMachineIdentifier()
+        // Carry the source's MachineIdentifier over rather than generating one.
+        // The identifier is an ECID — the machine identity the guest sees — and
+        // a template's whole point is that the clone is the same machine. Give
+        // it a fresh one and macOS reads it as new hardware, sending the clone
+        // back through the hardware-tied Setup Assistant panes (Software Update,
+        // Apple Account, FileVault) on its first login. Nothing outside the
+        // guest keys off the ECID, so clones sharing one is harmless — the
+        // identities that must stay unique (bundle id, MAC) are assigned
+        // elsewhere.
         let cloneIdPath = cloneBundle.appendingPathComponent("MachineIdentifier")
-        try newMachineIdentifier.dataRepresentation.write(to: cloneIdPath)
-        log("Generated new machine identifier")
+        try FileManager.default.copyItem(at: sourceIdPath, to: cloneIdPath)
+        log("Copied machine identifier")
 
         log("Clone complete: \(cloneVmId)")
         return cloneVmId

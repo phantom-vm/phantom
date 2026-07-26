@@ -97,13 +97,22 @@ class OCIImageManager {
                 let hwPath = bundlePath.appendingPathComponent("HardwareModel")
                 let hwData = try Data(contentsOf: hwPath)
 
+                // Read MachineIdentifier — the ECID this VM ran Setup Assistant
+                // under, kept so restores present the same machine to the guest.
+                let idPath = bundlePath.appendingPathComponent("MachineIdentifier")
+                let idData = try Data(contentsOf: idPath)
+
                 // Get disk size
                 let diskPath = bundlePath.appendingPathComponent("disk.img")
                 let diskAttrs = try FileManager.default.attributesOfItem(atPath: diskPath.path)
                 let diskSize = diskAttrs[.size] as? UInt64 ?? 0
 
-                // Write VM config (with HardwareModel embedded)
-                let vmConfig = PhantomVMConfig(hardwareModel: hwData, diskSize: diskSize)
+                // Write VM config (with HardwareModel and MachineIdentifier embedded)
+                let vmConfig = PhantomVMConfig(
+                    hardwareModel: hwData,
+                    diskSize: diskSize,
+                    machineIdentifier: idData
+                )
                 let configData = try vmConfig.toJSON()
                 let configPath = imageDir.appendingPathComponent("config.json")
                 try configData.write(to: configPath)
@@ -366,8 +375,15 @@ class OCIImageManager {
                 // to `loadExistingVMs` when all four files are present, so a
                 // daemon killed mid-restore leaves a directory that won't come
                 // back as a VM with a half-decompressed disk.
-                let machineIdentifier = VZMacMachineIdentifier()
-                try machineIdentifier.dataRepresentation.write(to: bundlePath.appendingPathComponent("MachineIdentifier"))
+                //
+                // Reuse the identifier the image was saved with, so the guest
+                // boots on the same machine it finished Setup Assistant on — a
+                // fresh ECID reads as new hardware and sends macOS back through
+                // the Software Update / Apple Account / FileVault panes. Images
+                // saved before the field existed still get a generated one.
+                let identifierData = try vmConfig.machineIdentifierData()
+                    ?? VZMacMachineIdentifier().dataRepresentation
+                try identifierData.write(to: bundlePath.appendingPathComponent("MachineIdentifier"))
 
                 bgLog("Restored VM '\(vmId)' from image '\(name)'")
             }.value
