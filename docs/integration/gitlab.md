@@ -1,6 +1,6 @@
 # GitLab CI Integration
 
-Phantom can serve as a [GitLab custom executor](https://docs.gitlab.com/runner/executors/custom.html), running each CI job inside an ephemeral macOS VM. The VM is cloned from a base template, used for the job, then deleted.
+Phantom can serve as a [GitLab custom executor](https://docs.gitlab.com/runner/executors/custom.html), running each CI job inside an ephemeral macOS VM. The VM is restored from a pinned local image, used for the job, then deleted.
 
 Phantom manages GitLab Runner for you: the daemon downloads the `gitlab-runner` binary, registers it against your GitLab instance, and supervises the runner process. No Homebrew install or `config.toml` editing needed.
 
@@ -104,7 +104,7 @@ the image predates that (or was built with `--no-gitlab-runner`): rebuild it
 with `phantom image build <name> --image <name> --replace`, rather than curling
 the binary in a `before_script`.
 
-> **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. This is slower than a VM clone but guarantees a clean, reproducible environment from a pinned image.
+> **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. That cost buys a clean, reproducible environment from a pinned image on every run.
 
 ### Managing the runner
 
@@ -151,4 +151,4 @@ Check that the phantom daemon is running and the image name is correct (`phantom
 The image must have `phantom-agent` installed and starting on boot, which every published image does. See [authoring-images.md](../authoring-images.md) if you built the image yourself.
 
 **Jobs hang during script execution**
-Check that the phantom agent is running inside the VM (`phantom vm exec <vmId> -- launchctl list com.monk.phantom-agent`). The agent must be installed and started on boot in the template VM.
+Check that the phantom agent is running inside the VM (`phantom vm exec <vmId> -- launchctl list com.monk.phantom-agent`). The agent must be installed and started on boot in the image the job names.
