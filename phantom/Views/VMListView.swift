@@ -1,14 +1,26 @@
 import SwiftUI
 
-/// Middle column for the VMs section: one row per VM. Every action lives in the
-/// detail pane, including the '+' that creates one — this column is a list and
-/// nothing else.
+/// Middle column for the VMs section: one row per VM, plus the filter that says
+/// which rows. Actions on a VM live in the detail pane, as does the '+' that
+/// creates one.
 struct VMListView: View {
     @Bindable var vm: VMManager
     @Binding var selection: String?
 
+    /// Remembered across launches: a user who hides stopped VMs means it.
+    @AppStorage("showStoppedVMs") private var showStoppedVMs = true
+
+    /// Only `.stopped` is hidden. The transitional states and `.error` always
+    /// show — a VM that is installing, restoring or broken is the one you most
+    /// need to see, and hiding it is how it gets forgotten about.
+    private var visibleVMs: [VMInfo] {
+        let all = vm.listVMs()
+        guard !showStoppedVMs else { return all }
+        return all.filter { vm.vmInstances[$0.id]?.state != .stopped }
+    }
+
     var body: some View {
-        let vms = vm.listVMs()
+        let vms = visibleVMs
 
         Group {
             if vms.isEmpty {
@@ -17,9 +29,11 @@ struct VMListView: View {
                 // both duplicate it and teach a spot that stops existing as soon
                 // as this pane has a list in it.
                 ContentUnavailableView {
-                    Label("No VMs", systemImage: "desktopcomputer")
+                    Label(showStoppedVMs ? "No VMs" : "No Running VMs", systemImage: "desktopcomputer")
                 } description: {
-                    Text("Create one with the + button above the detail pane.")
+                    Text(showStoppedVMs
+                         ? "Create one with the + button above the detail pane."
+                         : "Stopped VMs are hidden by the filter above.")
                 }
             } else {
                 List(vms, id: \.id, selection: $selection) { info in
@@ -28,6 +42,22 @@ struct VMListView: View {
             }
         }
         .navigationTitle("Virtual Machines")
+        .toolbar {
+            ToolbarItem {
+                Menu {
+                    Toggle("Show Stopped VMs", isOn: $showStoppedVMs)
+                } label: {
+                    Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                .help("Choose which VMs the list shows")
+            }
+        }
+        // A row can leave the list without the selection changing — the filter is
+        // switched off, or the selected VM stops — and the detail pane would then
+        // outlive its row.
+        .onChange(of: vms.map(\.id)) { _, ids in
+            if let selection, !ids.contains(selection) { self.selection = nil }
+        }
     }
 }
 

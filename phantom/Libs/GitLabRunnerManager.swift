@@ -38,7 +38,9 @@ class GitLabRunnerManager {
 
     private var versionDir: URL { runnerDir.appendingPathComponent(Self.runnerVersion, isDirectory: true) }
     private var binaryPath: URL { versionDir.appendingPathComponent("gitlab-runner") }
-    private var configPath: URL { runnerDir.appendingPathComponent("config.toml") }
+    /// Not private: the Info tab shows it, and `gitlab.status` already publishes
+    /// it over the TCP API, so it is not a secret.
+    var configPath: URL { runnerDir.appendingPathComponent("config.toml") }
     private var templatePath: URL { runnerDir.appendingPathComponent("template.toml") }
 
     private var downloadURL: URL {

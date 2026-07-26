@@ -13,12 +13,13 @@ phantom/
 ├── phantomApp.swift      # App entry point, initializes TCPServer
 ├── ContentView.swift     # Three-column GUI shell (sidebar / list / detail)
 ├── Views/                # The columns and their panes
-│   ├── SidebarView.swift     # Sections (VMs, Images) with live counts
-│   ├── VMListView.swift      # VM list column and its rows
+│   ├── SidebarView.swift     # VMs/Images with live counts, then a Daemon group
+│   ├── VMListView.swift      # VM list column, its rows and the filter menu
 │   ├── VMDetailView.swift    # VM metadata, actions, exec console
 │   ├── ImagesView.swift      # Local/catalog image columns and detail panes
 │   ├── CreateVMSheet.swift   # New VM: name, local image, CPU, memory
-│   ├── LogPane.swift         # Collapsible daemon log below the columns
+│   ├── LogLinesView.swift    # Tail-following log lines + the Daemon Log page
+│   ├── IntegrationView.swift # GitLab Runner (Info/Log tabs), GitHub placeholder
 │   └── VMDisplayView.swift   # VZVirtualMachineView wrapper
 ├── APIHandlers.swift     # API request routing
 ├── APIModels.swift       # JSON protocol definitions

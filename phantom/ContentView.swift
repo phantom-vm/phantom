@@ -1,17 +1,26 @@
 import SwiftUI
 
-/// What the sidebar lists. The daemon manages two kinds of thing, and each gets
-/// a list in the middle column and a detail pane on the right.
+/// What the sidebar lists, in two groups: the things the daemon manages, then the
+/// daemon itself. Most entries get a list in the middle column and a detail pane
+/// on the right; `.log` is one page and says so via `hasListColumn`.
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     case vms
     case images
+    case log
+    case integration
 
     var id: Self { self }
+
+    /// The entries above the "Daemon" header, and the ones under it.
+    static let resourceSections: [SidebarSection] = [.vms, .images]
+    static let daemonSections: [SidebarSection] = [.log, .integration]
 
     var title: String {
         switch self {
         case .vms: "VMs"
         case .images: "Images"
+        case .log: "Log"
+        case .integration: "Integration"
         }
     }
 
@@ -19,6 +28,17 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .vms: "desktopcomputer"
         case .images: "square.stack.3d.up"
+        case .log: "text.alignleft"
+        case .integration: "puzzlepiece.extension"
+        }
+    }
+
+    /// Whether the middle column has anything to list. The log is a single page,
+    /// so its column collapses and the log fills the width beside the sidebar.
+    var hasListColumn: Bool {
+        switch self {
+        case .vms, .images, .integration: true
+        case .log: false
         }
     }
 }
@@ -31,7 +51,7 @@ struct ContentView: View {
     @State private var selectedVMId: String?
     @State private var selectedImageName: String?
     @State private var imageScope: ImageScope = .local
-    @State private var showLog = false
+    @State private var selectedIntegration: Integration? = .gitlabRunner
     @State private var creatingVM = false
 
     /// Listing images walks the images directory, so it is cached here — both
@@ -52,80 +72,27 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // The log used to own half the window; it is a debugging aid, so it
-        // sits below the three columns and starts collapsed.
-        VSplitView {
-            NavigationSplitView {
-                SidebarView(vm: vm, imageCount: images.count, selection: $section)
-                    .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 260)
-            } content: {
-                Group {
-                    switch currentSection {
-                    case .vms:
-                        VMListView(vm: vm, selection: $selectedVMId)
-                    case .images:
-                        ImageListView(
-                            vm: vm,
-                            images: images,
-                            scope: $imageScope,
-                            selection: $selectedImageName,
-                            onRefresh: reloadImages
-                        )
-                        // Local and catalog names live in one selection, so
-                        // switching tabs must not leave a stale one behind.
-                        .onChange(of: imageScope) { selectedImageName = nil }
-                    }
+        // Two shapes of window, chosen by the selected section. A three-column
+        // NavigationSplitView cannot hide its middle column — neither
+        // `navigationSplitViewColumnWidth(0)` nor `columnVisibility` reaches it —
+        // so a section with nothing to list gets a genuinely two-column split view
+        // instead, and its page fills everything right of the sidebar.
+        Group {
+            if currentSection.hasListColumn {
+                NavigationSplitView {
+                    sidebar
+                } content: {
+                    listColumn
+                        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
+                } detail: {
+                    detailPane
                 }
-                .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
-                // The log toggle rides the *content* column, and not only to keep
-                // it out of the way: a detail-column item is pinned to that
-                // column's leading edge — just right of the split divider, where
-                // the '+' below wants to be — only while the content column has
-                // an item of its own. With the content column empty, the '+'
-                // drifts to the window's trailing edge instead. No placement
-                // names "the detail column's leading edge" directly; which column
-                // an item is declared on is the whole lever.
-                .toolbar {
-                    ToolbarItem {
-                        Button {
-                            showLog.toggle()
-                        } label: {
-                            Label("Log", systemImage: "text.alignleft")
-                        }
-                        .help(showLog ? "Hide the daemon log" : "Show the daemon log")
-                    }
+            } else {
+                NavigationSplitView {
+                    sidebar
+                } detail: {
+                    detailPane
                 }
-            } detail: {
-                detail
-                    .toolbar {
-                        if currentSection == .vms {
-                            ToolbarItem {
-                                Button {
-                                    creatingVM = true
-                                } label: {
-                                    Label("New VM", systemImage: "plus")
-                                }
-                                .help("Create a VM from a local image")
-                            }
-                        }
-                    }
-                    .sheet(isPresented: $creatingVM) {
-                        CreateVMSheet(
-                            vm: vm,
-                            images: images,
-                            onCreated: { selectedVMId = $0 },
-                            onBrowseCatalog: {
-                                imageScope = .catalog
-                                selectedImageName = nil
-                                section = .images
-                            }
-                        )
-                    }
-            }
-
-            if showLog {
-                LogPane(logs: vm.logs)
-                    .frame(minHeight: 100, idealHeight: 160)
             }
         }
         .frame(minWidth: 820, minHeight: 460)
@@ -137,8 +104,75 @@ struct ContentView: View {
         }
     }
 
+    private var sidebar: some View {
+        SidebarView(vm: vm, imageCount: images.count, selection: $section)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 260)
+    }
+
+    private var detailPane: some View {
+        detail
+            // Declaring this on the detail column is what puts it at that
+            // column's leading edge, just right of the split divider — no
+            // placement names that spot, the column is the whole lever.
+            // It only holds there while the content column has a toolbar
+            // item of its own, otherwise it drifts to the window's
+            // trailing edge: in the VMs section `VMListView`'s filter menu
+            // is what keeps it put.
+            .toolbar {
+                if currentSection == .vms {
+                    ToolbarItem {
+                        Button {
+                            creatingVM = true
+                        } label: {
+                            Label("New VM", systemImage: "plus")
+                        }
+                        .help("Create a VM from a local image")
+                    }
+                }
+            }
+            .sheet(isPresented: $creatingVM) {
+                CreateVMSheet(
+                    vm: vm,
+                    images: images,
+                    onCreated: { selectedVMId = $0 },
+                    onBrowseCatalog: {
+                        imageScope = .catalog
+                        selectedImageName = nil
+                        section = .images
+                    }
+                )
+            }
+    }
+
     private func reloadImages() {
         images = vm.imageManager.list()
+    }
+
+    // MARK: - List Column
+
+    @ViewBuilder
+    private var listColumn: some View {
+        switch currentSection {
+        case .vms:
+            VMListView(vm: vm, selection: $selectedVMId)
+        case .images:
+            ImageListView(
+                vm: vm,
+                images: images,
+                scope: $imageScope,
+                selection: $selectedImageName,
+                onRefresh: reloadImages
+            )
+            // Local and catalog names live in one selection, so switching tabs
+            // must not leave a stale one behind.
+            .onChange(of: imageScope) { selectedImageName = nil }
+        case .integration:
+            IntegrationListView(vm: vm, selection: $selectedIntegration)
+        case .log:
+            // Never built: `.log` takes the two-column window, which has no
+            // middle column to put this in.
+            EmptyView()
+        }
     }
 
     // MARK: - Detail Pane
@@ -189,6 +223,17 @@ struct ContentView: View {
                 .id(info.name)
             } else {
                 noSelection("No Selection", description: "Select an image to see its details.")
+            }
+        case .log:
+            DaemonLogView(logs: vm.logs)
+        case .integration:
+            switch selectedIntegration {
+            case .gitlabRunner:
+                GitLabRunnerDetailView(vm: vm)
+            case .githubRunner:
+                GitHubRunnerDetailView()
+            case nil:
+                noSelection("No Selection", description: "Select an integration to see its status.")
             }
         }
     }

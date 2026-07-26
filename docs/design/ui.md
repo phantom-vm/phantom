@@ -6,23 +6,43 @@ The daemon's SwiftUI window. Its view files are listed in
 
 ## GUI Layout
 
-The window is a three-column `NavigationSplitView`, the shape OrbStack and the
-Finder use:
+The window is a `NavigationSplitView` whose **shape depends on the selected
+section**. Most sections list something, so they get the three columns OrbStack and
+the Finder use; the Daemon log has nothing to list, so it gets two.
 
 ```
+VMs / Images / Integration — three columns
 ┌──────────┬──────────────────┬──────────────────────────┐
-│          │  Virtual   [log] │ [+]                      │
+│          │  Virtual  [⌵filter] [+]                     │
 │ VMs      │  Machines        │                          │
 │ Images   │ vm-a1b2c3d4      │ vm-a1b2c3d4              │
 │          │   Running        │   Running                │
-│          │ vm-e5f6g7h8      │   [Stop] [Display]       │
-│          │   Stopped        │   Details: id, state,    │
-│          │                  │   bundle path            │
+│ Daemon   │ vm-e5f6g7h8      │   [Stop] [Display]       │
+│  Log     │   Stopped        │   Details: id, state,    │
+│  Integr. │                  │   bundle path            │
 │          │                  │   Run Command …          │
 └──────────┴──────────────────┴──────────────────────────┘
-│ Log (collapsible, toggled from the toolbar)            │
-└────────────────────────────────────────────────────────┘
+
+Daemon › Log — two columns
+┌──────────┬─────────────────────────────────────────────┐
+│ VMs      │ Daemon Log                                  │
+│ Images   │ [17:16:28] Found existing IPSW: 25D125.ipsw  │
+│          │ [17:16:29] GitLab runner started (pid 83494) │
+│ Daemon   │ [17:16:29] [gitlab-runner] Configuration …   │
+│  Log   ◀ │                                             │
+│  Integr. │                                             │
+└──────────┴─────────────────────────────────────────────┘
 ```
+
+`SidebarSection.hasListColumn` picks the branch. Two split views rather than one is
+not a stylistic choice: **a three-column `NavigationSplitView` cannot hide its
+middle column.** `navigationSplitViewColumnWidth(0)` and its `min/ideal/max` form
+are both ignored for that column, and `NavigationSplitViewVisibility` only ever
+hides columns from the leading side (`.doubleColumn` hides the sidebar,
+`.detailOnly` hides the sidebar *and* the middle column) — there is no value for
+"hide the middle one". Switching between a three-column and a two-column split view
+is what gives the log the full width, and it costs nothing visible because the
+sidebar and detail builders are shared between the branches.
 
 No IPSW appears anywhere in this window. A user's starting point is a published
 catalog image, pulled ready to boot; a macOS restore image is how those images get
@@ -32,12 +52,13 @@ keeping a restore-image panel in the sidebar of every install. The daemon still
 serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
 `phantom image build --ipsw` is how a base image is produced.
 
-- **Sidebar** — the two things the daemon manages (`SidebarSection`), each with
-  a live count, and nothing else.
-- **List column** — the selected section's items. Actions that belong to the
-  collection rather than to one item live in the toolbar: Images keeps its
-  rescan/refresh here, while the VMs **+** sits over the detail column (below).
-  An image
+- **Sidebar** — two groups. The things the daemon manages (VMs, Images), each with
+  a live count, then a **Daemon** group for the daemon itself: its Log and its
+  Integrations.
+- **List column** — the selected section's items. Actions belonging to the
+  collection rather than to one item live in the toolbar: VMs has a filter menu,
+  Images its rescan/refresh, while the VMs **+** sits over the detail column
+  (below). An image
   operation running anywhere — including one the CLI started, since
   `OCIImageManager.state` is shared — shows as a progress banner above the list.
   Images has a **Local / Catalog** switch: Catalog lists what the published
@@ -49,11 +70,47 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   buttons and the exec console; `ContentUnavailableView` when nothing is
   selected. Both panes look their item up by id on every render, so one deleted
   over the API falls back to the placeholder instead of going stale.
-- **Log** — collapsed by default, below all three columns.
 
 Image listing walks the images directory, so `ContentView` caches the result and
 reloads it when `OCIImageManager.state` enters or leaves a terminal state, not
 on every progress tick.
+
+### Filtering the VM list
+
+The VMs column's toolbar holds a filter menu with one checkable item, **Show
+Stopped VMs**, on by default and remembered in `@AppStorage`. Unchecking it hides
+exactly the `.stopped` state: the transitional states (creating, installing,
+restoring, stopping) and `.error` always show, because a VM that is mid-install or
+broken is the one most worth seeing and hiding it is how it gets forgotten.
+
+A row can leave the list without the selection changing — the filter is switched
+off, or the selected VM stops — so `VMListView` clears the selection when the
+selected id is no longer visible, rather than letting the detail pane outlive its
+row.
+
+### Daemon log
+
+`VMManager.logs` is the daemon's whole log for the run, and **Daemon › Log** is the
+page that shows it, filling the window right of the sidebar. It used to be a
+collapsible pane under the columns behind a toolbar button, which made it a drawer
+rather than a place and spent the toolbar slot the VM filter now uses.
+
+`LogLinesView` renders the lines monospaced and follows the tail as they arrive. It
+is shared with the GitLab Runner's Log tab, which is the same array filtered on the
+`[gitlab-runner]` prefix — the runner's output is not stored separately,
+`GitLabRunnerManager` writes it straight into the daemon log.
+
+### Integration
+
+**Daemon › Integration** lists the CI integrations the daemon can host:
+
+- **GitLab Runner** — the one that works. Its detail pane has two tabs. **Info**
+  shows state, whether it is registered, whether it is running, the pinned version,
+  whether the binary is present, and the config path, with start/stop; registering
+  needs a URL and a token, so it points at `phantom gitlab-runner setup` rather than
+  reproducing that form. **Log** is the runner's own output.
+- **GitHub Runner** — a placeholder saying it is coming. Listed so the section is
+  honest about its scope instead of looking like it is only ever about GitLab.
 
 ### Toolbar placement
 
@@ -71,11 +128,10 @@ load-bearing in a way worth writing down:
   while the content column has an item of its own. With the content column
   empty, it drifts to the window's trailing edge instead.
 
-So the log toggle is declared on the content column, not merely to keep it out of
-the way: without it there, the **+** would not stay put. In the Images section,
-where the detail column has no item, the content column's own items (log toggle
-and refresh) sit at the window's trailing edge — the log toggle is the one control
-whose position depends on the section.
+So the VM filter menu is doing two jobs: it is the list column's own control, and
+it is what holds the **+** in place. In the Images section, where the detail column
+has no item, the content column's refresh sits at the window's trailing edge
+instead.
 
 ## GUI Reactivity
 

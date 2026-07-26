@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Left column: the two sections the daemon manages, with a live count each.
+/// Left column, in two groups: the things the daemon manages (with a live count
+/// each), then the daemon itself — its log and its integrations.
 ///
 /// Nothing about the macOS restore image (IPSW) appears here, or anywhere else in
 /// the GUI. A user's starting point is a published catalog image, pulled ready to
@@ -13,9 +14,21 @@ struct SidebarView: View {
     @Binding var selection: SidebarSection?
 
     var body: some View {
-        List(SidebarSection.allCases, selection: $selection) { section in
-            Label(section.title, systemImage: section.systemImage)
-                .badge(count(for: section))
+        List(selection: $selection) {
+            Section {
+                ForEach(SidebarSection.resourceSections) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .badge(count(for: section))
+                        .tag(section)
+                }
+            }
+
+            Section("Daemon") {
+                ForEach(SidebarSection.daemonSections) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .tag(section)
+                }
+            }
         }
         .listStyle(.sidebar)
         .navigationTitle("Phantom")
@@ -25,6 +38,7 @@ struct SidebarView: View {
         switch section {
         case .vms: vm.vmInstances.count
         case .images: imageCount
+        case .log, .integration: 0
         }
     }
 }
