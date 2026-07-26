@@ -15,6 +15,10 @@ struct VMDetailView: View {
 
     private var isRunning: Bool { instance.state == .running }
 
+    /// Read from the bundle, the same place a start reads it from — a VM that
+    /// predates `vm.json` shows the defaults it actually boots with.
+    private var settings: VMSettings { VMSettings.load(from: instance.bundlePath) }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -103,6 +107,8 @@ struct VMDetailView: View {
 
             DetailRow(label: "ID", value: instance.vmId, monospaced: true)
             DetailRow(label: "State", value: instance.state.apiString)
+            DetailRow(label: "CPUs", value: "\(settings.cpuCount)")
+            DetailRow(label: "Memory", value: settings.memorySize.formatted(.byteCount(style: .memory)))
             DetailRow(label: "Bundle", value: instance.bundlePath.path, monospaced: true)
         }
     }

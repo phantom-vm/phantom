@@ -191,6 +191,8 @@ struct APIHandlers {
         let ipswId = params?["ipswId"]?.value as? String
         let sourceVmId = params?["sourceVmId"]?.value as? String
         let fromImage = params?["fromImage"]?.value as? String
+        let name = params?["name"]?.value as? String
+        let settings = try vmSettings(from: params)
 
         // Must have exactly one source
         let sources = [ipswId, sourceVmId, fromImage].compactMap { $0 }
@@ -198,12 +200,21 @@ struct APIHandlers {
             throw APIHandlerError.invalidParams("Must specify exactly one of 'ipswId', 'sourceVmId', or 'fromImage'")
         }
 
+        if let name {
+            guard VMName.isValid(name) else {
+                throw APIHandlerError.invalidParams("Invalid VM name '\(name)': use letters, digits, '-' and '_' only")
+            }
+            guard !vmManager.vmInstances.keys.contains(name) else {
+                throw APIHandlerError.invalidParams("A VM named '\(name)' already exists")
+            }
+        }
+
         // Create from image. The restore runs in the background (a 90GB disk
         // takes minutes); the vmId comes back now, and `vm.list` carries the
         // state from restoring(N%) through to running.
         if let fromImage = fromImage {
             do {
-                let vmId = try vmManager.createVMFromImage(imageName: fromImage)
+                let vmId = try vmManager.createVMFromImage(imageName: fromImage, vmId: name, settings: settings)
                 return AnyCodable([
                     "status": "started",
                     "message": "Restoring VM from image '\(fromImage)'",
@@ -226,8 +237,8 @@ struct APIHandlers {
 
             // Install runs in the background (~20 min); return the vmId now so
             // callers can poll vm.list for its state (creating → installing → running).
-            let vmId = "vm-\(UUID().uuidString.prefix(8).lowercased())"
-            Task { await vmManager.createAndStartVM(vmId: vmId, ipswId: ipswId) }
+            let vmId = name ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
+            Task { await vmManager.createAndStartVM(vmId: vmId, ipswId: ipswId, settings: settings) }
 
             return AnyCodable([
                 "status": "started",
@@ -239,7 +250,7 @@ struct APIHandlers {
         // Clone from existing VM
         if let sourceVmId = sourceVmId {
             do {
-                let newVmId = try await vmManager.cloneVM(sourceVmId: sourceVmId)
+                let newVmId = try await vmManager.cloneVM(sourceVmId: sourceVmId, vmId: name, settings: settings)
                 await vmManager.startVM(vmId: newVmId)
                 try ensureStarted(newVmId)
                 return AnyCodable([
@@ -255,6 +266,41 @@ struct APIHandlers {
         }
 
         throw APIHandlerError.invalidParams("Invalid parameters")
+    }
+
+    /// Reads `cpuCount` / `memoryGB` out of a `vm.create` call, or nil when the
+    /// caller asked for neither. One without the other keeps the default for
+    /// the other, so `--cpu 8` doesn't silently resize memory too.
+    private func vmSettings(from params: [String: AnyCodable]?) throws -> VMSettings? {
+        let cpuCount = (params?["cpuCount"]?.value as? NSNumber)?.intValue
+        let memoryGB = (params?["memoryGB"]?.value as? NSNumber)?.doubleValue
+
+        guard cpuCount != nil || memoryGB != nil else { return nil }
+
+        var settings = VMSettings.defaults
+
+        if let cpuCount {
+            guard cpuCount >= VMSettings.minimumCPUCount, cpuCount <= VMSettings.maximumCPUCount else {
+                throw APIHandlerError.invalidParams(
+                    "cpuCount must be between \(VMSettings.minimumCPUCount) and \(VMSettings.maximumCPUCount) on this host"
+                )
+            }
+            settings.cpuCount = cpuCount
+        }
+
+        if let memoryGB {
+            let bytes = UInt64(memoryGB * 1024 * 1024 * 1024)
+            guard bytes >= VMSettings.minimumMemorySize, bytes <= VMSettings.maximumMemorySize else {
+                // Reported as sizes, not as GB: the floor is tens of megabytes,
+                // which rounds to a useless "0.0" in GB.
+                throw APIHandlerError.invalidParams(
+                    "memory must be between \(VMSettings.minimumMemorySize.formatted(.byteCount(style: .memory))) and \(VMSettings.maximumMemorySize.formatted(.byteCount(style: .memory))) on this host"
+                )
+            }
+            settings.memorySize = bytes
+        }
+
+        return settings
     }
 
     /// Verifies a just-started VM didn't land in an error state.

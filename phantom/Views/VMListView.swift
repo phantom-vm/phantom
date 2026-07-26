@@ -5,7 +5,11 @@ import SwiftUI
 /// list rather than to any one row.
 struct VMListView: View {
     @Bindable var vm: VMManager
+    let images: [ImageInfo]
     @Binding var selection: String?
+    let onBrowseCatalog: () -> Void
+
+    @State private var creating = false
 
     var body: some View {
         let vms = vm.listVMs()
@@ -15,9 +19,9 @@ struct VMListView: View {
                 ContentUnavailableView {
                     Label("No VMs", systemImage: "desktopcomputer")
                 } description: {
-                    Text(canCreateVM
-                        ? "Create one from the restore image, or from an image in the Images section."
-                        : "Download the restore image first, or restore one from the Images section.")
+                    Text("Create one with the + button.")
+                } actions: {
+                    Button("New VM…") { creating = true }
                 }
             } else {
                 List(vms, id: \.id, selection: $selection) { info in
@@ -29,19 +33,21 @@ struct VMListView: View {
         .toolbar {
             ToolbarItem {
                 Button {
-                    Task { await vm.createAndStartVM() }
+                    creating = true
                 } label: {
-                    Label("Create VM from restore image", systemImage: "plus")
+                    Label("New VM", systemImage: "plus")
                 }
-                .disabled(!canCreateVM)
-                .help("Install a new VM from the downloaded restore image")
+                .help("Create a VM from an image or the restore image")
             }
         }
-    }
-
-    private var canCreateVM: Bool {
-        if case .downloaded = vm.ipswManager.state { return true }
-        return false
+        .sheet(isPresented: $creating) {
+            CreateVMSheet(
+                vm: vm,
+                images: images,
+                onCreated: { selection = $0 },
+                onBrowseCatalog: onBrowseCatalog
+            )
+        }
     }
 }
 

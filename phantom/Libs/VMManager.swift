@@ -74,7 +74,7 @@ class VMManager {
 
     // MARK: - Public API
 
-    func createAndStartVM(vmId: String? = nil, ipswId: String? = nil) async {
+    func createAndStartVM(vmId: String? = nil, ipswId: String? = nil, settings: VMSettings? = nil) async {
         // The API always names an IPSW; only the GUI's "Create & Start VM"
         // button (no picker) falls back to whichever download exists.
         let ipswPath: URL
@@ -117,6 +117,10 @@ class VMManager {
             try FileManager.default.createDirectory(at: bundlePath, withIntermediateDirectories: true)
 
             log("Creating VM bundle at \(generatedId)...")
+
+            // Written before the configuration is built, since that is what
+            // reads it back.
+            try (settings ?? .defaults).clamped().write(to: bundlePath)
 
             // Disk image — 90GB sparse
             let diskPath = bundlePath.appendingPathComponent("disk.img")
@@ -468,7 +472,15 @@ class VMManager {
         hasExistingVM = !vmInstances.isEmpty
     }
 
-    func cloneVM(sourceVmId: String) async throws -> String {
+    func cloneVM(
+        sourceVmId: String,
+        vmId requestedId: String? = nil,
+        settings: VMSettings? = nil
+    ) async throws -> String {
+        if let requestedId, vmInstances[requestedId] != nil {
+            throw PhantomError.vmAlreadyExists(requestedId)
+        }
+
         // Find source VM bundle
         let sourceBundle = vmsDir.appendingPathComponent(sourceVmId)
         guard FileManager.default.fileExists(atPath: sourceBundle.path) else {
@@ -487,11 +499,11 @@ class VMManager {
         }
 
         // Create new VM bundle
-        let cloneId = UUID().uuidString.prefix(8).lowercased()
-        let cloneBundle = vmsDir.appendingPathComponent("vm-\(cloneId)", isDirectory: true)
+        let cloneVmId = requestedId ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
+        let cloneBundle = vmsDir.appendingPathComponent(cloneVmId, isDirectory: true)
         try FileManager.default.createDirectory(at: cloneBundle, withIntermediateDirectories: true)
 
-        log("Cloning VM \(sourceVmId) to vm-\(cloneId)...")
+        log("Cloning VM \(sourceVmId) to \(cloneVmId)...")
 
         // Clone disk image using APFS copy-on-write (clonefile syscall)
         let cloneDiskPath = cloneBundle.appendingPathComponent("disk.img")
@@ -511,14 +523,19 @@ class VMManager {
         let cloneHwPath = cloneBundle.appendingPathComponent("HardwareModel")
         try FileManager.default.copyItem(at: sourceHwPath, to: cloneHwPath)
 
+        // Without an explicit size, carry the source's over — a clone that
+        // quietly reverted to the defaults would be a different machine than
+        // the one it was cloned from.
+        try? (settings ?? VMSettings.load(from: sourceBundle)).clamped().write(to: cloneBundle)
+
         // Generate new MachineIdentifier (required for unique VM identity)
         let newMachineIdentifier = VZMacMachineIdentifier()
         let cloneIdPath = cloneBundle.appendingPathComponent("MachineIdentifier")
         try newMachineIdentifier.dataRepresentation.write(to: cloneIdPath)
         log("Generated new machine identifier")
 
-        log("Clone complete: vm-\(cloneId)")
-        return "vm-\(cloneId)"
+        log("Clone complete: \(cloneVmId)")
+        return cloneVmId
     }
 
     // MARK: - Create from Image
@@ -535,12 +552,19 @@ class VMManager {
     /// Progress lives on the VM's own state rather than `imageManager.state`:
     /// that slot is single-occupancy and would make a restore and a concurrent
     /// pull overwrite each other's progress.
-    func createVMFromImage(imageName: String) throws -> String {
+    func createVMFromImage(
+        imageName: String,
+        vmId requestedId: String? = nil,
+        settings: VMSettings? = nil
+    ) throws -> String {
         guard imageManager.imageExists(imageName) else {
             throw OCIError.imageNotFound(imageName)
         }
 
-        let vmId = "vm-\(UUID().uuidString.prefix(8).lowercased())"
+        let vmId = requestedId ?? "vm-\(UUID().uuidString.prefix(8).lowercased())"
+        guard vmInstances[vmId] == nil else {
+            throw PhantomError.vmAlreadyExists(vmId)
+        }
         let bundlePath = vmsDir.appendingPathComponent(vmId, isDirectory: true)
         vmInstances[vmId] = VMInstance(
             vmId: vmId,
@@ -562,6 +586,9 @@ class VMManager {
                         }
                     }
                 )
+                // After the restore: it creates the bundle, and cleans it up
+                // again if it fails, so anything written earlier would be lost.
+                try (settings ?? .defaults).clamped().write(to: bundlePath)
                 self.vmInstances[vmId]?.state = .stopped
                 await self.startExistingVM(vmId: vmId)
             } catch {
@@ -824,8 +851,12 @@ class VMManager {
             auxiliaryStorage: auxiliaryStorage
         )
         config.bootLoader = VZMacOSBootLoader()
-        config.cpuCount = max(VZVirtualMachineConfiguration.minimumAllowedCPUCount, 4)
-        config.memorySize = max(VZVirtualMachineConfiguration.minimumAllowedMemorySize, 16 * 1024 * 1024 * 1024)
+
+        // Read on every start, not just at create: this is what makes a VM
+        // sized at creation keep that size across reboots.
+        let settings = VMSettings.load(from: bundlePath).clamped()
+        config.cpuCount = settings.cpuCount
+        config.memorySize = settings.memorySize
 
         let diskPath = bundlePath.appendingPathComponent("disk.img")
         let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: diskPath, readOnly: false)
@@ -920,6 +951,7 @@ enum PhantomError: LocalizedError {
     case diskCreationFailed
     case vmBundleCorrupted
     case vmNotFound(String)
+    case vmAlreadyExists(String)
     case cloneFailed(String)
     case vmNotRunning(String)
     case noSocketDevice
@@ -932,6 +964,7 @@ enum PhantomError: LocalizedError {
         case .diskCreationFailed: "Failed to create disk image"
         case .vmBundleCorrupted: "VM bundle is missing required files"
         case .vmNotFound(let id): "VM not found: \(id)"
+        case .vmAlreadyExists(let id): "A VM named '\(id)' already exists"
         case .cloneFailed(let message): message
         case .vmNotRunning(let id): "VM is not running: \(id)"
         case .noSocketDevice: "No vsock device available"

@@ -7,6 +7,9 @@ export async function vmDeploy(...args: string[]) {
   let fromVm: string | undefined;
   let fromIpsw: string | undefined;
   let fromImage: string | undefined;
+  let name: string | undefined;
+  let cpuCount: number | undefined;
+  let memoryGB: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--template-vm" && i + 1 < args.length) {
@@ -18,6 +21,24 @@ export async function vmDeploy(...args: string[]) {
     } else if (args[i] === "--image" && i + 1 < args.length) {
       fromImage = args[i + 1];
       i++;
+    } else if (args[i] === "--name" && i + 1 < args.length) {
+      name = args[i + 1];
+      i++;
+    } else if (args[i] === "--cpu" && i + 1 < args.length) {
+      cpuCount = Number(args[i + 1]);
+      i++;
+    } else if (args[i] === "--memory" && i + 1 < args.length) {
+      memoryGB = Number(args[i + 1]);
+      i++;
+    }
+  }
+
+  // The daemon range-checks these against the host; catching the unparseable
+  // ones here keeps a typo from arriving as NaN.
+  for (const [flag, value] of [["--cpu", cpuCount], ["--memory", memoryGB]] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+      console.error(`Error: ${flag} must be a positive number`);
+      process.exit(1);
     }
   }
 
@@ -31,6 +52,11 @@ export async function vmDeploy(...args: string[]) {
     console.error("  phantom vm deploy --ipsw <ipsw-id>");
     console.error("  phantom vm deploy --template-vm <vm-id>");
     console.error("  phantom vm deploy --image <image-name>");
+    console.error("");
+    console.error("Options:");
+    console.error("  --name <name>    Name the VM (default: a generated vm-xxxxxxxx)");
+    console.error("  --cpu <n>        CPU count (default: 4)");
+    console.error("  --memory <gb>    Memory in GB (default: 16)");
     process.exit(1);
   }
 
@@ -42,12 +68,22 @@ export async function vmDeploy(...args: string[]) {
   }
 
   // Regular create
-  const params: { ipswId?: string; sourceVmId?: string; fromImage?: string } =
-    fromIpsw
-      ? { ipswId: fromIpsw }
-      : fromImage
-        ? { fromImage }
-        : { sourceVmId: fromVm };
+  const params: {
+    ipswId?: string;
+    sourceVmId?: string;
+    fromImage?: string;
+    name?: string;
+    cpuCount?: number;
+    memoryGB?: number;
+  } = fromIpsw
+    ? { ipswId: fromIpsw }
+    : fromImage
+      ? { fromImage }
+      : { sourceVmId: fromVm };
+
+  if (name !== undefined) params.name = name;
+  if (cpuCount !== undefined) params.cpuCount = cpuCount;
+  if (memoryGB !== undefined) params.memoryGB = memoryGB;
 
   const sourceType = fromIpsw ? "IPSW" : fromImage ? "image" : "VM";
   const sourceId = fromIpsw || fromImage || fromVm;
@@ -387,7 +423,7 @@ export async function vmDelete(vmId: string) {
 }
 
 export const commands: Record<string, Command> = {
-  deploy: { usage: "--image <name>", description: "Boot a VM (also: --ipsw <id>, --template-vm <id>)", multiArgHandler: vmDeploy },
+  deploy: { usage: "--image <name> [--name <id>] [--cpu <n>] [--memory <gb>]", description: "Boot a VM (also: --ipsw <id>, --template-vm <id>)", multiArgHandler: vmDeploy },
   list: { usage: "", description: "List VMs and their state", handler: vmList as Command["handler"] },
   start: { usage: "<id>", description: "Start a VM", handler: vmStart as Command["handler"] },
   stop: { usage: "<id>", description: "Stop a VM", handler: vmStop as Command["handler"] },

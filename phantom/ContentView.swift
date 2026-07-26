@@ -61,7 +61,16 @@ struct ContentView: View {
                 Group {
                     switch currentSection {
                     case .vms:
-                        VMListView(vm: vm, selection: $selectedVMId)
+                        VMListView(
+                            vm: vm,
+                            images: images,
+                            selection: $selectedVMId,
+                            onBrowseCatalog: {
+                                imageScope = .catalog
+                                selectedImageName = nil
+                                section = .images
+                            }
+                        )
                     case .images:
                         ImageListView(
                             vm: vm,

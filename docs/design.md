@@ -55,13 +55,15 @@ phantom/
 │   ├── SidebarView.swift     # Sections (VMs, Images) + restore image footer
 │   ├── VMListView.swift      # VM list column and its rows
 │   ├── VMDetailView.swift    # VM metadata, actions, exec console
-│   ├── ImagesView.swift      # Image list column and image detail pane
+│   ├── ImagesView.swift      # Local/catalog image columns and detail panes
+│   ├── CreateVMSheet.swift   # New VM: name, source image, CPU, memory
 │   ├── LogPane.swift         # Collapsible daemon log below the columns
 │   └── VMDisplayView.swift   # VZVirtualMachineView wrapper
 ├── APIHandlers.swift     # API request routing
 ├── APIModels.swift       # JSON protocol definitions
 └── Libs/
     ├── VMManager.swift   # VM lifecycle management
+    ├── VMSettings.swift  # Per-VM CPU/memory (vm.json) + VM name rules
     ├── IPSWManager.swift # IPSW download and listing
     ├── GitLabRunnerManager.swift # Managed GitLab Runner (download, register, supervise)
     ├── TCPServer.swift   # Network.framework TCP server
@@ -104,7 +106,10 @@ Finder use:
   rather than in Images because it is a host-level prerequisite for installing a
   VM from scratch, not one of the OCI images a VM is restored from.
 - **List column** — the selected section's items, and the actions that belong to
-  the collection rather than to one item (create a VM, rescan images). An image
+  the collection rather than to one item (create a VM, rescan images). The VMs
+  column's **+** opens a sheet for the VM's name, source image, CPU count and
+  memory; with nothing to build from, that sheet offers the catalog and the
+  restore image download instead of an unusable form. An image
   operation running anywhere — including one the CLI started, since
   `OCIImageManager.state` is shared — shows as a progress banner above the list.
   Images has a **Local / Catalog** switch: Catalog lists what the published
@@ -305,7 +310,8 @@ Daemon                    Guest Agent           Shell
 │   │   ├── disk.img          # 90GB sparse disk image
 │   │   ├── AuxiliaryStorage  # Binary blob
 │   │   ├── MachineIdentifier # Binary blob
-│   │   └── HardwareModel     # Binary blob
+│   │   ├── HardwareModel     # Binary blob
+│   │   └── vm.json           # CPU count + memory size (absent = 4 / 16GB)
 │   │
 │   └── vm-def456/
 │       └── ...
@@ -335,6 +341,15 @@ Daemon                    Guest Agent           Shell
 - `AuxiliaryStorage` - VM-specific data, persisted across boots
 - `MachineIdentifier` - Unique VM identity
 - `HardwareModel` - CPU/hardware configuration
+- `vm.json` - `VMSettings`: the VM's CPU count and memory size
+
+`vm.json` has to exist because a VM is configured from scratch on *every* start,
+not just at creation — without a record on disk, a VM sized at creation would
+quietly revert to the defaults on its next boot. A bundle without the file (any
+VM created before it existed) reads back as 4 CPUs / 16GB, exactly what used to
+be hardcoded, so nothing resizes underneath an existing VM. Values are clamped
+to what the host allows on the way in and on the way out, and a clone inherits
+its source's sizing.
 
 VMs get no host directory share: everything the guest needs arrives over the
 network (the agent bootstrap fetches the published `phantom-agent-install.sh` release
@@ -442,13 +457,15 @@ Or on error:
 - **Response**: `{"vms": [{"id": "vm-abc", "path": "...", "state": "running"}]}`
 
 ### vm.create
-- **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string)
+- **Params**: Exactly one of `ipswId` (string), `sourceVmId` (string), or `fromImage` (string); optional `name` (string), `cpuCount` (int), `memoryGB` (number)
 - **Purpose**: Create a new VM from an IPSW, by cloning an existing VM, or from a saved OCI image
+- **Sizing and naming**: `name` becomes the VM's id and its bundle directory, so it is restricted to letters, digits, `-` and `_` and rejected if a VM already has it; omitted, a `vm-xxxxxxxx` is generated. `cpuCount` and `memoryGB` are range-checked against the host (the framework's CPU ceiling capped at the machine's core count, memory at installed RAM) and stored in the bundle's `vm.json`, so they apply to every later start rather than only the first. Passing one leaves the other at its default. A clone without them inherits the source VM's sizing.
 - **Implementation**:
   - `ipswId`: Validates IPSW exists, then returns a generated `vmId` immediately and runs the ~20-minute install in a background task. Poll `vm.list` for the VM's state (`creating` → `installing(N%)` → `running`). After the install finishes, the installer's VM instance is torn down and a **fresh** `VZVirtualMachine` is booted from the bundle — the installer's own instance flakily hangs on a black screen instead of reaching Setup Assistant; a clean restart is reliable.
   - `sourceVmId`: APFS CoW clone of existing VM bundle — the one synchronous source, since a CoW clone is instant
   - `fromImage`: Same shape as `ipswId` — the `vmId` comes back as soon as the image is confirmed to exist, and a background task decompresses the image chunks (in parallel) into a new VM bundle, generates a fresh MachineIdentifier and boots it. Poll `vm.list` for the state (`restoring(N%)` → `creating` → `running`). Restoring the 58.9GB `xcode-26-6` into a 90GB disk takes minutes, so the caller must not be holding a socket open across it: the VM instance is registered *before* the restore begins, so it is listed the whole way through and a caller that times out or disconnects can still find it. Restore progress rides on the VM's own state rather than `image.status` — that slot is single-occupancy, and a restore has no business colliding with a concurrent pull.
 - **Response**: `{"status": "started"|"running", "message": "...", "vmId": "vm-..."}`
+- **CLI**: `phantom vm deploy --image <name> [--name <id>] [--cpu <n>] [--memory <gb>]`
 
 ### vm.start
 - **Params**: `vmId` (string)
