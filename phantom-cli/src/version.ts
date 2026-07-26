@@ -1,3 +1,3 @@
 // Single source of the CLI's version, compiled into both binaries.
 // Rewritten by scripts/set-version.sh — keep the assignment on one line.
-export const VERSION = "1.2.0";
+export const VERSION = "1.3.0";
