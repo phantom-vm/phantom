@@ -131,16 +131,7 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $creatingVM) {
-                CreateVMSheet(
-                    vm: vm,
-                    images: images,
-                    onCreated: { selectedVMId = $0 },
-                    onBrowseCatalog: {
-                        imageScope = .catalog
-                        selectedImageName = nil
-                        section = .images
-                    }
-                )
+                CreateVMSheet(vm: vm, onCreated: { selectedVMId = $0 })
             }
     }
 
