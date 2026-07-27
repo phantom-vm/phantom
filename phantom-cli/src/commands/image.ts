@@ -18,8 +18,10 @@ interface LocalImage {
 }
 
 /// Whether a local image is the one the catalog currently points at. "unknown"
-/// covers an image built locally and one pulled before pulls left a record —
-/// neither can be judged, and neither should be reported as out of date.
+/// covers an image built locally, one published from this machine, and one
+/// pulled before pulls left a record — none can be judged, and none should be
+/// reported as out of date. The listing renders it as plain "(Downloaded)"; the
+/// state is kept distinct for `pull`, which must refuse rather than guess.
 function compareToCatalog(image: LocalImage, catalogDigest: string): "current" | "stale" | "unknown" {
   if (!image.pulledFrom) return "unknown";
   return image.pulledFrom.digest === catalogDigest ? "current" : "stale";
@@ -81,18 +83,15 @@ export async function imageCatalog() {
     const have = local.get(entry.name);
     let mark = "";
     if (have) {
-      switch (compareToCatalog(have, entry.digest)) {
-        case "current":
-          mark = "  (Downloaded)";
-          break;
-        case "stale":
-          mark = "  (update available)";
-          updatable = true;
-          break;
-        case "unknown":
-          // Saved locally, or pulled before pulls recorded their digest.
-          mark = "  (Downloaded, origin unknown)";
-          break;
+      // Only a recorded digest that differs from the catalog is worth saying
+      // out loud. Everything else is just "you have this" — an unjudgeable
+      // origin is not something the reader can act on, and spelling it out
+      // made a successful local build or publish look like a failed pull.
+      if (compareToCatalog(have, entry.digest) === "stale") {
+        mark = "  (update available)";
+        updatable = true;
+      } else {
+        mark = "  (Downloaded)";
       }
     }
     console.log(`${entry.name.padEnd(25)} ${formatGB(entry.compressedSize).padStart(7)}${mark}`);

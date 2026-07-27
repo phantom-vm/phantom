@@ -85,10 +85,11 @@ phantom image build xcode-26-6 --image xcode-26-6 --replace
 `--replace` writes the new copy alongside the old one and swaps it in only when
 it is complete, so a failed build leaves the old image where it was. Budget disk
 for both at once, and note the replacement is a **local** image — it carries no
-`pulled.json`, so `image catalog` reports it as origin unknown. Publishing does not
+`pulled.json`, so `image catalog` marks it `(Downloaded)` and never `(update
+available)`, however far the catalog moves ahead of it. Publishing does not
 change that: `pulled.json` records where a *pull* came from, and the build host
-never pulls its own image. On the machine that built it the mark stays until you
-pull it back; verify a publish against the registry instead (see below).
+never pulls its own image. To confirm a publish, read the digest `image publish`
+prints back from the registry rather than the mark on the build host.
 
 ## Layering a toolchain
 
