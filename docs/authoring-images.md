@@ -113,6 +113,18 @@ and rewrites the catalog artifact that `phantom image list` reads. The digest is
 read back rather than computed locally because the daemon re-encodes the manifest
 when pushing, so only the registry knows the bytes it kept.
 
+**A description says what the image has, not what it lacks.** `image list` is a
+menu, and an entry that spends its length on absences reads as a defect report
+rather than a choice. Name the OS build and the toolchain, in that order:
+
+```
+macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
+macOS 26.5.2 (25F84) + Command Line Tools — the base for layering your own toolchain
+```
+
+`--catalog-only` rewrites the entry without re-pushing blobs, so wording can be
+fixed for the price of a catalog write rather than the image's whole size.
+
 **A newly created ghcr package is private.** Switch both the image and the
 `catalog` package to public once, by hand, in the package settings on GitHub —
 until then anonymous pulls get a 403. Check rather than assume:
