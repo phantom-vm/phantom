@@ -1,4 +1,4 @@
-import { renderGroup, type CommandGroup } from "./command";
+import { renderCommand, renderGroup, renderIndex, visible, type CommandGroup } from "./command";
 import { route } from "./router";
 import { CliError } from "./errors";
 import { VERSION } from "./version";
@@ -8,23 +8,44 @@ export interface CliDefinition {
   groups: CommandGroup[];
 }
 
+const HELP_FLAGS = new Set(["--help", "-h"]);
+
+/**
+ * The help path a `--help`/`-h` anywhere in the arguments is asking for, or
+ * null if none was passed. Only flags *before* a `--` separator count:
+ * `phantom vm exec <id> -- ls --help` is asking ls for help, not phantom.
+ */
+function helpFlagPath(args: string[]): string[] | null {
+  const separator = args.indexOf("--");
+  const scanned = separator === -1 ? args : args.slice(0, separator);
+  if (!scanned.some((arg) => HELP_FLAGS.has(arg))) return null;
+  return scanned.filter((arg) => !HELP_FLAGS.has(arg));
+}
+
 export async function runCli(build: () => CliDefinition) {
   const { routes, groups } = build();
   const commands = {
     ...routes,
-    help: { handler: () => showHelp(groups) },
-    "--help": { handler: () => showHelp(groups) },
-    "-h": { handler: () => showHelp(groups) },
+    help: { multiArgHandler: (...path: string[]) => showHelp(groups, path) },
   };
 
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    showHelp(groups);
+    showHelp(groups, []);
     process.exit(0);
   }
 
   if (args[0] === "--version" || args[0] === "-v" || args[0] === "version") {
     console.log(VERSION);
+    process.exit(0);
+  }
+
+  // Intercepted here rather than in the router so no handler ever sees a help
+  // flag: several parse their arguments strictly and would reject it, which is
+  // how `image build --help` used to arrive as a usage error and exit 1.
+  const helpPath = helpFlagPath(args);
+  if (helpPath) {
+    showHelp(groups, helpPath);
     process.exit(0);
   }
 
@@ -47,15 +68,80 @@ export async function runCli(build: () => CliDefinition) {
   }
 }
 
-function showHelp(groups: CommandGroup[]) {
-  const sections = groups.map(renderGroup).filter(Boolean).join("\n\n");
+/**
+ * `path` is what to describe: nothing for the index, a top-level command for
+ * its subcommands, a command and subcommand for that one in full.
+ */
+function showHelp(groups: CommandGroup[], path: string[]) {
+  const [name, sub] = path;
 
+  if (!name) {
+    showIndex(groups);
+    return;
+  }
+
+  // Bare top-level commands (health, update, help) live in the prefix-less
+  // group, so look for a command of that name before a group of that name.
+  const bare = groups
+    .filter((group) => !group.prefix)
+    .flatMap((group) => visible(group.commands).filter(([bareName]) => bareName === name));
+  if (bare.length > 0 && !sub) {
+    console.log(renderCommand("", name, bare[0]![1]));
+    return;
+  }
+
+  const group = groups.find((candidate) => candidate.prefix === name);
+  if (!group) {
+    unknownHelpTarget(groups, path);
+    return;
+  }
+
+  if (visible(group.commands).length === 0) {
+    // Every command gated away — say what invoking it would say.
+    if (group.hiddenHelp) group.hiddenHelp();
+    else unknownHelpTarget(groups, path);
+    return;
+  }
+
+  if (!sub) {
+    console.log(renderGroup(group));
+    console.log(`\nRun 'phantom help ${name} <subcommand>' for one in full.`);
+    return;
+  }
+
+  const command = group.commands[sub];
+  if (!command) {
+    unknownHelpTarget(groups, path);
+    return;
+  }
+
+  // Asking for help on a gated command is asking to use it: let the refusing
+  // handler explain PHANTOM_ADMIN_MODE rather than printing usage for
+  // something that will not run.
+  if (command.hidden) {
+    const refuse = command.multiArgHandler ?? command.handler;
+    if (refuse) {
+      refuse();
+      return;
+    }
+    unknownHelpTarget(groups, path);
+    return;
+  }
+
+  console.log(renderCommand(name, sub, command));
+}
+
+function showIndex(groups: CommandGroup[]) {
   console.log(`phantom ${VERSION} — the macOS VM orchestrator
 
 Usage
-  phantom <command> <subcommand> [options]
+  phantom <command> [subcommand] [options]
 
-${sections}
+Commands
+${renderIndex(groups)}
+
+Run 'phantom help <command>' for a command's subcommands, or add --help to any
+of them.
 
 Examples
   phantom image list
@@ -63,4 +149,12 @@ Examples
   phantom vm exec <id> --user admin -- sw_vers
   phantom gitlab-runner setup --token glrt-xxx
 `);
+}
+
+function unknownHelpTarget(groups: CommandGroup[], path: string[]) {
+  console.error(`No help for '${path.join(" ")}'`);
+  console.error("");
+  console.error("Commands");
+  console.error(renderIndex(groups));
+  process.exit(1);
 }

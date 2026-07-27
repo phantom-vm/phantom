@@ -2,9 +2,23 @@
 
 CLI that sends JSON-RPC requests to the daemon.
 
-**One binary, one entry point** (`src/main.ts`, built by `bun run build`), with the image-authoring commands (`ipsw`, `image build`, `image publish`, `vm boot-script`) gated behind the `PHANTOM_ADMIN_MODE` env var — `src/admin.ts`. Outside admin mode they are hidden from `phantom help` and answer with an error naming the variable rather than "unknown subcommand". This is presentation only: the commands are compiled into every binary, and the daemon API keeps all endpoints regardless of what the caller is showing in its help. It is explicitly **not** an access-control boundary. (Earlier versions shipped two binaries from two entry points, `main.ts` and `main-admin.ts`, so the user build's import graph excluded the authoring code; that saved 16KB on a 63MB binary — the Bun runtime dominates — and cost two release assets and two build scripts, so it was collapsed.) Each `commands/*.ts` module exports `Command` records — usage/description bundled with the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`).
+**One binary, one entry point** (`src/main.ts`, built by `bun run build`), with the image-authoring commands (`ipsw`, `image build`, `image publish`, `vm boot-script`) gated behind the `PHANTOM_ADMIN_MODE` env var — `src/admin.ts`. Outside admin mode they are hidden from `phantom help` and answer with an error naming the variable rather than "unknown subcommand". This is presentation only: the commands are compiled into every binary, and the daemon API keeps all endpoints regardless of what the caller is showing in its help. It is explicitly **not** an access-control boundary. (Earlier versions shipped two binaries from two entry points, `main.ts` and `main-admin.ts`, so the user build's import graph excluded the authoring code; that saved 16KB on a 63MB binary — the Bun runtime dominates — and cost two release assets and two build scripts, so it was collapsed.) Each `commands/*.ts` module exports `Command` records — usage, description, option detail and the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`).
 
 **Entry point**: `phantom-cli/src/main.ts` — argument routing in `router.ts`, help rendering in `command.ts`/`cli.ts`, handlers under `commands/`.
+
+**Help is three levels**, so the top of it stays an index rather than a specification:
+
+| Level | Reached by | Shows |
+|-------|-----------|-------|
+| Index | `phantom`, `phantom help` | One line per top-level command, no flags |
+| Group | `phantom help vm`, `phantom vm --help` | That command's subcommands and their argument forms |
+| Command | `phantom help vm deploy`, `phantom vm deploy --help` | One subcommand: description, usage, options |
+
+A `Command` carries `details` — its option lines — beside `usage` and `description`, and a handler that rejects its arguments prints the same block through `usageError`. So the text a user reads after a mistake is the text they get from asking, and neither can drift from the other. Option detail therefore lives in the module that implements the command (`build.ts` and `publish.ts` export their own `Command`, which `image.ts` only aggregates), next to the parser that has to honour it.
+
+`--help`/`-h` is intercepted in `cli.ts` before routing, so no handler ever sees it — several parse strictly and would reject it, which is how `image build --help` used to arrive as a usage error and exit 1. Only a help flag *before* a `--` separator counts: in `phantom vm exec <id> -- ls --help` the flag belongs to `ls`, in the guest.
+
+Admin gating runs through help unchanged: a gated command is absent from every index, and asking for help on one runs the same refusal that invoking it does, so it explains `PHANTOM_ADMIN_MODE` rather than answering "no help for that". A group whose commands are *all* gated (`ipsw`) refuses through `CommandGroup.hiddenHelp`.
 
 **File Structure**:
 ```

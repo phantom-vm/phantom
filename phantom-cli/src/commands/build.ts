@@ -1,5 +1,6 @@
 import { sendRequest } from "../lib/api";
 import { waitForVMRunning } from "../lib/wait";
+import { usageError, type Command } from "../command";
 
 // MARK: - image build orchestrator
 //
@@ -88,27 +89,37 @@ async function readScriptLines(path: string): Promise<string[]> {
     .filter((l) => l.length > 0 && !l.startsWith("#"));
 }
 
+/// image.ts aggregates this into the admin command set; declaring it here keeps
+/// the help text next to the handler that has to honour it.
+export const buildCommand: Command = {
+  usage: "<name> [options]",
+  description: "IPSW → agent install → provision → save, unattended",
+  details: [
+    "--ipsw <id>            IPSW to install from (default: the only downloaded one)",
+    "--image <name>         Layer onto an existing image instead of installing macOS",
+    "                       (skips Setup Assistant and provisioning)",
+    "--boot-script <path>   Setup Assistant script (default: provision/setup-tahoe.txt)",
+    "--provision <path>     Provision script (default: provision/provision.sh)",
+    "--agent-url <url>      phantom-agent-install.sh for the boot script to fetch, instead of",
+    "                       the latest GitHub release asset (for agent development)",
+    "--xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,",
+    "                       local path served to the guest over HTTP)",
+    "--xcode-script <path>  Xcode installer script (default: provision/install-xcode.sh)",
+    "--gitlab-runner        Bake gitlab-runner into a base build (default: only",
+    "                       layered --image builds get it — those are what CI runs on)",
+    "--no-gitlab-runner     Skip baking gitlab-runner into a layered build",
+    "--gitlab-runner-version <v>  Runner version to bake in (default: the script's pin)",
+    "--gitlab-runner-script <path>  (default: provision/install-gitlab-runner.sh)",
+    "--replace              Overwrite an existing image of the same name",
+    "--keep-vm              Keep the intermediate VM after saving",
+  ],
+  multiArgHandler: imageBuild,
+};
+
 export async function imageBuild(...args: string[]) {
   const opts = parseArgs(args);
   if (!opts) {
-    console.error("Usage: phantom image build <image-name> [options]");
-    console.error("  --ipsw <id>            IPSW to install from (default: the only downloaded one)");
-    console.error("  --image <name>         Layer onto an existing image instead of installing macOS");
-    console.error("                         (skips Setup Assistant and provisioning)");
-    console.error("  --boot-script <path>   Setup Assistant script (default: provision/setup-tahoe.txt)");
-    console.error("  --provision <path>     Provision script (default: provision/provision.sh)");
-    console.error("  --agent-url <url>      phantom-agent-install.sh for the boot script to fetch, instead of");
-    console.error("                         the latest GitHub release asset (for agent development)");
-    console.error("  --xcode <url|path>     Install Xcode from this .xip (URL fetched inside the guest,");
-    console.error("                         local path served to the guest over HTTP)");
-    console.error("  --xcode-script <path>  Xcode installer script (default: provision/install-xcode.sh)");
-    console.error("  --gitlab-runner        Bake gitlab-runner into a base build (default: only");
-    console.error("                         layered --image builds get it — those are what CI runs on)");
-    console.error("  --no-gitlab-runner     Skip baking gitlab-runner into a layered build");
-    console.error("  --gitlab-runner-version <v>  Runner version to bake in (default: the script's pin)");
-    console.error("  --gitlab-runner-script <path>  (default: provision/install-gitlab-runner.sh)");
-    console.error("  --replace              Overwrite an existing image of the same name");
-    console.error("  --keep-vm              Keep the intermediate VM after saving");
+    usageError("image", "build", buildCommand);
     process.exit(1);
   }
 

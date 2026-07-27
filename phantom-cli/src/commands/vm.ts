@@ -1,6 +1,6 @@
 import { sendRequest, type VM } from "../lib/api";
 import { waitForVMRunning } from "../lib/wait";
-import type { Command } from "../command";
+import { usageError, type Command } from "../command";
 
 export async function vmDeploy(...args: string[]) {
   // Parse flags
@@ -45,18 +45,9 @@ export async function vmDeploy(...args: string[]) {
   // Validate flags
   const sources = [fromVm, fromIpsw, fromImage].filter(Boolean);
   if (sources.length === 0) {
-    console.error(
-      "Error: Must specify one of --ipsw, --template-vm, or --image"
-    );
-    console.error("Usage:");
-    console.error("  phantom vm deploy --ipsw <ipsw-id>");
-    console.error("  phantom vm deploy --template-vm <vm-id>");
-    console.error("  phantom vm deploy --image <image-name>");
+    console.error("Error: Must specify one of --image, --ipsw, or --template-vm");
     console.error("");
-    console.error("Options:");
-    console.error("  --name <name>    Name the VM (default: a generated vm-xxxxxxxx)");
-    console.error("  --cpu <n>        CPU count (default: 4)");
-    console.error("  --memory <gb>    Memory in GB (default: 16)");
+    usage("deploy");
     process.exit(1);
   }
 
@@ -155,8 +146,9 @@ export async function vmList() {
 
 export async function vmStart(vmId: string) {
   if (!vmId) {
-    console.error("Error: VM_ID required");
-    console.error("Usage: phantom vm start <VM_ID>");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("start");
     process.exit(1);
   }
 
@@ -177,8 +169,9 @@ export async function vmStart(vmId: string) {
 
 export async function vmStop(vmId: string) {
   if (!vmId) {
-    console.error("Error: VM_ID required");
-    console.error("Usage: phantom vm stop <VM_ID>");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("stop");
     process.exit(1);
   }
 
@@ -201,7 +194,9 @@ export async function vmExec(...args: string[]) {
   // Parse: <vm-id> [--user <name>] -- <command> [args...]
   const dashDashIndex = args.indexOf("--");
   if (dashDashIndex === -1 || dashDashIndex === 0) {
-    console.error("Usage: phantom vm exec <VM_ID> [--user <name>] -- <command> [args...]");
+    console.error("Error: a -- separator followed by the command is required");
+    console.error("");
+    usage("exec");
     process.exit(1);
   }
 
@@ -241,8 +236,9 @@ export async function vmExec(...args: string[]) {
 
 export async function vmDisplay(vmId: string) {
   if (!vmId) {
-    console.error("Error: VM_ID required");
-    console.error("Usage: phantom vm display <VM_ID>");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("display");
     process.exit(1);
   }
 
@@ -264,8 +260,9 @@ export async function vmVnc(...args: string[]) {
   const vmId = args.find((a) => !a.startsWith("--"));
 
   if (!vmId) {
-    console.error("Error: VM_ID required");
-    console.error("Usage: phantom vm vnc <VM_ID> [--stop]");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("vnc");
     process.exit(1);
   }
 
@@ -303,7 +300,8 @@ export async function vmBootScript(...args: string[]) {
   const vmId = args.find((a, i) => !a.startsWith("--") && i !== fileIndex + 1);
 
   if (!vmId || !filePath) {
-    console.error("Usage: phantom vm boot-script <VM_ID> --file <script>");
+    console.error("");
+    usage("boot-script");
     console.error(
       "Script file: one boot command per line, blank lines and # comments ignored"
     );
@@ -380,7 +378,9 @@ export async function vmScreenshot(...args: string[]) {
   const vmId = args.find((a, i) => !a.startsWith("--") && i !== outIndex + 1);
 
   if (!vmId) {
-    console.error("Usage: phantom vm screenshot <VM_ID> [--out <path>]");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("screenshot");
     process.exit(1);
   }
 
@@ -402,8 +402,9 @@ export async function vmScreenshot(...args: string[]) {
 
 export async function vmDelete(vmId: string) {
   if (!vmId) {
-    console.error("Error: VM_ID required");
-    console.error("Usage: phantom vm delete <VM_ID>");
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("delete");
     process.exit(1);
   }
 
@@ -423,16 +424,51 @@ export async function vmDelete(vmId: string) {
 }
 
 export const commands: Record<string, Command> = {
-  deploy: { usage: "--image <name> [--name <id>] [--cpu <n>] [--memory <gb>]", description: "Boot a VM (also: --ipsw <id>, --template-vm <id>)", multiArgHandler: vmDeploy },
+  deploy: {
+    usage: "--image <name> [options]",
+    description: "Boot a VM from an image, an IPSW or another VM",
+    details: [
+      "--image <name>      Boot from a local image",
+      "--ipsw <id>         Install macOS from a downloaded IPSW instead",
+      "--template-vm <id>  Clone an existing VM instead",
+      "--name <id>         Name the VM (default: a generated vm-xxxxxxxx)",
+      "--cpu <n>           CPU count (default: 4)",
+      "--memory <gb>       Memory in GB (default: 16)",
+    ],
+    multiArgHandler: vmDeploy,
+  },
   list: { usage: "", description: "List VMs and their state", handler: vmList as Command["handler"] },
   start: { usage: "<id>", description: "Start a VM", handler: vmStart as Command["handler"] },
   stop: { usage: "<id>", description: "Stop a VM", handler: vmStop as Command["handler"] },
-  exec: { usage: "<id> [--user <name>] -- <cmd>", description: "Run a command inside a VM over vsock", multiArgHandler: vmExec },
+  exec: {
+    usage: "<id> [--user <name>] -- <cmd> [args...]",
+    description: "Run a command inside a VM over vsock",
+    details: [
+      "--user <name>  Run as this user through a login shell, which is what a CI",
+      "               job gets. Without it the command runs as root without one,",
+      "               on a PATH that excludes /usr/local/bin — so a binary",
+      "               installed there reads as missing.",
+    ],
+    multiArgHandler: vmExec,
+  },
   display: { usage: "<id>", description: "Open the VM's display window", handler: vmDisplay as Command["handler"] },
-  vnc: { usage: "<id> [--stop]", description: "Start/stop host-side VNC (vnc://...)", multiArgHandler: vmVnc },
-  screenshot: { usage: "<id> [--out <path>]", description: "Capture the VM's framebuffer", multiArgHandler: vmScreenshot },
+  vnc: {
+    usage: "<id> [--stop]",
+    description: "Start/stop host-side VNC (vnc://...)",
+    details: ["--stop  Stop the VNC server instead of starting it"],
+    multiArgHandler: vmVnc,
+  },
+  screenshot: {
+    usage: "<id> [--out <path>]",
+    description: "Capture the VM's framebuffer",
+    details: ["--out <path>  Write the PNG here (default: a temp file, whose path is printed)"],
+    multiArgHandler: vmScreenshot,
+  },
   delete: { usage: "<id>", description: "Delete a VM", handler: vmDelete as Command["handler"] },
 };
+
+/// A handler's usage-error path — same text as `phantom help vm <name>`.
+const usage = (name: string) => usageError("vm", name, commands[name] ?? adminCommands[name]!);
 
 // Image authoring: main.ts registers these only under PHANTOM_ADMIN_MODE.
 export const adminCommands: Record<string, Command> = {

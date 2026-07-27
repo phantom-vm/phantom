@@ -1,6 +1,6 @@
 import { sendRequest } from "../lib/api";
-import { imageBuild } from "./build";
-import { imagePublish } from "./publish";
+import { buildCommand } from "./build";
+import { publishCommand } from "./publish";
 import {
   fetchCatalog,
   formatGB,
@@ -8,7 +8,7 @@ import {
   resolve,
   type Catalog,
 } from "../lib/catalog";
-import type { Command } from "../command";
+import { usageError, type Command } from "../command";
 
 interface LocalImage {
   name: string;
@@ -99,7 +99,9 @@ export async function imageList() {
 
 export async function imageDelete(name?: string) {
   if (!name) {
-    console.error("Usage: phantom image delete <name>");
+    console.error("Error: image name required");
+    console.error("");
+    usage("delete");
     process.exit(1);
   }
 
@@ -121,7 +123,9 @@ export async function imageSave(...args: string[]) {
   const replace = args.includes("--replace");
 
   if (positional.length < 2) {
-    console.error("Usage: phantom image save <vmId> <imageName> [--replace]");
+    console.error("Error: a VM id and an image name are both required");
+    console.error("");
+    usage("save");
     process.exit(1);
   }
 
@@ -167,9 +171,9 @@ export async function imagePush(...args: string[]) {
   }
 
   if (!name || !reference) {
-    console.error("Usage: phantom image push <imageName> <registry/namespace:tag>");
-    console.error("  --username <user>    Registry username");
-    console.error("  --password <pass>    Registry password");
+    console.error("Error: an image name and a target reference are both required");
+    console.error("");
+    usage("push");
     process.exit(1);
   }
 
@@ -210,12 +214,9 @@ export async function imagePull(...args: string[]) {
   }
 
   if (!reference) {
-    console.error("Usage: phantom image pull <name | registry/namespace:tag> [--name <localName>]");
-    console.error("  <name>               Catalog image, e.g. 'xcode-26-6' (see 'phantom image list')");
-    console.error("  --name <name>        Local image name (default: derived from reference)");
-    console.error("  --force              Replace an image that is already present");
-    console.error("  --username <user>     Registry username");
-    console.error("  --password <pass>     Registry password");
+    console.error("Error: an image name or a registry reference is required");
+    console.error("");
+    usage("pull");
     process.exit(1);
   }
 
@@ -310,22 +311,43 @@ async function resolveExisting(
 
 export const commands: Record<string, Command> = {
   list: { usage: "", description: "List local images (default with no subcommand)", handler: imageList as Command["handler"] },
-  save: { usage: "<vmId> <name>", description: "Save a stopped VM as a local image", multiArgHandler: imageSave },
-  push: { usage: "<name> <registry:tag>", description: "Push a local image to an OCI registry", multiArgHandler: imagePush },
-  pull: { usage: "<registry:tag> [--name <localName>]", description: "Pull an image from an OCI registry", multiArgHandler: imagePull },
+  save: {
+    usage: "<vmId> <name> [--replace]",
+    description: "Save a stopped VM as a local image",
+    details: ["--replace  Overwrite an existing image of the same name"],
+    multiArgHandler: imageSave,
+  },
+  push: {
+    usage: "<name> <registry:tag>",
+    description: "Push a local image to an OCI registry",
+    details: [
+      "--username <user>  Registry username",
+      "--password <pass>  Registry password",
+    ],
+    multiArgHandler: imagePush,
+  },
+  pull: {
+    usage: "<name | registry:tag> [options]",
+    description: "Pull an image from the catalog or an OCI registry",
+    details: [
+      "<name>             Catalog image, e.g. 'xcode-26-6' (see 'phantom image list')",
+      "--name <name>      Local image name (default: derived from the reference)",
+      "--force            Replace an image that is already present",
+      "--username <user>  Registry username",
+      "--password <pass>  Registry password",
+    ],
+    multiArgHandler: imagePull,
+  },
   delete: { usage: "<name>", description: "Delete a local image", handler: imageDelete as Command["handler"] },
 };
 
 // Image authoring: main.ts registers these only under PHANTOM_ADMIN_MODE.
+// Both are declared in the module that implements them, so the option detail
+// and the parser that enforces it stay in one file.
 export const adminCommands: Record<string, Command> = {
-  build: {
-    usage: "<name> [options]",
-    description: "IPSW → agent install → provision → save, unattended",
-    multiArgHandler: imageBuild,
-  },
-  publish: {
-    usage: "<name> [--description <text>]",
-    description: "Push a local image and list it in the public catalog",
-    multiArgHandler: imagePublish,
-  },
+  build: buildCommand,
+  publish: publishCommand,
 };
+
+/// A handler's usage-error path — same text as `phantom help image <name>`.
+const usage = (name: string) => usageError("image", name, commands[name] ?? adminCommands[name]!);

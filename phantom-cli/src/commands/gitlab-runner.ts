@@ -3,13 +3,23 @@ import { waitForVMRunning } from "../lib/wait";
 import { unlinkSync } from "node:fs";
 import { basename } from "node:path";
 import { homedir } from "node:os";
-import type { Command } from "../command";
+import { usageError, type Command } from "../command";
 
 // gitlab-runner takes its whole arg vector (see the export at the bottom) and
 // routes internally, so these entries have no handler — they exist purely to
 // document the pseudo-subcommands for help rendering.
 export const commands: Record<string, Command> = {
-  setup: { usage: "--token <glrt-...> [--url <url>] [--concurrent <n>]", description: "Register + start a managed runner (one-time)" },
+  setup: {
+    usage: "--token <glrt-...> [options]",
+    description: "Register + start a managed runner (one-time)",
+    details: [
+      "--token <token>   Runner authentication token (create under Settings → CI/CD → Runners)",
+      "--url <url>       GitLab instance URL (default: https://gitlab.com)",
+      "--concurrent <n>  Max concurrent jobs (default: 1)",
+      "",
+      "Jobs choose their VM image with the 'image:' keyword (phantom image list).",
+    ],
+  },
   status: { usage: "", description: "Show runner state" },
   start: { usage: "", description: "Start the runner (also happens automatically on daemon launch)" },
   stop: { usage: "", description: "Stop the runner" },
@@ -174,12 +184,9 @@ async function setup(args: string[]) {
   }
 
   if (!token) {
-    console.error("Usage: phantom gitlab-runner setup --token <glrt-...> [--url <gitlab-url>] [--concurrent <n>]");
-    console.error("\nOptions:");
-    console.error("  --token <token>      Runner authentication token (create under Settings → CI/CD → Runners)");
-    console.error("  --url <url>          GitLab instance URL (default: https://gitlab.com)");
-    console.error("  --concurrent <n>     Max concurrent jobs (default: 1)");
-    console.error("\nJobs choose their VM image with the 'image:' keyword (phantom image list).");
+    console.error("Error: --token is required");
+    console.error("");
+    usageError("gitlab-runner", "setup", commands.setup!);
     process.exit(1);
   }
 

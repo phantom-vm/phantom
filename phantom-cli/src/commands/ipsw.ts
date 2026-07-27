@@ -198,6 +198,19 @@ async function pollDownload() {
 }
 
 export const commands: Record<string, Command> = {
-  list: { usage: "[--include-betas]", description: "List downloadable macOS restore images", multiArgHandler: ipswList },
-  pull: { usage: "[version|build]", description: "Download one (default: latest supported)", handler: ipswPull as Command["handler"] },
+  list: {
+    usage: "[--include-betas]",
+    description: "List downloadable macOS restore images",
+    details: ["--include-betas  Include beta builds (default: the release channel only)"],
+    multiArgHandler: ipswList,
+  },
+  pull: {
+    usage: "[version|build]",
+    description: "Download one (default: latest supported)",
+    details: [
+      "<version>  A macOS version, e.g. '26.5' — must match exactly one build",
+      "<build>    A build id, e.g. '25F84', when a version is ambiguous",
+    ],
+    handler: ipswPull as Command["handler"],
+  },
 };

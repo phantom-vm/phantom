@@ -8,6 +8,7 @@ import {
   type CatalogEntry,
 } from "../lib/catalog";
 import { RegistryClient, credentialsFor, pushArtifact, parseRef } from "../lib/oci";
+import { usageError, type Command } from "../command";
 
 // MARK: - image publish
 //
@@ -41,14 +42,24 @@ function parseArgs(args: string[]): PublishOptions | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/// image.ts aggregates this into the admin command set; declaring it here keeps
+/// the help text next to the handler that has to honour it.
+export const publishCommand: Command = {
+  usage: "<name> [--description <text>]",
+  description: "Push a local image and list it in the public catalog",
+  details: [
+    "--description <text>  One-line description for the catalog",
+    `--repository <repo>   Target repository (default: ${DEFAULT_NAMESPACE}/<name>)`,
+    "--tag <tag>           Tag to push (default: latest)",
+    "--catalog-only        Re-publish the catalog entry without re-pushing blobs",
+  ],
+  multiArgHandler: imagePublish,
+};
+
 export async function imagePublish(...args: string[]) {
   const opts = parseArgs(args);
   if (!opts) {
-    console.error("Usage: phantom image publish <name> [options]");
-    console.error("  --description <text>   One-line description for the catalog");
-    console.error(`  --repository <repo>    Target repository (default: ${DEFAULT_NAMESPACE}/<name>)`);
-    console.error("  --tag <tag>            Tag to push (default: latest)");
-    console.error("  --catalog-only         Re-publish the catalog entry without re-pushing blobs");
+    usageError("image", "publish", publishCommand);
     process.exit(1);
   }
 

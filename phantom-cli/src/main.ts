@@ -28,17 +28,30 @@ runCli(() => ({
     update: updateCommand,
   },
   groups: [
-    { title: "VMs", prefix: "vm", commands: vmAll },
-    { title: "Images", prefix: "image", commands: imageAll },
-    { title: "GitLab CI", prefix: "gitlab-runner", commands: gitlabRunnerHelp },
-    { title: "IPSW (image authoring)", prefix: "ipsw", commands: ipswAll },
+    { title: "VMs", prefix: "vm", summary: "Boot, run commands in, and delete VMs", commands: vmAll },
+    { title: "Images", prefix: "image", summary: "Local images and the registry they come from", commands: imageAll },
+    {
+      title: "GitLab CI",
+      prefix: "gitlab-runner",
+      summary: "The managed GitLab CI runner",
+      commands: gitlabRunnerHelp,
+    },
+    {
+      title: "IPSW (image authoring)",
+      prefix: "ipsw",
+      summary: "macOS restore images",
+      // Outside admin mode every ipsw command is hidden, so `help ipsw` has
+      // nothing to list — refuse the way `phantom ipsw` itself does.
+      hiddenHelp: refuse("ipsw"),
+      commands: ipswAll,
+    },
     {
       title: "Other",
       prefix: "",
       commands: {
         health: healthCommand,
         update: updateCommand,
-        help: { usage: "", description: "Show this help" },
+        help: { usage: "[command [subcommand]]", description: "Show help for a command" },
       },
     },
   ],
