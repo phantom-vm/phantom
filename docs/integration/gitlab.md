@@ -94,15 +94,25 @@ test:
 ```
 
 The custom executor runs a job's upload stages *inside* the VM, so they need
-`gitlab-runner` there — every phantom-built image bakes it in. If a job logs
+`gitlab-runner` there. Layered builds bake it in; a base image does not, since
+plenty of VMs are never used for CI at all. Naming one in a job's `image:` is
+therefore fine right up until the job wants an artifact — at which point the
+runner skips the stage and **the job still passes**, with the artifact simply
+never arriving.
+
+Prepare warns rather than letting that happen quietly:
 
 ```
-Missing gitlab-runner. Uploading artifacts is disabled.
+[phantom] WARNING: 'tahoe-base' has no gitlab-runner in the guest.
+[phantom] WARNING: artifacts and cache stages will be skipped and this job
+[phantom] WARNING: will still report success. Please use an image built with
+[phantom] WARNING: gitlab-runner installed if this job needs them.
 ```
 
-the image predates that (or was built with `--no-gitlab-runner`): rebuild it
-with `phantom image build <name> --image <name> --replace`, rather than curling
-the binary in a `before_script`.
+The fix is to build the image with the binary in it — layer it
+(`phantom image build <name> --image <name> --replace`) or pass
+`--gitlab-runner` to a base build — rather than curling the binary in a
+`before_script`. A job that needs no artifacts or cache can ignore the warning.
 
 > **Note**: Each job creates a fresh VM by decompressing the image, which takes a few minutes. That cost buys a clean, reproducible environment from a pinned image on every run.
 

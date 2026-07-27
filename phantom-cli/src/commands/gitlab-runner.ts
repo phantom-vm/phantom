@@ -43,6 +43,14 @@ function stateFilePath(jobId: string): string {
   return `/tmp/phantom-gitlab-runner-${jobId}`;
 }
 
+/// Who the job's commands run as. Job scripts run as the admin user by default
+/// — macOS CI tooling (brew, xcodebuild, simulators) misbehaves as root.
+/// Override with a PHANTOM_EXEC_USER CI variable; "root" skips the user wrap
+/// entirely, since a bare exec is already root.
+function execUser(): string {
+  return process.env.CUSTOM_ENV_PHANTOM_EXEC_USER ?? "admin";
+}
+
 async function prepare() {
   const jobId = getJobId();
   // The image comes from the job's `image:` keyword (default: or job-level)
@@ -91,9 +99,47 @@ async function prepare() {
     process.exit(SYSTEM_FAILURE);
   }
 
-  // 4. Persist VM ID for run/cleanup steps
+  // 4. Say so if the guest cannot upload artifacts or touch the cache
+  await warnIfNoGitLabRunner(vmId, baseImage);
+
+  // 5. Persist VM ID for run/cleanup steps
   await Bun.write(stateFilePath(jobId), vmId);
   console.error(`[phantom] VM ${vmId} ready`);
+}
+
+/// GitLab runs the artifact and cache stages inside the guest too, by shelling
+/// out to `gitlab-runner artifacts-uploader` / `cache-archiver`. With no such
+/// binary the runner skips those stages and the job still passes — the artifact
+/// simply never arrives. Only layered builds bake it in, so a job that names a
+/// base image hits this, and nothing in the job log explains it.
+///
+/// A warning rather than a failure: a lean image is a legitimate choice for a
+/// job that only runs a script, and the defect here is the silence, not the
+/// missing binary.
+async function warnIfNoGitLabRunner(vmId: string, image: string) {
+  // Probed exactly the way the job resolves it. GitLab runs the uploader
+  // through the same run_exec path as the script, so the user wrap has to
+  // match: a bare exec is root with PATH /usr/bin:/bin:/usr/sbin:/sbin, which
+  // cannot see /usr/local/bin and would warn about every image.
+  const user = execUser();
+  const resp = await sendRequest({
+    method: "vm.exec",
+    params: {
+      vmId,
+      command: "command -v gitlab-runner",
+      ...(user !== "root" && { user }),
+    },
+  });
+
+  // A probe that could not run tells us nothing about the image, so it stays
+  // quiet rather than guessing.
+  if (resp.error || resp.result?.exitCode == null) return;
+  if (resp.result.exitCode === 0) return;
+
+  console.error(`[phantom] WARNING: '${image}' has no gitlab-runner in the guest.`);
+  console.error(`[phantom] WARNING: artifacts and cache stages will be skipped and this job`);
+  console.error(`[phantom] WARNING: will still report success. Please use an image built with`);
+  console.error(`[phantom] WARNING: gitlab-runner installed if this job needs them.`);
 }
 
 async function run(scriptPath: string) {
@@ -124,17 +170,14 @@ async function run(scriptPath: string) {
   const base64 = Buffer.from(fullScript).toString("base64");
   const command = `printf '%s' '${base64}' | base64 -d | sh`;
 
-  // Job scripts run as the admin user by default — macOS CI tooling (brew,
-  // xcodebuild, simulators) misbehaves as root. Override with a
-  // PHANTOM_EXEC_USER CI variable; "root" skips the user wrap entirely.
-  const execUser = process.env.CUSTOM_ENV_PHANTOM_EXEC_USER ?? "admin";
+  const user = execUser();
 
   // Execute in VM with streaming output
   let exitCode = BUILD_FAILURE;
   const result = await sendStreamingRequest(
     {
       method: "vm.execStream",
-      params: { vmId, command, ...(execUser !== "root" && { user: execUser }) },
+      params: { vmId, command, ...(user !== "root" && { user }) },
     },
     (chunk) => {
       if (chunk.type === "stdout" && chunk.data) process.stdout.write(chunk.data);
