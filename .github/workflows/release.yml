@@ -33,7 +33,7 @@ jobs:
     outputs:
       tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0 # need the tag history to compute the next version
@@ -73,7 +73,7 @@ jobs:
     needs: cut
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.cut.outputs.tag }}
 
