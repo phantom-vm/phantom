@@ -55,17 +55,25 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
 - **Sidebar** — two groups. The things the daemon manages (VMs, Images), each with
   a live count, then a **Daemon** group for the daemon itself: its Log and its
   Integrations.
-- **List column** — the selected section's items. Actions belonging to the
-  collection rather than to one item live in the toolbar: VMs has a filter menu,
-  Images its rescan/refresh, while the VMs **+** sits over the detail column
-  (below). An image
-  operation running anywhere — including one the CLI started, since
-  `OCIImageManager.state` is shared — shows as a progress banner above the list.
-  Images has a **Local / Catalog** switch: Catalog lists what the published
-  catalog offers, marking what is already on disk, and its detail pane pulls the
-  entry by `repository@digest`. The catalog is fetched on first visit to that
-  tab, not at launch — a daemon nobody opens the tab on never reaches out to a
-  registry.
+- **List column** — the selected section's items, and only ever what this Mac
+  has. Actions belonging to the collection rather than to one item live in the
+  toolbar: VMs has a filter menu, Images its rescan/refresh, while both sections'
+  **+** sits over the detail column (below). An image operation running anywhere
+  — including one the CLI started, since `OCIImageManager.state` is shared —
+  shows as a progress banner above the list.
+- **Acquiring vs. having** — a list column shows what you have; getting another
+  one is an action, and actions are sheets behind the **+**. `CreateVMSheet`
+  restores a VM from a local image, `PullImageSheet` lists the published catalog
+  and pulls the chosen entry by `repository@digest`. The catalog is fetched when
+  that sheet first opens, not at launch — a daemon nobody asks for an image on
+  never reaches out to a registry. Images used to carry a **Local / Catalog**
+  switch instead; two kinds of thing in one column is what forced the switch, and
+  made a single selection binding serve two id spaces.
+- **One sheet per intent, not per entry point** — an image's own *Create VM*
+  opens `CreateVMSheet` with the image prefilled rather than creating a VM
+  outright, so a VM started from an image gets the same naming and sizing as one
+  started from the **+**. The sheet is presented by item, not by a flag, so each
+  request rebuilds it and the prefill takes.
 - **Detail pane** — everything about the selected item, including the lifecycle
   buttons and the exec console; `ContentUnavailableView` when nothing is
   selected. Both panes look their item up by id on every render, so one deleted
@@ -181,9 +189,8 @@ load-bearing in a way worth writing down:
   empty, it drifts to the window's trailing edge instead.
 
 So the VM filter menu is doing two jobs: it is the list column's own control, and
-it is what holds the **+** in place. In the Images section, where the detail column
-has no item, the content column's refresh sits at the window's trailing edge
-instead.
+it is what holds the **+** in place. The Images section works the same way, with
+its refresh button playing the filter menu's part.
 
 ## GUI Reactivity
 

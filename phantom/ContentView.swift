@@ -50,9 +50,22 @@ struct ContentView: View {
     @State private var section: SidebarSection? = .vms
     @State private var selectedVMId: String?
     @State private var selectedImageName: String?
-    @State private var imageScope: ImageScope = .local
     @State private var selectedIntegration: Integration? = .gitlabRunner
-    @State private var creatingVM = false
+    @State private var pullingImage = false
+
+    /// The New VM sheet, and the image it opens with. Non-nil is what presents
+    /// it — the '+' passes an empty string, an image's own Create VM passes its
+    /// name. Presented by item rather than a flag so the sheet is rebuilt per
+    /// request and its prefill takes.
+    @State private var newVMRequest: NewVMRequest?
+
+    /// Carries the prefill into `.sheet(item:)`, which needs something
+    /// Identifiable — a bare String is not, and conforming the stdlib's is a
+    /// heavier thing to do than naming the request.
+    private struct NewVMRequest: Identifiable {
+        let id = UUID()
+        let image: String
+    }
 
     /// Listing images walks the images directory, so it is cached here — both
     /// the list and the detail pane read this copy — and reloaded when an image
@@ -122,16 +135,32 @@ struct ContentView: View {
                 if currentSection == .vms {
                     ToolbarItem {
                         Button {
-                            creatingVM = true
+                            newVMRequest = NewVMRequest(image: "")
                         } label: {
                             Label("New VM", systemImage: "plus")
                         }
                         .help("Create a VM from a local image")
                     }
                 }
+                if currentSection == .images {
+                    ToolbarItem {
+                        Button {
+                            pullingImage = true
+                        } label: {
+                            Label("Pull Image", systemImage: "plus")
+                        }
+                        .help("Pull a published image")
+                    }
+                }
             }
-            .sheet(isPresented: $creatingVM) {
-                CreateVMSheet(vm: vm, onCreated: { selectedVMId = $0 })
+            .sheet(item: $newVMRequest) { request in
+                CreateVMSheet(vm: vm, image: request.image) { vmId in
+                    selectedVMId = vmId
+                    section = .vms
+                }
+            }
+            .sheet(isPresented: $pullingImage) {
+                PullImageSheet(vm: vm, onPullStarted: reloadImages)
             }
     }
 
@@ -150,13 +179,9 @@ struct ContentView: View {
             ImageListView(
                 vm: vm,
                 images: images,
-                scope: $imageScope,
                 selection: $selectedImageName,
                 onRefresh: reloadImages
             )
-            // Local and catalog names live in one selection, so switching tabs
-            // must not leave a stale one behind.
-            .onChange(of: imageScope) { selectedImageName = nil }
         case .integration:
             IntegrationListView(vm: vm, selection: $selectedIntegration)
         case .log:
@@ -189,14 +214,6 @@ struct ContentView: View {
             } else {
                 noSelection("No Selection", description: "Select a virtual machine to see its details.")
             }
-        case .images where imageScope == .catalog:
-            if let name = selectedImageName,
-               let entry = vm.catalogManager.entries.first(where: { $0.name == name }) {
-                CatalogDetailView(vm: vm, entry: entry, onPullStarted: reloadImages)
-                    .id(entry.name)
-            } else {
-                noSelection("No Selection", description: "Select a published image to see what it contains.")
-            }
         case .images:
             if let name = selectedImageName, let info = images.first(where: { $0.name == name }) {
                 ImageDetailView(
@@ -206,10 +223,7 @@ struct ContentView: View {
                         selectedImageName = nil
                         reloadImages()
                     },
-                    onVMCreated: { vmId in
-                        selectedVMId = vmId
-                        section = .vms
-                    }
+                    onCreateVM: { newVMRequest = NewVMRequest(image: $0) }
                 )
                 .id(info.name)
             } else {

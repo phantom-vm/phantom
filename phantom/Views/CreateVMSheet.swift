@@ -21,7 +21,15 @@ struct CreateVMSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = VMName.generate()
-    @State private var source = ""
+    @State private var source: String
+
+    /// - Parameter image: prefills the image field. An image's own "Create VM"
+    ///   opens this sheet with the name already answered; the '+' opens it empty.
+    init(vm: VMManager, image: String = "", onCreated: @escaping (String) -> Void) {
+        self.vm = vm
+        self.onCreated = onCreated
+        _source = State(initialValue: image)
+    }
     @State private var cpuCount = VMSettings.defaults.cpuCount
     @State private var memoryGB = Int(VMSettings.defaults.memorySize / (1024 * 1024 * 1024))
     @State private var errorMessage: String?
