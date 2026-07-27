@@ -85,7 +85,7 @@ phantom image build xcode-26-6 --image xcode-26-6 --replace
 `--replace` writes the new copy alongside the old one and swaps it in only when
 it is complete, so a failed build leaves the old image where it was. Budget disk
 for both at once, and note the replacement is a **local** image — it carries no
-`pulled.json`, so `image list` reports it as origin unknown. Publishing does not
+`pulled.json`, so `image catalog` reports it as origin unknown. Publishing does not
 change that: `pulled.json` records where a *pull* came from, and the build host
 never pulls its own image. On the machine that built it the mark stays until you
 pull it back; verify a publish against the registry instead (see below).
@@ -122,10 +122,10 @@ git add catalog.json && git commit -m "Publish xcode-26-6" && git push
 ```
 
 Nothing resolves until that lands on `main`, and raw.githubusercontent caches
-for a few minutes after it does. Until then `image list` simply omits the image
+for a few minutes after it does. Until then `image catalog` simply omits the image
 and `image pull <name>` says it could not reach the catalog.
 
-**A description says what the image has, not what it lacks.** `image list` is a
+**A description says what the image has, not what it lacks.** `image catalog` is a
 menu, and an entry that spends its length on absences reads as a defect report
 rather than a choice. Name the OS build and the toolchain, in that order:
 

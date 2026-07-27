@@ -7,7 +7,7 @@ over vsock, so there is nothing in the guest to log into.
 
 Requires an Apple Silicon Mac. Nothing to build: binaries come from
 [Releases](https://github.com/phantom-vm/phantom/releases) — the daemon app is
-Developer ID signed and notarized — images are published, and `image list` reads
+Developer ID signed and notarized — images are published, and `image catalog` reads
 the catalog anonymously, so this works on a machine with no credentials and no
 IPSW.
 
@@ -33,7 +33,8 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
 Then pull an image and boot a VM from it:
 
 ```
-phantom image list                       # browse the catalog
+phantom image catalog                    # browse the published images
+phantom image list                       # what's already on this machine
 phantom image pull xcode-26-6            # 58.9GB, pinned to a manifest digest
 phantom vm deploy --image xcode-26-6     # boot a VM from it
 phantom vm exec <vm-id> -- xcodebuild -version
@@ -60,7 +61,7 @@ Manage VMs and images:
 phantom vm list | start | stop | delete
 phantom vm vnc <id>              # open a VNC session to the VM's display
 phantom vm screenshot <id>       # capture its framebuffer
-phantom image list | pull | delete
+phantom image list | catalog | pull | delete
 ```
 
 `phantom` on its own lists the commands; `phantom help <command>` (or `--help`
@@ -70,7 +71,7 @@ Keep the CLI current with `phantom update`, which replaces the binary in place
 with the latest release. The daemon is updated by hand for now — download
 `phantom-daemon.zip` again.
 
-`image list` marks an image `(update available)` when the catalog has moved on
+`image catalog` marks an image `(update available)` when the catalog has moved on
 from the copy you pulled; `image pull <name>` then replaces it, and says so
 rather than re-downloading when your copy is already current.
 

@@ -37,7 +37,7 @@ Each CI job gets a fresh VM created from a local image, guaranteeing a clean and
    the usual case:
 
    ```bash
-   phantom image list
+   phantom image catalog
    phantom image pull xcode-26-6
    ```
 

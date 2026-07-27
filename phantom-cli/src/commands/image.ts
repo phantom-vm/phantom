@@ -25,11 +25,14 @@ function compareToCatalog(image: LocalImage, catalogDigest: string): "current" |
   return image.pulledFrom.digest === catalogDigest ? "current" : "stale";
 }
 
+/// What is on this machine. No catalog fetch: the commonest question about
+/// images shouldn't need the network, and comparing against what is published
+/// is `image catalog`'s job — the same split the GUI has always had between its
+/// Local and Catalog tabs.
 export async function imageList() {
-  const [response, statusResponse, catalog] = await Promise.all([
+  const [response, statusResponse] = await Promise.all([
     sendRequest({ method: "image.list" }),
     sendRequest({ method: "image.status" }),
-    fetchCatalog(),
   ]);
 
   if (response.error) {
@@ -37,23 +40,44 @@ export async function imageList() {
     process.exit(1);
   }
 
-  // Only surface a status line while an operation is actively running.
-  // completed/error/idle are skipped so a finished op doesn't linger in the
-  // listing (and so create-from-image's state can't leak in here).
-  const status = statusResponse.result;
-  const inProgress = ["saving", "pushing", "pulling"];
-  if (status && inProgress.includes(status.state)) {
-    const pct = status.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
-    console.log(`[${status.state}${pct}] ${status.message ?? ""}\n`);
-  }
+  printInProgress(statusResponse.result);
 
   const images = (response.result?.images as LocalImage[]) ?? [];
-  const local = new Map<string, LocalImage>(images.map((i) => [i.name, i]));
+  if (images.length === 0) {
+    console.log("No local images. Browse what's published with 'phantom image catalog'.");
+    return;
+  }
 
-  // Catalog images first, marked with whether they're already here, then
-  // anything local the catalog doesn't know about (locally built or pulled).
+  for (const image of images) {
+    console.log(`${image.name.padEnd(25)} ${formatGB(image.totalSize).padStart(7)}`);
+  }
+}
+
+/// What is published, and how this machine's copies compare. The marks are the
+/// reason this fetches: none of them can be derived locally.
+export async function imageCatalog() {
+  const [response, catalog] = await Promise.all([
+    sendRequest({ method: "image.list" }),
+    fetchCatalog(),
+  ]);
+
+  if (!catalog) {
+    console.error("Error: could not reach the image catalog");
+    console.error("'phantom image list' shows the images already on this machine.");
+    process.exit(1);
+  }
+
+  const local = new Map<string, LocalImage>(
+    ((response.result?.images as LocalImage[]) ?? []).map((i) => [i.name, i])
+  );
+
+  if (catalog.images.length === 0) {
+    console.log("The catalog lists no images.");
+    return;
+  }
+
   let updatable = false;
-  for (const entry of catalog?.images ?? []) {
+  for (const entry of catalog.images) {
     const have = local.get(entry.name);
     let mark = "";
     if (have) {
@@ -73,28 +97,22 @@ export async function imageList() {
     }
     console.log(`${entry.name.padEnd(25)} ${formatGB(entry.compressedSize).padStart(7)}${mark}`);
     console.log(`${" ".repeat(25)} ${entry.description}`);
-    local.delete(entry.name);
   }
 
-  if (local.size > 0) {
-    if (catalog) console.log("\nLocal only:");
-    for (const [name, image] of local) {
-      console.log(`${name.padEnd(25)} ${formatGB(image.totalSize).padStart(7)}`);
-    }
-  }
+  console.log(
+    updatable
+      ? "\nUpdate with 'phantom image pull <name>'."
+      : "\nPull one with 'phantom image pull <name>'."
+  );
+}
 
-  if (updatable) {
-    console.log("\nUpdate with 'phantom image pull <name>'.");
-  }
-
-  if (!catalog && local.size === 0) {
-    console.log("No local images, and the image catalog could not be reached.");
-    return;
-  }
-
-  if (catalog && images.length === 0) {
-    console.log("\nPull one with 'phantom image pull <name>'.");
-  }
+/// A status line, but only while an operation is actually running.
+/// completed/error/idle are skipped so a finished op doesn't linger in the
+/// listing (and so create-from-image's state can't leak in here).
+function printInProgress(status: { state?: string; progress?: number; message?: string } | undefined) {
+  if (!status?.state || !["saving", "pushing", "pulling"].includes(status.state)) return;
+  const pct = status.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
+  console.log(`[${status.state}${pct}] ${status.message ?? ""}\n`);
 }
 
 export async function imageDelete(name?: string) {
@@ -311,6 +329,7 @@ async function resolveExisting(
 
 export const commands: Record<string, Command> = {
   list: { usage: "", description: "List local images (default with no subcommand)", handler: imageList as Command["handler"] },
+  catalog: { usage: "", description: "Browse the published images and what's newer than yours", handler: imageCatalog as Command["handler"] },
   save: {
     usage: "<vmId> <name> [--replace]",
     description: "Save a stopped VM as a local image",

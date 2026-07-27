@@ -29,7 +29,7 @@ phantom-cli/
     ├── lib/api.ts       # TCP client (batch + streaming)
     └── commands/
         ├── vm.ts            # create, list, start, stop, exec, display, vnc, boot-script, screenshot, delete
-        ├── image.ts         # list, delete, save, push, pull
+        ├── image.ts         # list, catalog, delete, save, push, pull
         ├── build.ts         # image build orchestrator
         ├── ipsw.ts          # IPSW management
         ├── gitlab-runner.ts # GitLab custom executor
@@ -44,7 +44,7 @@ phantom-cli/
 5. Read response until newline
 6. Parse JSON and display formatted output
 
-Not every command follows it: `image list`/`image pull` also read the public image catalog, `ipsw` reads the restore-image catalog, and `update` talks only to GitHub. Those raise `CliError` (`errors.ts`) so `cli.ts`'s catch-all doesn't report their failures as "failed to connect to phantom daemon", which is the right guess for everything else.
+Not every command follows it: `image catalog`/`image pull` also read the public image catalog, `ipsw` reads the restore-image catalog, and `update` talks only to GitHub. Those raise `CliError` (`errors.ts`) so `cli.ts`'s catch-all doesn't report their failures as "failed to connect to phantom daemon", which is the right guess for everything else.
 
 The endpoints these commands call are documented in [api.md](api.md). `image build`
 is the one command that is more than a wrapper around an endpoint — it orchestrates
