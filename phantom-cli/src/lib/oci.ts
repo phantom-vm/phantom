@@ -108,12 +108,6 @@ export async function credentialsFor(registry: string): Promise<Credentials | un
   }
 }
 
-export function digestOf(data: Uint8Array): string {
-  const hash = new Bun.CryptoHasher("sha256");
-  hash.update(data);
-  return `sha256:${hash.digest("hex")}`;
-}
-
 /// Speaks to one repository, acquiring a token only when the registry asks for
 /// one. A registry with no auth at all (a local `registry:2`) has no token
 /// endpoint, so requesting a token up front would fail against it.
@@ -201,83 +195,5 @@ export class RegistryClient {
     const digest = res.headers.get("docker-content-digest");
     if (!digest) throw new Error("registry did not return a content digest");
     return digest;
-  }
-}
-
-interface Manifest {
-  layers: { mediaType: string; digest: string; size: number }[];
-}
-
-/// Pull an artifact's first layer blob, verifying it against its digest.
-export async function pullArtifact(reference: string): Promise<Uint8Array> {
-  const client = await RegistryClient.for(reference);
-
-  const manifestRes = await client.request("GET", `/manifests/${client.ref.reference}`, {
-    headers: { Accept: MANIFEST_TYPE },
-  });
-  if (!manifestRes.ok) throw new Error(`pulling manifest: ${manifestRes.status}`);
-  const manifest = (await manifestRes.json()) as Manifest;
-  const layer = manifest.layers?.[0];
-  if (!layer) throw new Error("artifact has no layers");
-
-  const blobRes = await client.request("GET", `/blobs/${layer.digest}`);
-  if (!blobRes.ok) throw new Error(`pulling blob: ${blobRes.status}`);
-  const data = new Uint8Array(await blobRes.arrayBuffer());
-
-  const actual = digestOf(data);
-  if (actual !== layer.digest) {
-    throw new Error(`digest mismatch: expected ${layer.digest}, got ${actual}`);
-  }
-  return data;
-}
-
-/// Push `data` as a single-layer artifact.
-export async function pushArtifact(reference: string, data: Uint8Array, layerType: string) {
-  const client = await RegistryClient.for(reference);
-
-  const empty = new Uint8Array([0x7b, 0x7d]); // "{}"
-  const layerDigest = digestOf(data);
-  const configDigest = digestOf(empty);
-
-  for (const [digest, blob] of [
-    [layerDigest, data],
-    [configDigest, empty],
-  ] as const) {
-    const head = await client.request("HEAD", `/blobs/${digest}`);
-    if (head.ok) continue;
-
-    const start = await client.request("POST", `/blobs/uploads/`);
-    if (!start.ok && start.status !== 202) {
-      throw new Error(`starting upload: ${start.status} ${await start.text()}`);
-    }
-    const location = start.headers.get("location");
-    if (!location) throw new Error("upload response had no Location");
-
-    const proto = client.ref.registry.startsWith("localhost") ? "http" : "https";
-    const url = new URL(location, `${proto}://${client.ref.registry}`);
-    url.searchParams.set("digest", digest);
-
-    const put = await client.request("PUT", url.toString(), {
-      headers: { "Content-Type": "application/octet-stream" },
-      body: blob,
-    });
-    if (!put.ok && put.status !== 201) {
-      throw new Error(`uploading blob: ${put.status} ${await put.text()}`);
-    }
-  }
-
-  const manifest = {
-    schemaVersion: 2,
-    mediaType: MANIFEST_TYPE,
-    config: { mediaType: EMPTY_CONFIG_TYPE, digest: configDigest, size: empty.length },
-    layers: [{ mediaType: layerType, digest: layerDigest, size: data.length }],
-  };
-
-  const put = await client.request("PUT", `/manifests/${client.ref.reference}`, {
-    headers: { "Content-Type": MANIFEST_TYPE },
-    body: new TextEncoder().encode(JSON.stringify(manifest)),
-  });
-  if (!put.ok && put.status !== 201) {
-    throw new Error(`pushing manifest: ${put.status} ${await put.text()}`);
   }
 }

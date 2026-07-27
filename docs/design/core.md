@@ -30,6 +30,7 @@ phantom/
     ├── LogBuffer.swift   # Bounded log with stable line ids
     ├── LineAssembler.swift # Reassembles piped lines, strips ANSI
     ├── IPSWManager.swift # IPSW download and listing
+    ├── CatalogManager.swift # Fetches catalog.json (the published image list)
     ├── GitLabRunnerManager.swift # Managed GitLab Runner (download, register, supervise)
     ├── TCPServer.swift   # Network.framework TCP server
     ├── VNCServer.swift   # Host-side VNC server (_VZVNCServer private API)
@@ -43,8 +44,7 @@ phantom/
         ├── OCIAuth.swift           # Bearer/Basic auth + Docker config
         ├── OCIRegistry.swift       # OCI Distribution API HTTP client
         ├── OCIDiskLayerizer.swift  # Disk chunking + LZ4 compression
-        ├── OCIImageManager.swift   # Image CRUD + push/pull orchestration
-        └── CatalogManager.swift    # Fetches the published image catalog
+        └── OCIImageManager.swift   # Image CRUD + push/pull orchestration
 
 phantomTests/             # Unit tests
 ├── OCIReferenceTests.swift

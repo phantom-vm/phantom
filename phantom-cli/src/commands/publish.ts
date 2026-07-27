@@ -1,39 +1,50 @@
 import { sendRequest } from "../lib/api";
-import {
-  CATALOG_LAYER_TYPE,
-  CATALOG_REFERENCE,
-  fetchCatalog,
-  formatGB,
-  type Catalog,
-  type CatalogEntry,
-} from "../lib/catalog";
-import { RegistryClient, credentialsFor, pushArtifact, parseRef } from "../lib/oci";
+import { formatGB, parseCatalog, type Catalog, type CatalogEntry } from "../lib/catalog";
+import { RegistryClient, credentialsFor, parseRef } from "../lib/oci";
 import { usageError, type Command } from "../command";
 
 // MARK: - image publish
 //
-// Admin-only: push a local image to the registry, then rewrite the catalog so
-// users see it. Two steps, because the catalog entry has to record the digest
-// the registry actually stored — that digest is what makes a user's pull
-// verifiable, so it is read back from the registry rather than computed here.
+// Admin-only: push a local image to the registry, then record it in the
+// catalog so users see it. Two steps, because the catalog entry has to record
+// the digest the registry actually stored — that digest is what makes a user's
+// pull verifiable, so it is read back from the registry rather than computed
+// here.
+//
+// The catalog is `catalog.json` in this repo, so the second step edits a file
+// in the checkout and the author commits it. That is one step more than
+// rewriting a registry artifact was, and buys the three things a mutable tag
+// could not give: a failed read cannot truncate the catalog (there is no read
+// of a remote catalog in this path at all), concurrent publishes conflict in
+// git instead of silently dropping an entry, and every change to a published
+// digest is a commit with an author and a diff.
 
 const DEFAULT_NAMESPACE = process.env.PHANTOM_REGISTRY_NAMESPACE ?? "ghcr.io/phantom-vm";
+
+const DEFAULT_CATALOG_FILE = "catalog.json";
 
 interface PublishOptions {
   imageName: string;
   description?: string;
   tag: string;
   repository?: string;
+  catalogFile: string;
   catalogOnly: boolean;
 }
 
 function parseArgs(args: string[]): PublishOptions | null {
-  const opts: PublishOptions = { imageName: "", tag: "latest", catalogOnly: false };
+  const opts: PublishOptions = {
+    imageName: "",
+    tag: "latest",
+    catalogFile: DEFAULT_CATALOG_FILE,
+    catalogOnly: false,
+  };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === "--description") opts.description = args[++i];
     else if (a === "--tag") opts.tag = args[++i]!;
     else if (a === "--repository") opts.repository = args[++i];
+    else if (a === "--catalog-file") opts.catalogFile = args[++i]!;
     else if (a === "--catalog-only") opts.catalogOnly = true;
     else if (!a.startsWith("--") && !opts.imageName) opts.imageName = a;
   }
@@ -48,10 +59,12 @@ export const publishCommand: Command = {
   usage: "<name> [--description <text>]",
   description: "Push a local image and list it in the public catalog",
   details: [
-    "--description <text>  One-line description for the catalog",
-    `--repository <repo>   Target repository (default: ${DEFAULT_NAMESPACE}/<name>)`,
-    "--tag <tag>           Tag to push (default: latest)",
-    "--catalog-only        Re-publish the catalog entry without re-pushing blobs",
+    "--description <text>   One-line description for the catalog",
+    `--repository <repo>    Target repository (default: ${DEFAULT_NAMESPACE}/<name>)`,
+    "--tag <tag>            Tag to push (default: latest)",
+    `--catalog-file <path>  Catalog to edit (default: ./${DEFAULT_CATALOG_FILE}, so run this`,
+    "                       from the repo checkout)",
+    "--catalog-only         Update the catalog entry without re-pushing blobs",
   ],
   multiArgHandler: imagePublish,
 };
@@ -107,10 +120,13 @@ async function run(opts: PublishOptions) {
   const digest = await (await RegistryClient.for(reference)).manifestDigest();
   console.log(`      ${digest}`);
 
-  console.log(`[3/3] Updating the catalog at ${CATALOG_REFERENCE}`);
+  console.log(`[3/3] Recording it in ${opts.catalogFile}`);
+  const catalog = await readCatalogFile(opts.catalogFile);
+  const previous = catalog.images.find((i) => i.name === opts.imageName);
+
   const entry: CatalogEntry = {
     name: opts.imageName,
-    description: opts.description ?? (await existingDescription(opts.imageName)) ?? opts.imageName,
+    description: opts.description ?? previous?.description ?? opts.imageName,
     repository,
     digest,
     compressedSize: local.totalSize,
@@ -118,18 +134,36 @@ async function run(opts: PublishOptions) {
     published: new Date().toISOString().slice(0, 10),
   };
 
-  const catalog = (await fetchCatalog()) ?? { schemaVersion: 1 as const, images: [] };
   const next: Catalog = {
     schemaVersion: 1,
     images: [...catalog.images.filter((i) => i.name !== entry.name), entry].sort((a, b) =>
       a.name.localeCompare(b.name)
     ),
   };
+  await Bun.write(opts.catalogFile, JSON.stringify(next, null, 2) + "\n");
+  console.log(`      ${previous ? "updated" : "added"} '${entry.name}' (${next.images.length} images)`);
 
-  const body = new TextEncoder().encode(JSON.stringify(next, null, 2) + "\n");
-  await pushArtifact(CATALOG_REFERENCE, body, CATALOG_LAYER_TYPE);
+  console.log(`\n✓ Pushed '${opts.imageName}' and updated ${opts.catalogFile}.`);
+  console.log(`  Commit and push it — users read the catalog from the repo, so`);
+  console.log(`  'phantom image pull ${opts.imageName}' resolves only once it lands on main.`);
+}
 
-  console.log(`\n✓ Published '${opts.imageName}' — users can now run 'phantom image pull ${opts.imageName}'`);
+/// The catalog to edit. A missing file is an error rather than an empty
+/// catalog: the likely cause is running this outside the checkout, and treating
+/// that as "no images yet" would write a catalog with exactly one entry and
+/// call it complete.
+async function readCatalogFile(path: string): Promise<Catalog> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) {
+    throw new Error(
+      `no catalog at '${path}' — run this from the repo checkout, or pass --catalog-file`
+    );
+  }
+  const catalog = parseCatalog(await file.text());
+  if (!catalog) {
+    throw new Error(`'${path}' is not a readable catalog (expected schemaVersion 1 with an images array)`);
+  }
+  return catalog;
 }
 
 /// Size and layer count of a local image, read from its manifest, plus the disk
@@ -147,12 +181,6 @@ async function localImage(name: string) {
     layerCount: manifest.layers.length,
     diskSize: config.diskSize,
   };
-}
-
-/// Keep a previously published description when this run doesn't supply one.
-async function existingDescription(name: string): Promise<string | undefined> {
-  const catalog = await fetchCatalog();
-  return catalog?.images.find((i) => i.name === name)?.description;
 }
 
 const BAR_WIDTH = 28;

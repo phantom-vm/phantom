@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - Catalog Types
 
-/// One published image, as the catalog artifact describes it. Mirrors
-/// `CatalogEntry` in the CLI's `lib/catalog.ts` — same artifact, two readers.
+/// One published image, as the catalog describes it. Mirrors `CatalogEntry` in
+/// the CLI's `lib/catalog.ts` — same file, two readers.
 struct CatalogEntry: Codable, Identifiable, Equatable {
     /// Local image name this is pulled as, and how users refer to it
     let name: String
@@ -36,13 +36,15 @@ struct Catalog: Codable {
 /// Fetches the published image catalog so the GUI can show what exists before
 /// anything has been pulled.
 ///
-/// The catalog is a one-layer OCI artifact in the same registry as the images —
-/// see the CLI's `lib/catalog.ts`, which reads the same object. Reads are
+/// The catalog is `catalog.json` at the root of the phantom repo, fetched over
+/// HTTPS — see the CLI's `lib/catalog.ts`, which reads the same file. Reads are
 /// anonymous, so a fresh install can browse before it has credentials.
 ///
 /// It only *points*: every entry carries its image's manifest digest, and pulls
 /// go by digest, so the trust in the catalog never exceeds the trust in the
-/// digests it names.
+/// digests it names. That is why this fetch needs no integrity check of its
+/// own — being wrong about the catalog can misname or mislist an image, but it
+/// cannot make the daemon accept bytes that don't match a digest.
 @Observable
 @MainActor
 class CatalogManager {
@@ -59,8 +61,9 @@ class CatalogManager {
 
     /// Overridable for the same reason the CLI overrides it: pointing a test or
     /// a private deployment at another catalog without a rebuild.
-    static var reference: String {
-        ProcessInfo.processInfo.environment["PHANTOM_CATALOG"] ?? "ghcr.io/phantom-vm/catalog:latest"
+    static var url: String {
+        ProcessInfo.processInfo.environment["PHANTOM_CATALOG"]
+            ?? "https://raw.githubusercontent.com/phantom-vm/phantom/main/catalog.json"
     }
 
     init(log: @escaping (String) -> Void) {
@@ -76,34 +79,56 @@ class CatalogManager {
     func load() async {
         guard state != .loading else { return }
 
-        let reference = Self.reference
+        let source = Self.url
         state = .loading
 
         do {
             let catalog = try await Task.detached { () -> Catalog in
-                let ref = try OCIReference(parsing: reference)
-                let creds = RegistryCredentials.load(for: ref.registry)
-                let client = OCIRegistryClient(reference: ref, credentials: creds)
-
-                let (manifest, _) = try await client.pullManifest(reference: ref.reference)
-                guard let layer = manifest.layers.first else {
-                    throw OCIError.invalidManifest("catalog artifact has no layers")
+                guard let url = URL(string: source) else {
+                    throw CatalogError.badSource(source)
                 }
 
-                // pullBlob verifies the blob against the digest the manifest names.
-                let data = try await client.pullBlob(digest: layer.digest)
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 15
+                // raw.githubusercontent caches for a few minutes, and URLSession
+                // would happily add its own on top. The catalog changes rarely
+                // but when it does, a stale listing sends a pull at a digest
+                // that may already be superseded.
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                    throw CatalogError.httpStatus(http.statusCode)
+                }
                 return try JSONDecoder().decode(Catalog.self, from: data)
             }.value
 
             guard catalog.schemaVersion == 1 else {
-                throw OCIError.invalidManifest("unsupported catalog schemaVersion \(catalog.schemaVersion)")
+                throw CatalogError.unsupportedSchema(catalog.schemaVersion)
             }
 
             state = .loaded(catalog.images)
             log("Loaded catalog: \(catalog.images.count) images")
         } catch {
             state = .error(error.localizedDescription)
-            log("Failed to load catalog from \(reference): \(error.localizedDescription)")
+            log("Failed to load catalog from \(source): \(error.localizedDescription)")
+        }
+    }
+}
+
+enum CatalogError: LocalizedError {
+    case badSource(String)
+    case httpStatus(Int)
+    case unsupportedSchema(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .badSource(let source):
+            return "'\(source)' is not a URL"
+        case .httpStatus(let code):
+            return "catalog fetch returned HTTP \(code)"
+        case .unsupportedSchema(let version):
+            return "unsupported catalog schemaVersion \(version)"
         }
     }
 }

@@ -109,9 +109,21 @@ phantom image publish xcode-26-6 --description "…"
 ```
 
 `publish` pushes the image, reads back the digest the registry actually stored,
-and rewrites the catalog artifact that `phantom image list` reads. The digest is
-read back rather than computed locally because the daemon re-encodes the manifest
-when pushing, so only the registry knows the bytes it kept.
+and writes that entry into `catalog.json`. The digest is read back rather than
+computed locally because the daemon re-encodes the manifest when pushing, so
+only the registry knows the bytes it kept.
+
+**The catalog is a file in this repo, so publishing ends with a commit.** Run
+`publish` from the checkout — it edits `./catalog.json` by default
+(`--catalog-file` points it elsewhere) — then commit and push:
+
+```bash
+git add catalog.json && git commit -m "Publish xcode-26-6" && git push
+```
+
+Nothing resolves until that lands on `main`, and raw.githubusercontent caches
+for a few minutes after it does. Until then `image list` simply omits the image
+and `image pull <name>` says it could not reach the catalog.
 
 **A description says what the image has, not what it lacks.** `image list` is a
 menu, and an entry that spends its length on absences reads as a defect report

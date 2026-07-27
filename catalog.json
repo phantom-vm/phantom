@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "images": [
+    {
+      "name": "tahoe-base",
+      "description": "macOS 26.5.2 (25F84) + Command Line Tools — the base for layering your own toolchain",
+      "repository": "ghcr.io/phantom-vm/tahoe-base",
+      "digest": "sha256:4524081d57afa6ef5d614bfd46e5686a2531ee9157b56d4bbbfeea1d36844307",
+      "compressedSize": 25657026459,
+      "diskSize": 96636764160,
+      "published": "2026-07-27"
+    },
+    {
+      "name": "xcode-26-6",
+      "description": "macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes",
+      "repository": "ghcr.io/phantom-vm/xcode-26-6",
+      "digest": "sha256:e78df84299d54c8e290d24b4162829aa1bb602c5b6224a38a0399d122e5f2f04",
+      "compressedSize": 56847606622,
+      "diskSize": 96636764160,
+      "published": "2026-07-27"
+    }
+  ]
+}

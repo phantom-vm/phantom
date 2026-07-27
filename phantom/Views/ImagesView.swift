@@ -117,7 +117,7 @@ struct ImageListView: View {
                 ContentUnavailableView {
                     Label("Catalog Empty", systemImage: "square.stack.3d.up")
                 } description: {
-                    Text("\(CatalogManager.reference) lists no images.")
+                    Text("\(CatalogManager.url) lists no images.")
                 }
             } else {
                 List(entries, selection: $selection) { entry in
