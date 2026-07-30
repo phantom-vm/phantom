@@ -43,6 +43,20 @@ class OCIImageManager {
         try? FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)
     }
 
+    // MARK: - Image Names
+
+    /// An image's name is also its directory name under `images/`, so a name
+    /// like `../..` becomes a path that leaves the images directory — and with
+    /// `replace`, a directory that gets moved over whatever is there. The check
+    /// lives here, with the code that turns a name into a path, rather than in
+    /// each caller: the GUI already gates on it, but the API and the CLI hand
+    /// over whatever they were given.
+    ///
+    /// Same rule as a VM's name — one word for "a name" across the daemon.
+    nonisolated static func validate(name: String) throws {
+        guard VMName.isValid(name) else { throw OCIError.invalidImageName(name) }
+    }
+
     // MARK: - Save VM as Image
 
     /// Save a VM bundle as a local OCI image.
@@ -58,6 +72,14 @@ class OCIImageManager {
     func save(name: String, bundlePath: URL, replace: Bool = false) async {
         guard state == .idle || isTerminalState else {
             state = .error("An operation is already in progress")
+            return
+        }
+
+        do {
+            try Self.validate(name: name)
+        } catch {
+            log("Failed to save image: \(error.localizedDescription)")
+            state = .error(error.localizedDescription)
             return
         }
 
@@ -248,6 +270,7 @@ class OCIImageManager {
     // MARK: - Delete Image
 
     func delete(name: String) throws {
+        try Self.validate(name: name)
         let imageDir = imagesDir.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: imageDir.path) else {
             throw OCIError.imageNotFound(name)
@@ -270,6 +293,7 @@ class OCIImageManager {
         into bundlePath: URL,
         progress updateProgress: @escaping @Sendable (Double) -> Void
     ) async throws {
+        try Self.validate(name: name)
         let imageDir = imagesDir.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: imageDir.path) else {
             throw OCIError.imageNotFound(name)
@@ -402,6 +426,14 @@ class OCIImageManager {
             return
         }
 
+        do {
+            try Self.validate(name: name)
+        } catch {
+            log("Push failed: \(error.localizedDescription)")
+            state = .error(error.localizedDescription)
+            return
+        }
+
         state = .pushing(progress: 0, message: "Preparing push...")
         log("Pushing image '\(name)' to \(reference)...")
 
@@ -515,6 +547,16 @@ class OCIImageManager {
             return
         }
 
+        // Before anything else: a bad name would otherwise reach the failure
+        // path below, which deletes the directory it names.
+        do {
+            if let name { try Self.validate(name: name) }
+        } catch {
+            log("Pull failed: \(error.localizedDescription)")
+            state = .error(error.localizedDescription)
+            return
+        }
+
         state = .pulling(progress: 0, message: "Preparing pull...")
         log("Pulling image from \(reference)...")
 
@@ -535,7 +577,10 @@ class OCIImageManager {
                 let creds = RegistryCredentials.load(for: ref.registry, username: username, password: password)
                 let client = OCIRegistryClient(reference: ref, credentials: creds)
 
+                // A name taken from the reference is as unchecked as one that
+                // was passed in — the registry chose it, not us.
                 let imageName = name ?? ref.namespace.split(separator: "/").last.map(String.init) ?? "pulled-image"
+                try Self.validate(name: imageName)
                 let imageDir = imagesDir.appendingPathComponent(imageName)
 
                 if FileManager.default.fileExists(atPath: imageDir.path) {
@@ -647,11 +692,15 @@ class OCIImageManager {
 
     // MARK: - Image Directory Access
 
-    func imageDirectory(for name: String) -> URL {
-        imagesDir.appendingPathComponent(name)
+    func imageDirectory(for name: String) throws -> URL {
+        try Self.validate(name: name)
+        return imagesDir.appendingPathComponent(name)
     }
 
+    /// False for a name that is not one, rather than stat-ing whatever path it
+    /// points at — this is what callers ask before push and restore.
     func imageExists(_ name: String) -> Bool {
+        guard VMName.isValid(name) else { return false }
         let manifestPath = imagesDir.appendingPathComponent(name).appendingPathComponent("manifest.json")
         return FileManager.default.fileExists(atPath: manifestPath.path)
     }

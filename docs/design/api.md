@@ -223,6 +223,7 @@ Or on error:
 - **Params**: `vmId` (string), `name` (string), `replace` (bool, optional — default false)
 - **Purpose**: Save a stopped VM as a local OCI image
 - **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json. An existing name is an error unless `replace` is set, in which case the new copy is built in a hidden staging directory and moved into place only once the manifest is written — a failed save leaves the old image intact, at the cost of room for both while it runs. Replacing drops the old `pulled.json`, since the locally built bytes no longer come from that digest.
+- **Naming**: `name` becomes the image's directory under `images/`, so it takes the same characters as a VM's name — letters, digits, `-` and `_`, up to 64 — and anything else is rejected before the save starts. The rule is enforced in the image manager, at the point a name turns into a path, so `image.delete`, `image.push` and `image.pull` hold to it too; the handler checks as well, so a fire-and-forget call answers with the error rather than `started`.
 - **Response**: `{"status": "started", "message": "Saving VM '...' as image '...'"}`
 
 ### image.list
@@ -243,7 +244,7 @@ Or on error:
 ### image.pull
 - **Params**: `reference` (string), `name` (string, optional), `username` (string, optional), `password` (string, optional)
 - **Purpose**: Pull an image from an OCI registry to local storage
-- **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory.
+- **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory. An omitted `name` is taken from the last path segment of the reference and has to satisfy the same naming rule as `image.save` — the registry picked it, so it is checked like any other input.
 - **Response**: `{"status": "started", "message": "Pulling image from ..."}`
 
 ### image.status

@@ -551,6 +551,14 @@ struct APIHandlers {
         guard let name = params?["name"]?.value as? String else {
             throw APIHandlerError.missingParam("name")
         }
+        // The save itself runs detached and only reports through the image
+        // manager's state, so a name it will refuse has to fail here to reach
+        // the caller at all.
+        do {
+            try OCIImageManager.validate(name: name)
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
 
         // Verify VM exists and is stopped
         guard let instance = vmManager.vmInstances[vmId] else {
@@ -642,6 +650,14 @@ struct APIHandlers {
         let username = params?["username"]?.value as? String
         let password = params?["password"]?.value as? String
         let replace = params?["replace"]?.value as? Bool ?? false
+
+        // As with save: the pull is detached, so this is the caller's only
+        // chance to hear that the name is not one.
+        do {
+            if let name { try OCIImageManager.validate(name: name) }
+        } catch {
+            throw APIHandlerError.invalidParams(error.localizedDescription)
+        }
 
         Task {
             await vmManager.imageManager.pull(

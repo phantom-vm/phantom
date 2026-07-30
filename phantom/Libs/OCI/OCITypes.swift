@@ -171,6 +171,7 @@ enum OCIError: Error, LocalizedError {
     case invalidReference(String)
     case imageNotFound(String)
     case imageAlreadyExists(String)
+    case invalidImageName(String)
     case vmNotStopped(String)
     case compressionFailed(String)
     case decompressionFailed(String)
@@ -187,6 +188,8 @@ enum OCIError: Error, LocalizedError {
         case .invalidReference(let msg): return "Invalid reference: \(msg)"
         case .imageNotFound(let name): return "Image not found: \(name)"
         case .imageAlreadyExists(let name): return "Image already exists: \(name)"
+        case .invalidImageName(let name):
+            return "Invalid image name: \(name) (use letters, digits, '-' and '_', up to 64 characters)"
         case .vmNotStopped(let id): return "VM must be stopped: \(id)"
         case .compressionFailed(let msg): return "Compression failed: \(msg)"
         case .decompressionFailed(let msg): return "Decompression failed: \(msg)"
