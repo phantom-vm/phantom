@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Middle column for the Images section: the local OCI images a VM can be
-/// restored from. Acquiring one is the '+' over the detail pane
-/// (`PullImageSheet`); saving and pushing stay CLI operations.
+/// restored from. Getting another one is the '+' over the detail pane
+/// (`PullImageSheet`) or a stopped VM's Save as Image (`SaveImageSheet`);
+/// pushing stays a CLI operation.
 struct ImageListView: View {
     @Bindable var vm: VMManager
     let images: [ImageInfo]
@@ -11,8 +12,8 @@ struct ImageListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let operation = operationStatus {
-                operationBanner(operation)
+            if let banner {
+                operationBanner(banner)
                 Divider()
             }
 
@@ -46,7 +47,7 @@ struct ImageListView: View {
             ContentUnavailableView {
                 Label("No Images", systemImage: "square.stack.3d.up")
             } description: {
-                Text("Pull a published one with the + button above the detail pane, or save a stopped VM with `phantom image save`.")
+                Text("Pull a published one with the + button above the detail pane, or save a stopped VM from its own pane.")
             }
         } else {
             List(images, id: \.name, selection: $selection) { info in
@@ -62,28 +63,63 @@ struct ImageListView: View {
         }
     }
 
-    /// The in-flight image operation, if any — including ones started over the
-    /// API by the CLI, since the manager's state is shared.
-    private var operationStatus: (progress: Double, message: String)? {
+    /// What the banner has to say about the shared image manager — including
+    /// about an operation the CLI started, since its state is the same state.
+    ///
+    /// A *completed* one gets no banner: it put an image in the list below, which
+    /// says it better than a line of text. A failure has no such trace, and until
+    /// the GUI could start a save the only failures were the CLI's own, reported
+    /// in the terminal that asked for them.
+    private enum Banner {
+        case running(progress: Double, message: String)
+        case failed(String)
+    }
+
+    private var banner: Banner? {
         switch vm.imageManager.state {
         case .saving(let progress, let message),
              .pushing(let progress, let message),
              .pulling(let progress, let message):
-            (progress, message)
-        case .idle, .completed, .error:
+            .running(progress: progress, message: message)
+        case .error(let message):
+            .failed(message)
+        case .idle, .completed:
             nil
         }
     }
 
-    private func operationBanner(_ operation: (progress: Double, message: String)) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(operation.message)
-                .font(.caption)
-                .lineLimit(2)
-            ProgressView(value: operation.progress)
+    @ViewBuilder
+    private func operationBanner(_ banner: Banner) -> some View {
+        switch banner {
+        case .running(let progress, let message):
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message)
+                    .font(.caption)
+                    .lineLimit(2)
+                ProgressView(value: progress)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .failed(let message):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.caption)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                // Dismissed by hand rather than on a timer: the failure is the
+                // whole account of a save or pull that ran for minutes, and the
+                // next operation is the only other thing that clears it.
+                Button("Dismiss") { vm.imageManager.clearTerminalState() }
+                    .controlSize(.small)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

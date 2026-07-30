@@ -59,12 +59,23 @@ struct ContentView: View {
     /// request and its prefill takes.
     @State private var newVMRequest: NewVMRequest?
 
+    /// The Save as Image sheet, and the VM it was opened from. Presented by item
+    /// for the same reason the New VM sheet is, and carrying the bundle path so
+    /// the sheet never has to look the instance up to start the save.
+    @State private var saveImageRequest: SaveImageRequest?
+
     /// Carries the prefill into `.sheet(item:)`, which needs something
     /// Identifiable — a bare String is not, and conforming the stdlib's is a
     /// heavier thing to do than naming the request.
     private struct NewVMRequest: Identifiable {
         let id = UUID()
         let image: String
+    }
+
+    private struct SaveImageRequest: Identifiable {
+        let id = UUID()
+        let vmId: String
+        let bundlePath: URL
     }
 
     /// Listing images walks the images directory, so it is cached here — both
@@ -162,6 +173,17 @@ struct ContentView: View {
             .sheet(isPresented: $pullingImage) {
                 PullImageSheet(vm: vm, onPullStarted: reloadImages)
             }
+            .sheet(item: $saveImageRequest) { request in
+                SaveImageSheet(vm: vm, vmId: request.vmId, bundlePath: request.bundlePath) { name in
+                    // Go where the result lands: the save runs for minutes, and
+                    // the Images list is what draws its progress and then holds
+                    // the image. Selecting the name now means the detail pane is
+                    // already on it when the list reloads — until then it reads
+                    // as no selection, which is true.
+                    selectedImageName = name
+                    section = .images
+                }
+            }
     }
 
     private func reloadImages() {
@@ -207,6 +229,12 @@ struct ContentView: View {
                     onShowDisplay: {
                         vm.setDisplayedVM(vmId: instance.vmId)
                         openWindow(id: "vm-display")
+                    },
+                    onSaveAsImage: {
+                        saveImageRequest = SaveImageRequest(
+                            vmId: instance.vmId,
+                            bundlePath: instance.bundlePath
+                        )
                     },
                     onDeleted: { selectedVMId = nil }
                 )

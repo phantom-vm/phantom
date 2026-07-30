@@ -7,6 +7,7 @@ struct VMDetailView: View {
     @Bindable var vm: VMManager
     let instance: VMManager.VMInstance
     let onShowDisplay: () -> Void
+    let onSaveAsImage: () -> Void
     let onDeleted: () -> Void
 
     @State private var commandText = ""
@@ -14,6 +15,16 @@ struct VMDetailView: View {
     @State private var confirmingDelete = false
 
     private var isRunning: Bool { instance.state == .running }
+
+    /// The image manager takes one operation at a time, and it is shared with the
+    /// API — so a pull the CLI started is also a reason this VM cannot be saved
+    /// right now.
+    private var imageOperationRunning: Bool {
+        switch vm.imageManager.state {
+        case .saving, .pushing, .pulling: true
+        case .idle, .completed, .error: false
+        }
+    }
 
     /// Read from the bundle, the same place a start reads it from — a VM that
     /// predates `vm.json` shows the defaults it actually boots with.
@@ -88,13 +99,25 @@ struct VMDetailView: View {
                 Button("Display") { onShowDisplay() }
                     .disabled(!isRunning)
 
+                // The ellipsis is the sheet: the image needs a name, and this VM
+                // may not be the one it should be named after.
+                Button("Save as Image…") { onSaveAsImage() }
+                    .disabled(instance.state != .stopped || imageOperationRunning)
+                    // A dim button should say why it is dim, and "stop it first"
+                    // is not guessable from a disk that would be read mid-write.
+                    .help(
+                        instance.state == .stopped
+                            ? "Save this VM as a local image"
+                            : "Stop the VM first — a running VM's disk would be captured mid-write"
+                    )
+
                 Spacer()
 
                 Button("Delete", role: .destructive) {
                     confirmingDelete = true
                 }
             }
-            .frame(maxWidth: 420)
+            .frame(maxWidth: 520)
         }
     }
 

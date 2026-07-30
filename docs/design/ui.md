@@ -60,7 +60,9 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   toolbar: VMs has a filter menu, Images its rescan/refresh, while both sections'
   **+** sits over the detail column (below). An image operation running anywhere
   — including one the CLI started, since `OCIImageManager.state` is shared —
-  shows as a progress banner above the list.
+  shows as a progress banner above the list, and a failed one stays there until
+  dismissed. A *completed* one gets no banner: it put an image in the list below,
+  which says it better than a line of text.
 - **Acquiring vs. having** — a list column shows what you have; getting another
   one is an action, and actions are sheets behind the **+**. `CreateVMSheet`
   restores a VM from a local image, `PullImageSheet` lists the published catalog
@@ -74,6 +76,18 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   outright, so a VM started from an image gets the same naming and sizing as one
   started from the **+**. The sheet is presented by item, not by a flag, so each
   request rebuilds it and the prefill takes.
+- **Turning one thing into another belongs to the thing** — a stopped VM's
+  **Save as Image…** is in the VM's detail pane, not behind the Images **+**: it
+  acts on *this* VM, while the **+** is for acquiring something this Mac does not
+  have yet. It opens `SaveImageSheet`, which prefills the VM's id as the name,
+  and when that name is already taken flips its button to **Replace** and says
+  what replacing does (built alongside the old image, swapped in only on
+  success). The button is dim while the VM runs — a running VM's disk would be
+  captured mid-write — and while any image operation is in flight, since the
+  manager takes one at a time. Starting a save selects the new name and switches
+  to **Images**, where the banner and then the image itself are: the save runs
+  for minutes, and a second progress bar in the VM pane would only be the same
+  state drawn twice.
 - **Detail pane** — everything about the selected item, including the lifecycle
   buttons and the exec console; `ContentUnavailableView` when nothing is
   selected. Both panes look their item up by id on every render, so one deleted

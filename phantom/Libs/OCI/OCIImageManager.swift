@@ -658,6 +658,14 @@ class OCIImageManager {
 
     // MARK: - Helpers
 
+    /// Drop a finished operation's state. Nothing else clears `.error` — the next
+    /// operation is what normally replaces it — so the GUI's banner would keep a
+    /// failure on screen forever without a way to say it has been read. A running
+    /// operation is left alone.
+    func clearTerminalState() {
+        if isTerminalState { state = .idle }
+    }
+
     private var isTerminalState: Bool {
         switch state {
         case .completed, .error, .idle: return true
