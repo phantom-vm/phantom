@@ -126,6 +126,32 @@ phantom gitlab-runner start    # start it again
 
 Re-running `setup` replaces the previous registration (e.g. to change the base image or point at a different GitLab instance).
 
+## Cancelling a Job
+
+Pressing **Cancel** deletes the job's VM, and everything running inside it stops
+with the VM — typically under a second.
+
+That is blunter than it looks, and deliberately so. A cancel reaches the
+executor as a `SIGTERM` on the stage that is running; nothing the host can say
+over vsock stops a command already running in the guest, and GitLab keeps going
+with the stages that follow a cancelled script — `after_script`, then uploading
+artifacts for the now-failed job — all of them inside that same VM. Since the
+guest agent serves one command at a time, those stages used to queue behind the
+build nobody wanted any more: a measured cancel took **4m41s**, all of it spent
+waiting for an `xcodebuild` that had already been cancelled.
+
+The trade: **a cancelled job uploads no artifacts**. The stages that run after
+the cancel find the VM gone and say so:
+
+```
+[phantom] SIGTERM — job cancelled, deleting VM vm-c5192f79
+[phantom] Job was cancelled — the VM is gone, skipping
+```
+
+A cancel during the restore is handled the same way, so a VM that is still
+decompressing is deleted rather than left to finish, boot, and sit there with no
+job to serve.
+
 ## Job Execution User
 
 Job scripts run inside the VM as the `admin` user — macOS CI tooling (Homebrew, xcodebuild, simulators) misbehaves as root. Set a `PHANTOM_EXEC_USER` CI variable to override (`root` runs the script unwrapped as the agent's root user).

@@ -227,6 +227,12 @@ class GitLabRunnerManager {
           builds_dir = "/tmp/builds"
           cache_dir = "/tmp/cache"
           [runners.custom]
+            # A cancelled job's run stage deletes the VM before it exits, so the
+            # runner has to wait for it — but the defaults for both of these are
+            # ten minutes, and nothing here is worth that. Deleting a VM is a
+            # force-stop and an rm.
+            graceful_kill_timeout = 60
+            force_kill_timeout = 30
             prepare_exec = "\(cliPath)"
             prepare_args = ["gitlab-runner", "prepare"]
             run_exec = "\(cliPath)"
