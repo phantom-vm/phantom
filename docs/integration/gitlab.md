@@ -144,8 +144,9 @@ The trade: **a cancelled job uploads no artifacts**. The stages that run after
 the cancel find the VM gone and say so:
 
 ```
-[phantom] SIGTERM — job cancelled, deleting VM vm-c5192f79
-[phantom] Job was cancelled — the VM is gone, skipping
+[phantom] SIGTERM — job cancelled, deleting VM vm-41399188
+[phantom] Job was cancelled — skipping upload_artifacts_on_failure, the VM is gone
+[phantom] Job was cancelled — skipping cleanup_file_variables, the VM is gone
 ```
 
 A cancel during the restore is handled the same way, so a VM that is still

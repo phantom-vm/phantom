@@ -187,14 +187,16 @@ function installCancelHandler(jobId: string, vmId: string) {
   process.on("SIGINT", () => void onCancel("SIGINT"));
 }
 
-async function run(scriptPath: string) {
+async function run(scriptPath: string, stage?: string) {
   const jobId = getJobId();
 
-  // GitLab keeps calling this stage after a cancelled script — after_script,
-  // and uploading artifacts for the now-failed job — and those run in a VM that
-  // is no longer there.
+  // GitLab keeps invoking this stage after a cancelled script — after_script,
+  // uploading artifacts for the now-failed job, cleaning up file variables —
+  // and each of those runs in a VM that is no longer there. One invocation per
+  // sub-stage, so the stage is named: two identical lines in a row otherwise
+  // read as one line logged twice.
   if (await Bun.file(cancelledFilePath(jobId)).exists()) {
-    console.error(`[phantom] Job was cancelled — the VM is gone, skipping`);
+    console.error(`[phantom] Job was cancelled — skipping ${stage ?? "this stage"}, the VM is gone`);
     process.exit(BUILD_FAILURE);
   }
 
@@ -352,7 +354,7 @@ export async function gitlabRunner(...args: string[]) {
       console.error("Usage: phantom gitlab-runner run <script> <stage>");
       process.exit(SYSTEM_FAILURE);
     }
-    await run(scriptPath);
+    await run(scriptPath, args[2]);
   } else if (subcommand === "cleanup") {
     await cleanup();
   } else if (subcommand === "setup") {
