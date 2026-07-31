@@ -90,12 +90,12 @@ To get a dev build into a VM:
     `/var/log/phantom-agent.out.log` is fully buffered when it goes to a file,
     so its startup line lags and cannot settle this either.
 
-  Do **not** try to upgrade an agent by running the released
-  `phantom-agent-install.sh` over vsock: it `launchctl unload`s the daemon
-  before installing the new binary, which kills the shell running it, so nothing
-  is installed and the VM is left with no agent at all until it reboots. The
-  installer is written for the boot script, which types it into the guest from
-  outside the agent.
+  Running the installer over vsock instead works from v1.7.0 on — it installs
+  the binary and writes the job before restarting the daemon, so the restart
+  taking its own shell down no longer matters. **The v1.6.0 installer and
+  earlier will not do this**: they `launchctl unload` first, which kills the
+  shell running them, so nothing is installed and the VM is left with no agent
+  at all until it reboots.
 
 - **Fresh image build** — serve the binary and the generated installer over
   HTTP on the vmnet bridge (the guest reaches the host at the bridge address,

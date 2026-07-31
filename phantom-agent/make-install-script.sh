@@ -54,14 +54,16 @@ if [ "$got" != "$AGENT_SHA256" ]; then
   exit 1
 fi
 
-# Replacing an existing install: stop the old daemon before swapping the binary.
-launchctl unload /Library/LaunchDaemons/com.monk.phantom-agent.plist 2>/dev/null || true
-
 echo "Installing /usr/local/bin/phantom-agent..."
 mkdir -p /usr/local/bin
+# Everything is in place before the daemon is touched. Stopping it first looks
+# tidier and cannot work: the natural way to upgrade an agent in an existing VM
+# is to run this installer *through* that agent, so the stop kills the shell
+# running these lines, and nothing after it happens. That left the binary
+# unswapped and the VM with no agent at all until it rebooted.
 install -m 755 "$tmp" /usr/local/bin/phantom-agent
 
-echo "Starting launchd daemon..."
+echo "Writing the launchd job..."
 cat > /Library/LaunchDaemons/com.monk.phantom-agent.plist <<'PLIST'
 EOF
 
@@ -70,7 +72,18 @@ cat "$SCRIPT_DIR/com.monk.phantom-agent.plist"
 cat <<'EOF'
 PLIST
 chmod 644 /Library/LaunchDaemons/com.monk.phantom-agent.plist
-launchctl load /Library/LaunchDaemons/com.monk.phantom-agent.plist
+
+# Last, because this is the step that can take the caller down with it. If the
+# daemon is already loaded — an upgrade — `kickstart -k` restarts it in place,
+# killing the running agent and, when the installer was invoked through it, this
+# shell. That is fine now: the binary and the plist are already written, and
+# launchd starts the new one. A fresh install has nothing to restart yet.
+echo "Starting phantom-agent..."
+if launchctl print system/com.monk.phantom-agent >/dev/null 2>&1; then
+  launchctl kickstart -k system/com.monk.phantom-agent
+else
+  launchctl load /Library/LaunchDaemons/com.monk.phantom-agent.plist
+fi
 
 echo "phantom-agent installed and started"
 EOF
