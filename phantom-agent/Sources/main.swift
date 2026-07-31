@@ -36,9 +36,134 @@ struct sockaddr_vm {
     var svm_cid: UInt32
 }
 
+// MARK: - Stopping a Command
+
+/// How long a command gets to wind down after the host hangs up, before it is
+/// killed outright.
+let hangUpGracePeriod: TimeInterval = 5
+
+/// Every process `pid` started, deepest first.
+///
+/// A command arrives as `/bin/sh -c …`, so the shell is only the top of the
+/// tree — a CI job script is another shell below it, and its compiler below
+/// that. Signalling the shell alone leaves the real work running, reparented to
+/// launchd and still holding the CPU.
+func descendants(of pid: pid_t) -> [pid_t] {
+    let ps = Process()
+    ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+    ps.arguments = ["-Ao", "pid=,ppid="]
+    let pipe = Pipe()
+    ps.standardOutput = pipe
+    ps.standardError = FileHandle.nullDevice
+    guard (try? ps.run()) != nil else { return [] }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    ps.waitUntilExit()
+
+    var childrenByParent: [pid_t: [pid_t]] = [:]
+    for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+        let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+        guard fields.count >= 2, let child = pid_t(fields[0]), let parent = pid_t(fields[1]) else { continue }
+        childrenByParent[parent, default: []].append(child)
+    }
+
+    // Breadth-first from `pid`, then reversed, so a child is signalled before
+    // the parent whose death would otherwise reparent it.
+    var found: [pid_t] = []
+    var queue = childrenByParent[pid] ?? []
+    while !queue.isEmpty {
+        let next = queue.removeFirst()
+        found.append(next)
+        queue.append(contentsOf: childrenByParent[next] ?? [])
+    }
+    return found.reversed()
+}
+
+func signalTree(of pid: pid_t, _ signalNumber: Int32) {
+    for descendant in descendants(of: pid) { kill(descendant, signalNumber) }
+    kill(pid, signalNumber)
+}
+
+/// Watch a client connection for the host hanging up while its command runs.
+///
+/// The host closes the connection when whoever asked for the command has gone —
+/// a cancelled CI job, a `phantom vm exec` interrupted at the terminal. Nothing
+/// used to be watching: the command ran to completion with nobody to report to,
+/// and since this agent handles one command per connection, every other exec on
+/// the VM waited behind it. A killed `phantom vm exec … sleep 120` measurably
+/// cost the next exec on that VM 117 seconds.
+final class HangUpWatcher {
+    private let clientFd: Int32
+    private let onHangUp: () -> Void
+    private let lock = NSLock()
+    private var stopped = false
+
+    init(clientFd: Int32, onHangUp: @escaping () -> Void) {
+        self.clientFd = clientFd
+        self.onHangUp = onHangUp
+    }
+
+    func start() {
+        Thread.detachNewThread { [self] in
+            while !isStopped {
+                var toWatch = pollfd(fd: clientFd, events: Int16(POLLIN), revents: 0)
+                // Polled with a timeout rather than waited on outright, so the
+                // thread also notices `stop()` once the command has finished.
+                let ready = poll(&toWatch, 1, 500)
+                if ready < 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                if ready == 0 { continue }
+
+                // Readable, or hung up. The host says nothing while a command
+                // runs, so a peek that reads end-of-file is the connection
+                // closing; anything else is left in the buffer for the reader
+                // that owns this socket between commands.
+                var byte: UInt8 = 0
+                let peeked = recv(clientFd, &byte, 1, MSG_PEEK)
+                if peeked == 0 || (peeked < 0 && errno != EINTR && errno != EAGAIN) {
+                    if !isStopped { onHangUp() }
+                    return
+                }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+}
+
+/// Run `process` to completion, stopping it if the client hangs up first.
+func waitForExit(_ process: Process, clientFd: Int32) {
+    let watcher = HangUpWatcher(clientFd: clientFd) { [weak process] in
+        guard let process, process.isRunning else { return }
+        let pid = process.processIdentifier
+        print("phantom-agent: client hung up — stopping \(pid)")
+        signalTree(of: pid, SIGTERM)
+        // For anything that ignores SIGTERM. There is nothing left to read the
+        // output, so there is no reason to keep waiting on it.
+        DispatchQueue.global().asyncAfter(deadline: .now() + hangUpGracePeriod) {
+            if process.isRunning { signalTree(of: pid, SIGKILL) }
+        }
+    }
+    watcher.start()
+    process.waitUntilExit()
+    watcher.stop()
+}
+
 // MARK: - Command Execution
 
-func executeCommand(_ request: ExecRequest) -> ExecResponse {
+func executeCommand(_ request: ExecRequest, clientFd: Int32) -> ExecResponse {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
 
@@ -56,7 +181,7 @@ func executeCommand(_ request: ExecRequest) -> ExecResponse {
 
     do {
         try process.run()
-        process.waitUntilExit()
+        waitForExit(process, clientFd: clientFd)
 
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
@@ -123,7 +248,7 @@ func executeCommandStreaming(_ request: ExecRequest, clientFd: Int32) {
 
     do {
         try process.run()
-        process.waitUntilExit()
+        waitForExit(process, clientFd: clientFd)
 
         // Clear handlers and flush remaining data
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
@@ -167,6 +292,46 @@ func writeLine(_ data: Data, to fd: Int32) {
     payload.withUnsafeBytes { ptr in
         _ = write(fd, ptr.baseAddress!, ptr.count)
     }
+}
+
+// MARK: - Serving Clients
+
+/// Serve one client until it goes away: commands arrive one per line, and each
+/// runs to completion before the next is read.
+///
+/// Runs on its own thread. A single accept loop meant one long command held the
+/// agent, and every other exec on the VM waited in the listen backlog until it
+/// finished — however long after anyone still cared about the answer.
+func serveClient(_ clientFd: Int32) {
+    let decoder = JSONDecoder()
+    let encoder = JSONEncoder()
+
+    while let lineData = readLine(from: clientFd) {
+        do {
+            let request = try decoder.decode(ExecRequest.self, from: lineData)
+            print("phantom-agent: executing '\(request.command)' (stream: \(request.stream ?? false))")
+
+            if request.stream == true {
+                executeCommandStreaming(request, clientFd: clientFd)
+            } else {
+                let response = executeCommand(request, clientFd: clientFd)
+                let responseData = try encoder.encode(response)
+                writeLine(responseData, to: clientFd)
+            }
+        } catch {
+            let errorResponse = ExecResponse(
+                stdout: "",
+                stderr: "Failed to parse request: \(error.localizedDescription)",
+                exitCode: -1
+            )
+            if let data = try? encoder.encode(errorResponse) {
+                writeLine(data, to: clientFd)
+            }
+        }
+    }
+
+    print("phantom-agent: client disconnected")
+    close(clientFd)
 }
 
 // MARK: - Main
@@ -213,9 +378,6 @@ guard listen(sockFd, 5) == 0 else {
 
 print("phantom-agent: listening for connections...")
 
-let decoder = JSONDecoder()
-let encoder = JSONEncoder()
-
 // Accept loop
 while true {
     var clientAddr = sockaddr_vm(
@@ -235,32 +397,5 @@ while true {
     }
 
     print("phantom-agent: client connected")
-
-    // Handle commands from this connection (one per line)
-    while let lineData = readLine(from: clientFd) {
-        do {
-            let request = try decoder.decode(ExecRequest.self, from: lineData)
-            print("phantom-agent: executing '\(request.command)' (stream: \(request.stream ?? false))")
-
-            if request.stream == true {
-                executeCommandStreaming(request, clientFd: clientFd)
-            } else {
-                let response = executeCommand(request)
-                let responseData = try encoder.encode(response)
-                writeLine(responseData, to: clientFd)
-            }
-        } catch {
-            let errorResponse = ExecResponse(
-                stdout: "",
-                stderr: "Failed to parse request: \(error.localizedDescription)",
-                exitCode: -1
-            )
-            if let data = try? encoder.encode(errorResponse) {
-                writeLine(data, to: clientFd)
-            }
-        }
-    }
-
-    print("phantom-agent: client disconnected")
-    close(clientFd)
+    Thread.detachNewThread { serveClient(clientFd) }
 }

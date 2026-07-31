@@ -173,6 +173,7 @@ Or on error:
 - **Purpose**: Execute command inside running VM via vsock
 - **Implementation**: Connects to guest agent on vsock port 9001. When `waitForAgent` is true, retries connection every 2s for up to 120s (for freshly booted VMs). The agent runs as root; when `user` is set, the daemon wraps the command in `su - <user> -c '…'` so it runs as that user with their login environment (no agent change needed). With an auto-logged-in user this even reaches the GUI session — e.g. `--user admin -- open -a Notes` opens Notes on the desktop.
 - **Response**: `{"stdout": "...", "stderr": "...", "exitCode": 0}`
+- **Hanging up cancels it**: a client that closes the connection stops the command in the guest. The daemon shuts the vsock connection down, and the agent takes that end-of-file as its cue to signal the command and everything it started. Applies to `vm.execStream` the same way. Reaching a VM whose image carries an older agent, the daemon still stops waiting, but the guest command runs to its end.
 - **CLI**: `phantom vm exec <vm-id> [--user <name>] -- <command>`
 
 ### vm.execStream

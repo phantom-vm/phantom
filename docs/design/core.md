@@ -64,7 +64,7 @@ The GUI shell those `Views/` make up is described in [ui.md](ui.md).
 
 Lightweight vsock server that executes commands inside the VM.
 
-**File**: `phantom-agent/Sources/main.swift` (180 lines)
+**File**: `phantom-agent/Sources/main.swift`
 
 **Startup**:
 - Installed as launchd daemon at `/Library/LaunchDaemons/com.monk.phantom-agent.plist`
@@ -72,12 +72,28 @@ Lightweight vsock server that executes commands inside the VM.
 - Binds to vsock port 9001
 
 **Request Handling**:
-1. Accept connection from host
+1. Accept connection from host, and serve it on its own thread
 2. Read newline-delimited JSON: `{"command": "whoami", "args": null}`
 3. Execute via `/bin/sh -c`
 4. Capture stdout, stderr, exit code
 5. Send newline-delimited JSON response
 6. Keep connection open for more commands
+
+**A connection per thread, and a command that stops with its caller.** Both
+answer the same defect: the agent used to accept one connection, run its command
+to completion, and only then accept the next, with nothing watching whether the
+host was still there. A killed `phantom vm exec … sleep 120` left the sleep
+running and cost the next exec on that VM 117 seconds — it sat in the listen
+backlog until the abandoned command finished on its own.
+
+So each connection is served on its own thread, and while a command runs a
+watcher polls the client socket. End-of-file means the host has gone: the
+command gets `SIGTERM`, and `SIGKILL` five seconds later if it is still there.
+The signal goes to the whole process tree, walked from `ps -Ao pid=,ppid=` —
+`/bin/sh -c` is only the top of it, and a CI job's script and compiler are
+below. The host end of this is `TCPServer.withHangUpCancellation`, which turns a
+client disconnect into task cancellation, and the `shutdown(fd)` in `VMManager`
+that the agent reads as that end-of-file.
 
 **Installed inside the VM only**:
 ```
@@ -160,6 +176,10 @@ Daemon                    Guest Agent           Shell
   │  Close connection        │                    │
   ├─────────────────────────▶│                    │
 ```
+
+A connection closed early — the API client hung up — is not a no-op: the agent
+reads the end-of-file and stops the command rather than running it out for
+nobody.
 
 ---
 

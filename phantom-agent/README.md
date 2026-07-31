@@ -52,11 +52,25 @@ To get a dev build into a VM:
   and kills the shell before it can `load` again, leaving no agent at all.
 
   ```bash
-  phantom vm exec <vm-id> -- sh -c "echo $(base64 -i .build/release/phantom-agent) \
-    | base64 -d > /tmp/phantom-agent \
-    && sudo install -m 755 /tmp/phantom-agent /usr/local/bin/phantom-agent \
-    && sudo pkill -x phantom-agent"
+  B64=$(base64 -i .build/release/phantom-agent | tr -d '\n')
+
+  phantom vm exec <vm-id> -- printf %s "$B64" '|' base64 -d '>' /tmp/phantom-agent \
+    '&&' shasum -a 256 /tmp/phantom-agent
+  phantom vm exec <vm-id> -- install -m 755 /tmp/phantom-agent /usr/local/bin/phantom-agent \
+    '&&' pkill -x phantom-agent
   ```
+
+  Two details this depends on, both easy to get wrong:
+
+  - **Don't wrap it in `sh -c`.** `vm exec` joins everything after `--` into one
+    command string, the way `ssh host cmd` does, and the guest agent runs that
+    through `/bin/sh -c` itself. A nested `sh -c "…"` loses the grouping and the
+    guest ends up running the first word with the rest as `$0`, `$1`, … The
+    shell operators are quoted so the *host* shell passes them through.
+  - **One line of base64, and quoted.** `$(base64 -i …)` unquoted is split on
+    the wrapping newlines, and `echo` then prints something `base64 -d` cannot
+    read. `tr -d '\n'` and the quotes are what make it arrive intact — check
+    the `shasum` against the local file before installing.
 
 - **Fresh image build** — serve the binary and the generated installer over
   HTTP on the vmnet bridge (the guest reaches the host at the bridge address,

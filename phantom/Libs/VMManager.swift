@@ -664,8 +664,16 @@ class VMManager {
 
                 Self.writeAll(requestData, to: fd)
 
-                // Read response (newline-delimited JSON)
-                let responseData = try await readLine(from: fd)
+                // Read response (newline-delimited JSON).
+                //
+                // Cancelled when the API client hangs up: the shutdown unblocks
+                // this read, and the guest agent reads the same end-of-file as
+                // its cue to stop the command.
+                let responseData = try await withTaskCancellationHandler {
+                    try await Self.readLine(from: fd)
+                } onCancel: {
+                    shutdown(fd, SHUT_RDWR)
+                }
                 let response = try JSONDecoder().decode(ExecResponse.self, from: responseData)
 
                 if !response.stdout.isEmpty {
@@ -679,6 +687,8 @@ class VMManager {
                 connection.close()
                 return response
             } catch {
+                // A hang-up is the answer, not a hiccup to retry.
+                try Task.checkCancellation()
                 lastError = error
                 if attempt < maxAttempts {
                     if attempt == 1 {
@@ -726,58 +736,27 @@ class VMManager {
 
                 Self.writeAll(requestData, to: fd)
 
-                // Read streaming chunks until we get an "exit" chunk
-                let exitCode: Int32 = try await withCheckedThrowingContinuation { cont in
-                    DispatchQueue.global().async {
-                        let decoder = JSONDecoder()
-                        while true {
-                            // Read one line
-                            var buffer = Data()
-                            var byte: UInt8 = 0
-                            while true {
-                                let n = read(fd, &byte, 1)
-                                if n <= 0 {
-                                    cont.resume(throwing: PhantomError.connectionClosed)
-                                    return
-                                }
-                                if byte == 0x0A {
-                                    break
-                                }
-                                buffer.append(byte)
-                            }
-
-                            // Try to decode as streaming chunk
-                            if let chunk = try? decoder.decode(StreamChunk.self, from: buffer) {
-                                if chunk.type == "exit" {
-                                    cont.resume(returning: chunk.exitCode ?? -1)
-                                    return
-                                }
-                                onChunk(chunk)
-                                continue
-                            }
-
-                            // Fallback: agent sent a batch ExecResponse (old agent without streaming)
-                            if let batch = try? decoder.decode(ExecResponse.self, from: buffer) {
-                                // Forward stdout/stderr as chunks, then exit
-                                if !batch.stderr.isEmpty {
-                                    onChunk(StreamChunk(type: "stderr", data: batch.stderr, exitCode: nil))
-                                }
-                                if !batch.stdout.isEmpty {
-                                    onChunk(StreamChunk(type: "stdout", data: batch.stdout, exitCode: nil))
-                                }
-                                cont.resume(returning: batch.exitCode)
-                                return
-                            }
-
-                            print("VMManager: failed to decode stream chunk: \(String(data: buffer, encoding: .utf8) ?? "<binary>")")
-                        }
-                    }
+                // Read streaming chunks until we get an "exit" chunk.
+                //
+                // Cancelling this task is how a client that has hung up stops
+                // the command: the shutdown unblocks the read, and the guest
+                // agent reads the same end-of-file as its cue to kill what it
+                // is running. Shutdown rather than close — the fd belongs to
+                // the connection, which is closed on the way out as usual.
+                let exitCode = try await withTaskCancellationHandler {
+                    try await Self.readStream(fd: fd, onChunk: onChunk)
+                } onCancel: {
+                    shutdown(fd, SHUT_RDWR)
                 }
 
                 connection.close()
                 log("Streaming exec finished with exit code: \(exitCode)")
                 return exitCode
             } catch {
+                // A hang-up is the answer, not a hiccup to retry — otherwise
+                // `waitForAgent` would reconnect up to sixty times to run a
+                // command nobody is listening for.
+                try Task.checkCancellation()
                 lastError = error
                 if attempt < maxAttempts {
                     if attempt == 1 {
@@ -789,6 +768,60 @@ class VMManager {
         }
 
         throw lastError ?? PhantomError.connectionClosed
+    }
+
+    /// The blocking half of a streaming exec: read the agent's newline-delimited
+    /// chunks off `fd` until it reports an exit code.
+    private nonisolated static func readStream(
+        fd: Int32,
+        onChunk: @escaping (StreamChunk) -> Void
+    ) async throws -> Int32 {
+        try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global().async {
+                let decoder = JSONDecoder()
+                while true {
+                    // Read one line
+                    var buffer = Data()
+                    var byte: UInt8 = 0
+                    while true {
+                        let n = read(fd, &byte, 1)
+                        if n <= 0 {
+                            cont.resume(throwing: PhantomError.connectionClosed)
+                            return
+                        }
+                        if byte == 0x0A {
+                            break
+                        }
+                        buffer.append(byte)
+                    }
+
+                    // Try to decode as streaming chunk
+                    if let chunk = try? decoder.decode(StreamChunk.self, from: buffer) {
+                        if chunk.type == "exit" {
+                            cont.resume(returning: chunk.exitCode ?? -1)
+                            return
+                        }
+                        onChunk(chunk)
+                        continue
+                    }
+
+                    // Fallback: agent sent a batch ExecResponse (old agent without streaming)
+                    if let batch = try? decoder.decode(ExecResponse.self, from: buffer) {
+                        // Forward stdout/stderr as chunks, then exit
+                        if !batch.stderr.isEmpty {
+                            onChunk(StreamChunk(type: "stderr", data: batch.stderr, exitCode: nil))
+                        }
+                        if !batch.stdout.isEmpty {
+                            onChunk(StreamChunk(type: "stdout", data: batch.stdout, exitCode: nil))
+                        }
+                        cont.resume(returning: batch.exitCode)
+                        return
+                    }
+
+                    print("VMManager: failed to decode stream chunk: \(String(data: buffer, encoding: .utf8) ?? "<binary>")")
+                }
+            }
+        }
     }
 
     /// Write every byte, however many passes the socket takes.
@@ -813,7 +846,7 @@ class VMManager {
         }
     }
 
-    private func readLine(from fd: Int32) async throws -> Data {
+    private nonisolated static func readLine(from fd: Int32) async throws -> Data {
         return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global().async {
                 var buffer = Data()

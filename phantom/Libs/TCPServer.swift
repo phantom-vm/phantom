@@ -176,16 +176,40 @@ class TCPServer {
         // Streaming methods keep the connection open
         if request.method == "vm.execStream" {
             let handlers = APIHandlers(vmManager: vmManager)
-            await handlers.handleStream(request) { chunk in
-                self.sendChunk(chunk, to: connection)
+            await withHangUpCancellation(on: connection) {
+                await handlers.handleStream(request) { chunk in
+                    self.sendChunk(chunk, to: connection)
+                }
             }
             connection.cancel()
             return
         }
 
         let handlers = APIHandlers(vmManager: vmManager)
-        let responseData = await handlers.handle(request)
+        let responseData = await withHangUpCancellation(on: connection) {
+            await handlers.handle(request)
+        }
         sendResponse(responseData, to: connection)
+    }
+
+    /// Run `work`, cancelling it if the client hangs up first.
+    ///
+    /// A client sends one request and then listens, so a receive that completes
+    /// — end of stream, or an error — means it has gone: a cancelled CI job, a
+    /// `phantom vm exec` interrupted at the terminal. Handlers that reach into
+    /// a VM honour that cancellation by closing the vsock connection, which is
+    /// what stops a guest command whose caller is no longer there. It used to
+    /// run to the end for nobody, holding the guest agent and every other exec
+    /// on that VM behind it.
+    private func withHangUpCancellation<T: Sendable>(
+        on connection: NWConnection,
+        _ work: @escaping @Sendable () async -> T
+    ) async -> T {
+        let task = Task { await work() }
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
+            if isComplete || error != nil { task.cancel() }
+        }
+        return await task.value
     }
 
     private func sendResponse(_ data: Data, to connection: NWConnection) {
