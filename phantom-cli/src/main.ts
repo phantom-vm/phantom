@@ -6,7 +6,7 @@ import { commands as vmCommands, adminCommands as vmAdminCommands } from "./comm
 import { commands as imageCommands, adminCommands as imageAdminCommands } from "./commands/image";
 import { command as healthCommand } from "./commands/health";
 import { command as updateCommand } from "./commands/update";
-import { commands as gitlabRunnerHelp, gitlabRunner } from "./commands/gitlab-runner";
+import { commands as gitlabRunnerCommands } from "./commands/gitlab-runner";
 import { adminMode, gate, refuse } from "./admin";
 import { runCli } from "./cli";
 
@@ -23,7 +23,7 @@ runCli(() => ({
     ipsw: { subcommands: ipswAll, handler: admin ? undefined : refuse("ipsw") },
     vm: { subcommands: vmAll },
     image: { subcommands: imageAll, handler: imageAll.list!.handler },
-    "gitlab-runner": { multiArgHandler: gitlabRunner },
+    "gitlab-runner": { subcommands: gitlabRunnerCommands },
     health: healthCommand,
     update: updateCommand,
   },
@@ -34,7 +34,7 @@ runCli(() => ({
       title: "GitLab CI",
       prefix: "gitlab-runner",
       summary: "The managed GitLab CI runner",
-      commands: gitlabRunnerHelp,
+      commands: gitlabRunnerCommands,
     },
     {
       title: "IPSW (image authoring)",

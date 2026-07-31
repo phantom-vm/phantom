@@ -18,6 +18,8 @@ A `Command` carries `details` — its option lines — beside `usage` and `descr
 
 `--help`/`-h` is intercepted in `cli.ts` before routing, so no handler ever sees it — several parse strictly and would reject it, which is how `image build --help` used to arrive as a usage error and exit 1. Only a help flag *before* a `--` separator counts: in `phantom vm exec <id> -- ls --help` the flag belongs to `ls`, in the guest.
 
+**A usage error answers with help, not with a list of names.** The router only holds the registry — names and handlers — so `route()` takes a `HelpPrinter` from `cli.ts` and calls it wherever the arguments don't route: a bare group (`phantom vm`) prints the group, an unknown subcommand prints the group under an `Unknown vm subcommand: …` line, an unknown top-level command prints the index. Same text as `--help`, but on stderr and exiting 1 — asking for help succeeds, mistyping a command does not. It lives in the router rather than in a per-group handler, so a new group gets it by existing; a group that defines a real default handler (`image` lists, `ipsw` outside admin mode refuses) still runs that instead.
+
 Admin gating runs through help unchanged: a gated command is absent from every index, and asking for help on one runs the same refusal that invoking it does, so it explains `PHANTOM_ADMIN_MODE` rather than answering "no help for that". A group whose commands are *all* gated (`ipsw`) refuses through `CommandGroup.hiddenHelp`.
 
 **File Structure**:

@@ -50,7 +50,9 @@ export async function runCli(build: () => CliDefinition) {
   }
 
   try {
-    await route(commands, args);
+    // A usage error the router raises answers with the same help `--help`
+    // gives, on stderr — see HelpPrinter.
+    await route(commands, args, (path) => showHelp(groups, path, console.error));
   } catch (error) {
     // A CliError already knows what to say. Anything else is assumed to be a
     // failed connection, which is what almost every command here does first —
@@ -71,12 +73,15 @@ export async function runCli(build: () => CliDefinition) {
 /**
  * `path` is what to describe: nothing for the index, a top-level command for
  * its subcommands, a command and subcommand for that one in full.
+ *
+ * `log` is stdout when help was asked for and stderr when it is the answer to
+ * a usage error — the text is the same either way, only the stream differs.
  */
-function showHelp(groups: CommandGroup[], path: string[]) {
+function showHelp(groups: CommandGroup[], path: string[], log: (line: string) => void = console.log) {
   const [name, sub] = path;
 
   if (!name) {
-    showIndex(groups);
+    showIndex(groups, log);
     return;
   }
 
@@ -86,7 +91,7 @@ function showHelp(groups: CommandGroup[], path: string[]) {
     .filter((group) => !group.prefix)
     .flatMap((group) => visible(group.commands).filter(([bareName]) => bareName === name));
   if (bare.length > 0 && !sub) {
-    console.log(renderCommand("", name, bare[0]![1]));
+    log(renderCommand("", name, bare[0]![1]));
     return;
   }
 
@@ -104,8 +109,8 @@ function showHelp(groups: CommandGroup[], path: string[]) {
   }
 
   if (!sub) {
-    console.log(renderGroup(group));
-    console.log(`\nRun 'phantom help ${name} <subcommand>' for one in full.`);
+    log(renderGroup(group));
+    log(`\nRun 'phantom help ${name} <subcommand>' for one in full.`);
     return;
   }
 
@@ -128,11 +133,11 @@ function showHelp(groups: CommandGroup[], path: string[]) {
     return;
   }
 
-  console.log(renderCommand(name, sub, command));
+  log(renderCommand(name, sub, command));
 }
 
-function showIndex(groups: CommandGroup[]) {
-  console.log(`phantom ${VERSION} — the macOS VM orchestrator
+function showIndex(groups: CommandGroup[], log: (line: string) => void) {
+  log(`phantom ${VERSION} — the macOS VM orchestrator
 
 Usage
   phantom <command> [subcommand] [options]

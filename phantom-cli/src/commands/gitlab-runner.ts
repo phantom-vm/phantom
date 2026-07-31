@@ -5,9 +5,10 @@ import { basename } from "node:path";
 import { homedir } from "node:os";
 import { usageError, type Command } from "../command";
 
-// gitlab-runner takes its whole arg vector (see the export at the bottom) and
-// routes internally, so these entries have no handler — they exist purely to
-// document the pseudo-subcommands for help rendering.
+// One record for both the router and `phantom help`, like every other group.
+// (These used to be pseudo-subcommands: the group took its whole arg vector and
+// dispatched internally, which cost it its own "Unknown subcommand" line and
+// kept the executor hooks fused into a single undispatchable help row.)
 export const commands: Record<string, Command> = {
   setup: {
     usage: "--token <glrt-...> [options]",
@@ -19,11 +20,36 @@ export const commands: Record<string, Command> = {
       "",
       "Jobs choose their VM image with the 'image:' keyword (phantom image list).",
     ],
+    multiArgHandler: (...args: string[]) => setup(args),
   },
-  status: { usage: "", description: "Show runner state" },
-  start: { usage: "", description: "Start the runner (also happens automatically on daemon launch)" },
-  stop: { usage: "", description: "Stop the runner" },
-  "prepare|run|cleanup": { usage: "", description: "Custom executor hooks (invoked by gitlab-runner itself)" },
+  status: { usage: "", description: "Show runner state", handler: () => daemonCommand("gitlab.status") },
+  start: {
+    usage: "",
+    description: "Start the runner (also happens automatically on daemon launch)",
+    handler: () => daemonCommand("gitlab.start"),
+  },
+  stop: { usage: "", description: "Stop the runner", handler: () => daemonCommand("gitlab.stop") },
+  prepare: {
+    usage: "",
+    description: "Executor hook: create the job's VM (invoked by gitlab-runner itself)",
+    handler: () => prepare(),
+  },
+  run: {
+    usage: "<script> <stage>",
+    description: "Executor hook: run one job step in the VM",
+    handler: (scriptPath?: string) => {
+      if (!scriptPath) {
+        console.error("Usage: phantom gitlab-runner run <script> <stage>");
+        process.exit(SYSTEM_FAILURE);
+      }
+      return run(scriptPath);
+    },
+  },
+  cleanup: {
+    usage: "",
+    description: "Executor hook: delete the job's VM",
+    handler: () => cleanup(),
+  },
 };
 
 // GitLab custom executor exit codes (set by runner as env vars)
@@ -283,33 +309,4 @@ async function daemonCommand(method: string) {
     process.exit(1);
   }
   printStatus(resp.result);
-}
-
-export async function gitlabRunner(...args: string[]) {
-  const subcommand = args[0];
-
-  if (subcommand === "prepare") {
-    await prepare();
-  } else if (subcommand === "run") {
-    const scriptPath = args[1];
-    if (!scriptPath) {
-      console.error("Usage: phantom gitlab-runner run <script> <stage>");
-      process.exit(SYSTEM_FAILURE);
-    }
-    await run(scriptPath);
-  } else if (subcommand === "cleanup") {
-    await cleanup();
-  } else if (subcommand === "setup") {
-    await setup(args.slice(1));
-  } else if (subcommand === "status") {
-    await daemonCommand("gitlab.status");
-  } else if (subcommand === "start") {
-    await daemonCommand("gitlab.start");
-  } else if (subcommand === "stop") {
-    await daemonCommand("gitlab.stop");
-  } else {
-    console.error(`Unknown subcommand: ${subcommand ?? "(none)"}`);
-    console.error("Usage: phantom gitlab-runner <setup|status|start|stop|prepare|run|cleanup>");
-    process.exit(1);
-  }
 }
