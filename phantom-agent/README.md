@@ -55,12 +55,17 @@ To get a dev build into a VM:
   B64=$(base64 -i .build/release/phantom-agent | tr -d '\n')
 
   phantom vm exec <vm-id> -- printf %s "$B64" '|' base64 -d '>' /tmp/phantom-agent \
-    '&&' shasum -a 256 /tmp/phantom-agent
-  phantom vm exec <vm-id> -- install -m 755 /tmp/phantom-agent /usr/local/bin/phantom-agent \
-    '&&' pkill -x phantom-agent
+    '&&' shasum -a 256 /tmp/phantom-agent          # matches the local file?
+
+  phantom vm exec <vm-id> -- install -m 755 /tmp/phantom-agent /usr/local/bin/phantom-agent
+
+  # Restart it by pid. KeepAlive brings the new binary up; the kill also takes
+  # down the shell running it, so this exec reports a failure — that's expected.
+  PID=$(phantom vm exec <vm-id> -- pgrep -f /usr/local/bin/phantom-agent | tr -dc 0-9)
+  phantom vm exec <vm-id> -- kill "$PID"
   ```
 
-  Two details this depends on, both easy to get wrong:
+  Four details this depends on, all easy to get wrong:
 
   - **Don't wrap it in `sh -c`.** `vm exec` joins everything after `--` into one
     command string, the way `ssh host cmd` does, and the guest agent runs that
@@ -71,6 +76,26 @@ To get a dev build into a VM:
     the wrapping newlines, and `echo` then prints something `base64 -d` cannot
     read. `tr -d '\n'` and the quotes are what make it arrive intact — check
     the `shasum` against the local file before installing.
+  - **`pkill -x phantom-agent` matches nothing, and `pkill -f` shoots the
+    messenger.** launchd starts the agent by absolute path, so its process name
+    is `/usr/local/bin/phantom-agent`, which `-x` never matches — the kill
+    silently does nothing and you keep testing the old agent. `-f` does match,
+    but the pattern also appears in the argv of the shell running `pkill`, which
+    is a child of the agent, so it can kill itself before signalling anything.
+    Take the pid first and `kill` that.
+  - **`phantom-agent --version` reads the file, not the process.** After
+    installing, it reports the new version whether or not the running agent was
+    ever replaced. Confirm the swap by behaviour instead — kill an exec's client
+    mid-command and check the command stopped — or by watching the pid change.
+    `/var/log/phantom-agent.out.log` is fully buffered when it goes to a file,
+    so its startup line lags and cannot settle this either.
+
+  Do **not** try to upgrade an agent by running the released
+  `phantom-agent-install.sh` over vsock: it `launchctl unload`s the daemon
+  before installing the new binary, which kills the shell running it, so nothing
+  is installed and the VM is left with no agent at all until it reboots. The
+  installer is written for the boot script, which types it into the guest from
+  outside the agent.
 
 - **Fresh image build** — serve the binary and the generated installer over
   HTTP on the vmnet bridge (the guest reaches the host at the bridge address,
