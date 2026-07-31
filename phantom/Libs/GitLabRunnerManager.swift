@@ -368,7 +368,7 @@ class GitLabRunnerManager {
         guard let data = try? Data(contentsOf: jobVMPath),
             let settings = try? JSONDecoder().decode(VMSettings.self, from: data)
         else {
-            return VMSettings.defaults.clamped()
+            return VMSettings.defaults
         }
         return settings.clamped()
     }

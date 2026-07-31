@@ -65,7 +65,7 @@ Two is the ceiling on concurrency because Virtualization.framework runs at most 
 
 That's it. The daemon downloads `gitlab-runner` (pinned version, stored under `~/Library/Application Support/phantom/gitlab-runner/<version>/`), registers it, and starts it. The runner restarts automatically whenever the daemon launches.
 
-Everything above — the URL, the token, concurrency, and how big each job's VM is — can also be seen and changed later in the app, under **Integration › GitLab Runner › Configure…**. Job VMs are created with 4 CPUs and 16GB by default; `phantom gitlab-runner status` reports the current size. Changing it takes effect on the next job, without restarting the runner.
+Everything above — the URL, the token, concurrency, and how big each job's VM is — can also be seen and changed later in the app, under **Integration › GitLab Runner › Configure…**. Job VMs default to half the Mac's cores and a quarter of its memory (never below 8GB); `phantom gitlab-runner status` reports the current size. Changing it takes effect on the next job, without restarting the runner.
 
 3. Point your jobs at a phantom image with the `image:` keyword (job-level or `default:`), using a local image name from `phantom image list`:
 
