@@ -84,6 +84,17 @@ function execUser(): string {
   return process.env.CUSTOM_ENV_PHANTOM_EXEC_USER ?? "admin";
 }
 
+/// The size the daemon says a job's VM gets, or undefined if it doesn't say —
+/// an older daemon, in which case `vm.create` applies its own defaults exactly
+/// as it did before this was configurable.
+async function jobVMSize(): Promise<{ cpuCount: number; memoryGB: number } | undefined> {
+  const resp = await sendRequest({ method: "gitlab.status" });
+  const cpuCount = resp.result?.jobCpuCount;
+  const memoryGB = resp.result?.jobMemoryGB;
+  if (typeof cpuCount !== "number" || typeof memoryGB !== "number") return undefined;
+  return { cpuCount, memoryGB };
+}
+
 async function prepare() {
   const jobId = getJobId();
   // The image comes from the job's `image:` keyword (default: or job-level)
@@ -93,11 +104,15 @@ async function prepare() {
     process.exit(SYSTEM_FAILURE);
   }
 
-  // 1. Create VM from image
-  console.error(`[phantom] Creating VM from image ${baseImage} for job ${jobId}...`);
+  // 1. Create VM from image, at the size the runner is configured to give a job.
+  // Asked for rather than assumed: the daemon owns the setting (Integration ›
+  // Configure…), and defaulting here would mean two places to change it.
+  const jobVM = await jobVMSize();
+  const size = jobVM ? ` (${jobVM.cpuCount} CPUs, ${jobVM.memoryGB}GB)` : "";
+  console.error(`[phantom] Creating VM from image ${baseImage} for job ${jobId}${size}...`);
   const createResp = await sendRequest({
     method: "vm.create",
-    params: { fromImage: baseImage },
+    params: { fromImage: baseImage, ...jobVM },
   });
   if (createResp.error) {
     console.error(`[phantom] VM create failed: ${createResp.error.message}`);
@@ -320,6 +335,9 @@ function printStatus(result: any) {
   console.log(`Version:    ${result?.version}`);
   console.log(`Configured: ${result?.configured}`);
   console.log(`Running:    ${result?.running}`);
+  if (typeof result?.jobCpuCount === "number") {
+    console.log(`Job VM:     ${result.jobCpuCount} CPUs, ${result.jobMemoryGB}GB`);
+  }
   if (result?.configPath) console.log(`Config:     ${result.configPath}`);
 }
 

@@ -80,6 +80,10 @@ class GitLabRunnerManager {
     /// it over the TCP API, so it is not a secret.
     var configPath: URL { runnerDir.appendingPathComponent("config.toml") }
     private var templatePath: URL { runnerDir.appendingPathComponent("template.toml") }
+    /// Phantom's own settings, deliberately not in `config.toml`: the size of a
+    /// job's VM is nothing gitlab-runner knows or cares about, and `register`
+    /// rewrites that file from scratch.
+    private var jobVMPath: URL { runnerDir.appendingPathComponent("job-vm.json") }
 
     private var downloadURL: URL {
         URL(string: "https://gitlab-runner-downloads.s3.amazonaws.com/\(Self.runnerVersion)/binaries/gitlab-runner-darwin-arm64")!
@@ -223,6 +227,7 @@ class GitLabRunnerManager {
         case .stopped: stateString = "stopped"
         case .error(let message): stateString = "error: \(message)"
         }
+        let jobVM = jobVMSettings
         return [
             "state": stateString,
             "configured": isConfigured,
@@ -230,6 +235,10 @@ class GitLabRunnerManager {
             "version": Self.runnerVersion,
             "binaryDownloaded": isBinaryDownloaded,
             "configPath": configPath.path,
+            // What `prepare` creates each job's VM with — it reads them from
+            // here rather than carrying a copy of the defaults.
+            "jobCpuCount": jobVM.cpuCount,
+            "jobMemoryGB": Double(jobVM.memorySize) / 1024 / 1024 / 1024,
         ]
     }
 
@@ -348,6 +357,28 @@ class GitLabRunnerManager {
             cleanup_args = ["gitlab-runner", "cleanup"]
         """
         try template.write(to: templatePath, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Job VM size
+
+    /// What every job's VM is created with. Clamped on the way out, because the
+    /// file outlives the Mac it was written on — a 10-CPU job VM moved to an
+    /// 8-core machine should boot smaller, not fail.
+    var jobVMSettings: VMSettings {
+        guard let data = try? Data(contentsOf: jobVMPath),
+            let settings = try? JSONDecoder().decode(VMSettings.self, from: data)
+        else {
+            return VMSettings.defaults.clamped()
+        }
+        return settings.clamped()
+    }
+
+    /// Takes effect on the next job, so the runner is left alone: it only
+    /// decides what `prepare` asks `vm.create` for.
+    func setJobVMSettings(_ settings: VMSettings) throws {
+        try JSONEncoder().encode(settings.clamped()).write(to: jobVMPath, options: .atomic)
+        let memory = settings.memorySize.formatted(.byteCount(style: .memory))
+        log("Job VMs will be created with \(settings.cpuCount) CPUs and \(memory)")
     }
 
     static func validate(concurrent: Int) throws {

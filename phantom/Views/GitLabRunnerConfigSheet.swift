@@ -2,14 +2,17 @@ import SwiftUI
 
 /// The GitLab runner's configuration, editable from the Integration pane.
 ///
-/// Two operations wear one form, because to the reader they are one thing —
-/// "what is this runner set to":
+/// Three kinds of setting wear one form, because to the reader they are one
+/// thing — "what is this runner set to" — and they cost different things to
+/// apply, which the sheet says out loud rather than hiding:
 ///
 /// - **Not registered yet** — every field is required and applying registers.
-/// - **Registered** — `concurrent` is a config edit that the registration
-///   survives, while a new URL or token can only be applied by registering
-///   again, which throws the current registration away. The button renames
-///   itself and the sheet says so before that happens.
+/// - **URL or token** — only applicable by registering again, which throws the
+///   current registration away. The button renames itself to Re-register.
+/// - **Concurrency** — a config edit the registration survives, but the runner
+///   reads it at startup, so it is bounced.
+/// - **Job VM size** — phantom's own setting, not gitlab-runner's. It decides
+///   what the *next* job's VM is created with, so nothing is restarted.
 struct GitLabRunnerConfigSheet: View {
     @Bindable var vm: VMManager
 
@@ -18,23 +21,40 @@ struct GitLabRunnerConfigSheet: View {
     @State private var url: String
     @State private var token: String
     @State private var concurrent: Int
+    @State private var cpuCount: Int
+    @State private var memoryGB: Int
     /// The token is prefilled so a URL change doesn't cost one, but it is a
     /// credential on a pane that gets screen-shared — masked until asked for.
     @State private var revealToken = false
     @State private var errorMessage: String?
 
-    /// What the file said when the sheet opened, to tell an edit from a
+    /// What the files said when the sheet opened, to tell an edit from a
     /// retyping of the same value.
     private let original: GitLabRunnerManager.Configuration?
+    private let originalJobVM: VMSettings
 
     init(vm: VMManager) {
         self.vm = vm
         let current = vm.gitlabRunnerManager.currentConfiguration()
+        let jobVM = vm.gitlabRunnerManager.jobVMSettings
         self.original = current
+        self.originalJobVM = jobVM
         _url = State(initialValue: current?.url ?? "https://gitlab.com")
         _token = State(initialValue: current?.token ?? "")
         _concurrent = State(initialValue: current?.concurrent ?? 1)
+        _cpuCount = State(initialValue: jobVM.cpuCount)
+        _memoryGB = State(initialValue: Int(jobVM.memorySize / (1024 * 1024 * 1024)))
     }
+
+    private var maxCPUCount: Int { VMSettings.maximumCPUCount }
+    private var minMemoryGB: Int { max(1, Int(VMSettings.minimumMemorySize / (1024 * 1024 * 1024))) }
+    private var maxMemoryGB: Int { Int(VMSettings.maximumMemorySize / (1024 * 1024 * 1024)) }
+
+    private var jobVMSettings: VMSettings {
+        VMSettings(cpuCount: cpuCount, memorySize: UInt64(memoryGB) * 1024 * 1024 * 1024)
+    }
+
+    private var jobVMChanged: Bool { jobVMSettings != originalJobVM }
 
     private var runner: GitLabRunnerManager { vm.gitlabRunnerManager }
 
@@ -49,6 +69,13 @@ struct GitLabRunnerConfigSheet: View {
     }
 
     private var hasChanges: Bool {
+        guard let original else { return true }
+        return reregisters || concurrent != original.concurrent || jobVMChanged
+    }
+
+    /// Whether applying stops the runner. Job VM size alone doesn't: it is read
+    /// when the next job asks for a VM, not when the runner starts.
+    private var restartsRunner: Bool {
         guard let original else { return true }
         return reregisters || concurrent != original.concurrent
     }
@@ -174,6 +201,53 @@ struct GitLabRunnerConfigSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Job VM") {
+                // The same two sliders as CreateVMSheet, for the same reason: the
+                // value is what matters, so it is labelled and kept beside the
+                // track rather than left to be read off a handle position.
+                LabeledContent("CPUs") {
+                    HStack {
+                        Slider(
+                            value: cpuBinding,
+                            in: Double(VMSettings.minimumCPUCount)...Double(maxCPUCount),
+                            step: 1
+                        ) {
+                            EmptyView()
+                        } minimumValueLabel: {
+                            bound("\(VMSettings.minimumCPUCount)")
+                        } maximumValueLabel: {
+                            bound("\(maxCPUCount)")
+                        }
+                        Text("\(cpuCount)")
+                            .monospacedDigit()
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+
+                LabeledContent("Memory") {
+                    HStack {
+                        // Unstepped, like CreateVMSheet's: a stepped track snaps
+                        // to a grid anchored at the lower bound and puts the
+                        // stated ceiling out of reach. The binding rounds.
+                        Slider(value: memoryBinding, in: Double(minMemoryGB)...Double(maxMemoryGB)) {
+                            EmptyView()
+                        } minimumValueLabel: {
+                            bound("\(minMemoryGB)")
+                        } maximumValueLabel: {
+                            bound("\(maxMemoryGB)")
+                        }
+                        Text("\(memoryGB) GB")
+                            .monospacedDigit()
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+
+                Text("What every job's VM is created with. Two concurrent jobs take two of these at once, so this and the count above share one Mac between them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let validationError {
                 Section {
                     Text(validationError)
@@ -191,16 +265,40 @@ struct GitLabRunnerConfigSheet: View {
                             systemImage: "exclamationmark.triangle"
                         )
                     }
-                    if runner.isRunning {
+                    if restartsRunner && runner.isRunning {
                         note(
                             "The runner reads its config at startup, so applying restarts it. A job running right now would be interrupted.",
                             systemImage: "arrow.clockwise"
+                        )
+                    } else if jobVMChanged {
+                        note(
+                            "The runner keeps running: a VM's size is read when the next job asks for one, so a job already under way finishes at the old size.",
+                            systemImage: "clock.arrow.circlepath"
                         )
                     }
                 }
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// The ends of a track, so the handle reads as a proportion of what this Mac
+    /// allows rather than a bare position.
+    private func bound(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+    }
+
+    /// Slider works in Double; the settings are integers. Rounding on the way
+    /// back keeps a dragged handle from landing on 7.999999 CPUs.
+    private var cpuBinding: Binding<Double> {
+        Binding(get: { Double(cpuCount) }, set: { cpuCount = Int($0.rounded()) })
+    }
+
+    private var memoryBinding: Binding<Double> {
+        Binding(get: { Double(memoryGB) }, set: { memoryGB = Int($0.rounded()) })
     }
 
     private func note(_ text: String, systemImage: String) -> some View {
@@ -215,14 +313,31 @@ struct GitLabRunnerConfigSheet: View {
     private func apply() {
         guard validationError == nil, blockedReason == nil else { return }
 
-        // A concurrency-only change is a line in a file and a bounce of the
-        // process: fast enough to report failure in the sheet that asked for it.
-        if !reregisters {
+        // Written first and unconditionally: a re-registration below replaces
+        // config.toml but never touches this file, and the next job should be
+        // sized by what the sheet said either way.
+        if jobVMChanged {
             do {
-                try runner.setConcurrent(concurrent)
+                try runner.setJobVMSettings(jobVMSettings)
             } catch {
                 errorMessage = error.localizedDescription
                 return
+            }
+        }
+
+        // Everything short of a re-registration is a line in a file and, at
+        // most, a bounce of the process: fast enough to report failure in the
+        // sheet that asked for it.
+        // (`reregisters` is true whenever there is no registration, so here
+        // there is one, and only a changed value needs the runner bounced.)
+        if !reregisters {
+            if concurrent != original?.concurrent {
+                do {
+                    try runner.setConcurrent(concurrent)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    return
+                }
             }
             dismiss()
             return

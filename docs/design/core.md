@@ -220,7 +220,8 @@ nobody.
     ├── v18.11.2/
     │   └── gitlab-runner     # Versioned binary downloaded from GitLab S3
     ├── config.toml           # Runner config owned by phantom (never touches ~/.gitlab-runner)
-    └── template.toml         # Register template pointing the custom executor at phantom-cli
+    ├── template.toml         # Register template pointing the custom executor at phantom-cli
+    └── job-vm.json           # VMSettings every job's VM is created with (phantom's, not the runner's)
 ```
 
 `config.toml` is also read back, not just written: `GitLabRunnerManager.currentConfiguration()`
@@ -235,7 +236,15 @@ bounced — which interrupts a job in flight, so both the GUI and the CLI say so
 they do it. It is capped at `GitLabRunnerManager.maxConcurrent` (2), enforced in the
 manager because the GUI, the CLI and the API all arrive there: Virtualization.framework
 runs at most two macOS guests at a time and every job is a VM, so a third concurrent job
-could only wait for a slot. Everything else GitLab knows about — the URL and the token — can only change by
+could only wait for a slot.
+
+The size of a job's VM is **not** in `config.toml` — it is nothing gitlab-runner knows
+about, and `register` rewrites that file from scratch. It lives in phantom's own
+`job-vm.json` (`jobVMSettings` / `setJobVMSettings`, clamped to the host on read, since
+the file outlives the Mac it was written on), is reported by `gitlab.status`, and
+`prepare` asks for it and passes `cpuCount`/`memoryGB` to `vm.create` rather than
+carrying a second copy of the defaults. Changing it restarts nothing: it is read when
+the next job asks for a VM, so a job already under way finishes at the old size. Everything else GitLab knows about — the URL and the token — can only change by
 registering again, which replaces the file.
 
 **VM Bundle Contents**:

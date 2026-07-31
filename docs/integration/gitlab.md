@@ -59,9 +59,13 @@ Options:
 |------|-------------|
 | `--token <token>` | Runner authentication token (required) |
 | `--url <url>` | GitLab instance URL (default: `https://gitlab.com`) |
-| `--concurrent <n>` | Max concurrent jobs (default: 1) |
+| `--concurrent <n>` | Max concurrent jobs, 1 or 2 (default: 1) |
+
+Two is the ceiling on concurrency because Virtualization.framework runs at most two macOS VMs at a time, and every job is a VM.
 
 That's it. The daemon downloads `gitlab-runner` (pinned version, stored under `~/Library/Application Support/phantom/gitlab-runner/<version>/`), registers it, and starts it. The runner restarts automatically whenever the daemon launches.
+
+Everything above — the URL, the token, concurrency, and how big each job's VM is — can also be seen and changed later in the app, under **Integration › GitLab Runner › Configure…**. Job VMs are created with 4 CPUs and 16GB by default; `phantom gitlab-runner status` reports the current size. Changing it takes effect on the next job, without restarting the runner.
 
 3. Point your jobs at a phantom image with the `image:` keyword (job-level or `default:`), using a local image name from `phantom image list`:
 
@@ -167,13 +171,17 @@ This means all standard CI variables (`CI_COMMIT_SHA`, `CI_PROJECT_NAME`, etc.) 
 
 ## Concurrent Jobs
 
-Each job gets its own VM. Concurrent jobs are supported — pass `--concurrent <n>` to setup.
+Each job gets its own VM. Concurrent jobs are supported — pass `--concurrent <n>` to setup, up to two: that is how many macOS VMs Virtualization.framework will run at once, so a third job would only wait for a slot.
 
 Each job's script is base64-encoded and piped directly into the VM over vsock, so there are no shared files and no risk of collisions between concurrent jobs.
+
+Two concurrent jobs means two VMs of the size configured under **Integration › GitLab Runner › Configure…** running on one Mac, so the two settings are worth choosing together.
 
 ## Under the Hood
 
 Setup generates `~/Library/Application Support/phantom/gitlab-runner/config.toml` with a `[runners.custom]` section that points `prepare_exec`/`run_exec`/`cleanup_exec` at the phantom CLI (`phantom gitlab-runner prepare|run|cleanup`). The daemon runs `gitlab-runner run --config <that file>` as a supervised child process — your `~/.gitlab-runner/` (if any) is never touched.
+
+The job VM's size is not in that file: it is nothing gitlab-runner knows about, and registering rewrites `config.toml` from scratch. It lives beside it in `job-vm.json`, and `prepare` asks the daemon for it when it creates the job's VM.
 
 ## Troubleshooting
 

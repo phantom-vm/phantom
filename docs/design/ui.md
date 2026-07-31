@@ -184,7 +184,8 @@ its output separately.
   and the config path, with start/stop and **Register…**/**Configure…**.
   **Log** is the runner's own output.
 
-  `GitLabRunnerConfigSheet` is that form: GitLab URL, token and concurrency, prefilled
+  `GitLabRunnerConfigSheet` is that form: GitLab URL, token, concurrency and the size of
+  the VM each job gets, prefilled
   by reading `config.toml` back — `setup` keeps none of its arguments, and the file
   survives launches and hand edits, so the file is the only truth there is. One form
   covers two operations, because "what is this runner set to" is one question to the
@@ -192,9 +193,15 @@ its output separately.
   patches the file and bounces the process, GitLab never hears about it), while a new
   URL or token can only be applied by registering again — so the button renames itself
   to **Re-register** and the sheet says what that discards *before* it happens.
-  Both consequences are stated before they happen, since nothing else on screen would
-  show them: that applying discards a registration, and that it restarts the runner and
-  so interrupts a job in flight. Concurrency tops out at two — every job is a VM and
+  The **Job VM** sliders are `CreateVMSheet`'s, bounded the same way, and they are the one
+  setting here that is phantom's rather than gitlab-runner's — so they go in `job-vm.json`
+  beside the runner's config, never into `config.toml`, and applying them restarts
+  nothing: they decide what the *next* job's VM is created with.
+
+  Each consequence is stated before it happens, since nothing else on screen would show
+  it: that applying discards a registration, that it restarts the runner and so
+  interrupts a job in flight, or — for a size-only change — that it deliberately does
+  neither. Concurrency tops out at two — every job is a VM and
   Virtualization.framework runs two macOS guests at a time — and a larger value already
   in the file is displayed as it is rather than clamped behind the user's back.
   The token is prefilled so that changing the URL doesn't cost one, masked behind a

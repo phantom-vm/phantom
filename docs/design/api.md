@@ -265,7 +265,8 @@ Or on error:
 
 ### gitlab.status
 - **Purpose**: Report managed runner state
-- **Response**: `{"state": "not_configured|downloading|registering|running|stopped|error: ...", "configured": bool, "running": bool, "version": "v18.11.2", "binaryDownloaded": bool, "configPath": "..."}`
+- **Response**: `{"state": "not_configured|downloading|registering|running|stopped|error: ...", "configured": bool, "running": bool, "version": "v18.11.2", "binaryDownloaded": bool, "configPath": "...", "jobCpuCount": 4, "jobMemoryGB": 16}`
+- **Note**: `jobCpuCount`/`jobMemoryGB` are what every CI job's VM is created with, and this is where the executor reads them: `gitlab-runner prepare` calls this before `vm.create` and passes them straight through, rather than keeping a second copy of the defaults. A response without them (an older daemon) means `vm.create` applies its own, exactly as before the size was configurable.
 
 ### gitlab.start
 - **Purpose**: Start the runner from an existing config (also happens automatically on daemon launch)
