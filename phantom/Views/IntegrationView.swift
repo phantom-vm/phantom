@@ -100,8 +100,13 @@ struct GitLabRunnerDetailView: View {
 
     @State private var tab: Tab = .info
     @State private var errorMessage: String?
+    @State private var configuring = false
 
     private var runner: GitLabRunnerManager { vm.gitlabRunnerManager }
+
+    /// Read once per body pass rather than stored: `setup` writes the file and
+    /// publishes its state, and this view redraws on that.
+    private var configuration: GitLabRunnerManager.Configuration? { runner.currentConfiguration() }
 
     var body: some View {
         Group {
@@ -115,6 +120,9 @@ struct GitLabRunnerDetailView: View {
             }
         }
         .navigationTitle("GitLab Runner")
+        .sheet(isPresented: $configuring) {
+            GitLabRunnerConfigSheet(vm: vm)
+        }
         // In the toolbar rather than the pane body: which view of the runner you
         // are looking at is navigation, not content, and a header band inside the
         // pane costs vertical space on every tab. Declared here, on the detail
@@ -156,6 +164,7 @@ struct GitLabRunnerDetailView: View {
                             }
                             .disabled(!runner.isConfigured)
                         }
+                        Button(runner.isConfigured ? "Configure…" : "Register…") { configuring = true }
                     }
 
                     if let errorMessage {
@@ -174,6 +183,10 @@ struct GitLabRunnerDetailView: View {
                     DetailRow(label: "State", value: stateDescription)
                     DetailRow(label: "Registered", value: runner.isConfigured ? "Yes" : "No")
                     DetailRow(label: "Running", value: runner.isRunning ? "Yes" : "No")
+                    if let configuration {
+                        DetailRow(label: "GitLab", value: configuration.url)
+                        DetailRow(label: "Concurrent", value: "\(configuration.concurrent)")
+                    }
                     DetailRow(label: "Version", value: GitLabRunnerManager.runnerVersion)
                     DetailRow(label: "Binary", value: runner.isBinaryDownloaded ? "Downloaded" : "Not downloaded")
                     DetailRow(label: "Config", value: runner.configPath.path, monospaced: true)
@@ -193,15 +206,14 @@ struct GitLabRunnerDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Not registered yet")
                 .font(.headline)
-            Text("Registering needs a GitLab URL and a runner token, so it is done from the CLI:")
+            Text("Registering needs a GitLab URL and a runner token — Register… above, or 'phantom gitlab-runner setup --token glrt-xxx' from a terminal.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            Text("phantom gitlab-runner setup --token glrt-xxx")
-                .font(.system(.callout, design: .monospaced))
-                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
             Text("Every job then gets a fresh VM, created from the image its 'image:' names and deleted afterwards.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

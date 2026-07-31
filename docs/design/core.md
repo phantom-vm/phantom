@@ -223,6 +223,17 @@ nobody.
     └── template.toml         # Register template pointing the custom executor at phantom-cli
 ```
 
+`config.toml` is also read back, not just written: `GitLabRunnerManager.currentConfiguration()`
+pulls the URL, token and concurrency out of it for the GUI's config sheet, and
+`resolvedCLIPath()` takes the executor path out of `template.toml` so a re-registration
+keeps pointing at the CLI the first one found. Three keys read and one written, all in
+a shape `gitlab-runner register` controls — matched by regex rather than by taking on a
+TOML dependency. `concurrent` is the one setting phantom edits in place (`setConcurrent`):
+it is a global key rather than a `[[runners]]` one, so GitLab is not involved and the
+registration survives, but the runner only reads it at startup, so a running process is
+bounced. Everything else GitLab knows about — the URL and the token — can only change by
+registering again, which replaces the file.
+
 **VM Bundle Contents**:
 - `disk.img` - Created via `ftruncate()`, 90GB sparse file
 - `AuxiliaryStorage` - VM-specific data, persisted across boots

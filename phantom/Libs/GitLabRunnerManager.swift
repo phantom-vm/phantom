@@ -123,6 +123,21 @@ class GitLabRunnerManager {
     /// Re-running replaces the previous registration. Jobs pick their VM image
     /// via the `image:` keyword — the runner has no image configuration.
     func setup(url: String, token: String, cliPath: String, concurrent: Int?) async throws {
+        do {
+            try await performSetup(url: url, token: token, cliPath: cliPath, concurrent: concurrent)
+        } catch {
+            // The steps that have their own diagnosis (download, registration)
+            // have already set it; this catches the ones that don't, so a caller
+            // with nowhere to put a thrown error — the GUI, which dismisses its
+            // sheet and lets the state label speak — still shows the failure.
+            if case .error = state {} else { state = .error(error.localizedDescription) }
+            log("GitLab runner setup failed: \(error.localizedDescription)")
+            daemonLog("GitLab runner setup failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
+    private func performSetup(url: String, token: String, cliPath: String, concurrent: Int?) async throws {
         if !isBinaryDownloaded {
             try await downloadBinary()
         }
@@ -155,11 +170,24 @@ class GitLabRunnerManager {
         }
         log("Runner registered")
 
-        if let concurrent, concurrent > 1 {
+        if let concurrent {
             try patchConcurrent(concurrent)
         }
 
         try startRunner()
+    }
+
+    /// Change `concurrent` without disturbing the registration: it is a global
+    /// key, not a `[[runners]]` one, so GitLab never hears about it — but the
+    /// runner only reads it at startup, so a running process is bounced.
+    func setConcurrent(_ concurrent: Int) throws {
+        guard isConfigured else { throw GitLabRunnerError.notConfigured }
+        try patchConcurrent(concurrent)
+        log("concurrent set to \(concurrent)")
+        if isRunning {
+            stopRunner()
+            try startRunner()
+        }
     }
 
     func start() async throws {
@@ -220,6 +248,74 @@ class GitLabRunnerManager {
     }
 
     // MARK: - Config
+
+    /// What the runner is registered with, as the config file has it.
+    ///
+    /// Read back rather than remembered: `setup` takes these as arguments and
+    /// keeps none of them, the file outlives every launch, and it can be edited
+    /// by hand — so the file is the truth and anything cached beside it would
+    /// be a second, staler one.
+    struct Configuration: Equatable {
+        var url: String
+        var token: String
+        var concurrent: Int
+    }
+
+    func currentConfiguration() -> Configuration? {
+        guard let config = try? String(contentsOf: configPath, encoding: .utf8) else { return nil }
+        return Configuration(
+            url: Self.tomlValue(config, key: "url") ?? "",
+            token: Self.tomlValue(config, key: "token") ?? "",
+            // `concurrent` is written by register even when it was never asked
+            // for; 1 is what its absence would mean anyway.
+            concurrent: Self.tomlValue(config, key: "concurrent").flatMap(Int.init) ?? 1
+        )
+    }
+
+    /// The registering CLI's absolute path, which the custom executor needs.
+    ///
+    /// The CLI passes its own `execPath`; the GUI has to find one. A
+    /// re-registration reuses whatever the current template names, so a CLI
+    /// installed somewhere unusual survives an edit made from the GUI, and only
+    /// a first registration falls back to guessing.
+    func resolvedCLIPath() -> String? {
+        if let template = try? String(contentsOf: templatePath, encoding: .utf8),
+            let path = Self.tomlValue(template, key: "prepare_exec"),
+            FileManager.default.isExecutableFile(atPath: path)
+        {
+            return path
+        }
+        return Self.installedCLIPath()
+    }
+
+    /// Where `curl | sh` and the two package managers put the CLI. Nothing here
+    /// searches $PATH: the app is launched by Finder, whose environment is not
+    /// the shell's, so a PATH lookup would answer for the wrong user's setup.
+    static func installedCLIPath() -> String? {
+        [
+            "\(NSHomeDirectory())/.local/bin/phantom",
+            "/usr/local/bin/phantom",
+            "/opt/homebrew/bin/phantom",
+        ].first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    /// One key out of a TOML file, string or integer, at any indentation.
+    ///
+    /// Three keys are read and one is written, all of them written by
+    /// `gitlab-runner register` in a shape it controls — not enough TOML to be
+    /// worth a dependency. The `=` has to be matched to keep `token_obtained_at`
+    /// from answering for `token`.
+    private static func tomlValue(_ toml: String, key: String) -> String? {
+        let pattern = "(?m)^[ \t]*\(key)[ \t]*=[ \t]*(?:\"([^\"]*)\"|([0-9]+))[ \t]*$"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(in: toml, range: NSRange(toml.startIndex..., in: toml))
+        else { return nil }
+        // One of the two alternatives matched; the other's range is empty.
+        for group in 1...2 {
+            if let range = Range(match.range(at: group), in: toml) { return String(toml[range]) }
+        }
+        return nil
+    }
 
     private func writeTemplate(cliPath: String) throws {
         let template = """

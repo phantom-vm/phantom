@@ -179,10 +179,28 @@ its output separately.
   `IntegrationListView` has no toolbar item to anchor them beside the divider (see
   Toolbar placement below) and there is no control that list of two fixed rows
   actually wants. **Info**
-  shows state, whether it is registered, whether it is running, the pinned version,
-  whether the binary is present, and the config path, with start/stop; registering
-  needs a URL and a token, so it points at `phantom gitlab-runner setup` rather than
-  reproducing that form. **Log** is the runner's own output.
+  shows state, whether it is registered, whether it is running, where it is registered
+  and how many jobs it runs at once, the pinned version, whether the binary is present,
+  and the config path, with start/stop and **Register…**/**Configure…**.
+  **Log** is the runner's own output.
+
+  `GitLabRunnerConfigSheet` is that form: GitLab URL, token and concurrency, prefilled
+  by reading `config.toml` back — `setup` keeps none of its arguments, and the file
+  survives launches and hand edits, so the file is the only truth there is. One form
+  covers two operations, because "what is this runner set to" is one question to the
+  reader: concurrency is a global key the registration survives (`setConcurrent`
+  patches the file and bounces the process, GitLab never hears about it), while a new
+  URL or token can only be applied by registering again — so the button renames itself
+  to **Re-register** and the sheet says what that discards *before* it happens.
+  The token is prefilled so that changing the URL doesn't cost one, masked behind a
+  reveal toggle: it is plain text in `config.toml` either way, and hiding it in the
+  GUI only keeps it off a screen someone is sharing. Registering writes the CLI's
+  absolute path into the executor config, so the sheet needs one — the current
+  `template.toml`'s if there is one, else `~/.local/bin`, `/usr/local/bin`,
+  `/opt/homebrew/bin`; with no CLI installed it refuses rather than registering a
+  runner whose every job would invoke a missing binary. Registration outlives the
+  sheet (it downloads a binary and talks to GitLab), so the sheet dismisses and the
+  state label behind it carries the progress and any failure.
 - **GitHub Runner** — a placeholder saying it is coming. Listed so the section is
   honest about its scope instead of looking like it is only ever about GitLab.
 
