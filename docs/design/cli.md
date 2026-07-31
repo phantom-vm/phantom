@@ -10,9 +10,11 @@ CLI that sends JSON-RPC requests to the daemon.
 
 | Level | Reached by | Shows |
 |-------|-----------|-------|
-| Index | `phantom`, `phantom help` | One line per top-level command, no flags |
-| Group | `phantom help vm`, `phantom vm --help` | That command's subcommands and their argument forms |
-| Command | `phantom help vm deploy`, `phantom vm deploy --help` | One subcommand: description, usage, options |
+| Index | `phantom` | One line per top-level command, no flags |
+| Group | `phantom vm --help` | That command's subcommands and their argument forms |
+| Command | `phantom vm deploy --help` | One subcommand: description, usage, options |
+
+`--help` is the one form the CLI points at, so it is the only one its own text ever recommends. `phantom help [command [subcommand]]` reaches all three levels too and still routes, but it is not listed in the index and nothing suggests it — one way to ask is enough to teach.
 
 A `Command` carries `details` — its option lines — beside `usage` and `description`, and a handler that rejects its arguments prints the same block through `usageError`. So the text a user reads after a mistake is the text they get from asking, and neither can drift from the other. Option detail therefore lives in the module that implements the command (`build.ts` and `publish.ts` export their own `Command`, which `image.ts` only aggregates), next to the parser that has to honour it.
 

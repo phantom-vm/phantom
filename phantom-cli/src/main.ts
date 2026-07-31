@@ -48,10 +48,11 @@ runCli(() => ({
     {
       title: "Other",
       prefix: "",
+      // `phantom help [command [subcommand]]` still routes — it is just not
+      // advertised, since `--help` is the form we point people at.
       commands: {
         health: healthCommand,
         update: updateCommand,
-        help: { usage: "[command [subcommand]]", description: "Show help for a command" },
       },
     },
   ],

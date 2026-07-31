@@ -64,8 +64,8 @@ phantom vm screenshot <id>       # capture its framebuffer
 phantom image list | catalog | pull | delete
 ```
 
-`phantom` on its own lists the commands; `phantom help <command>` (or `--help`
-after any of them) gives that one's subcommands and flags.
+`phantom` on its own lists the commands; `--help` after any of them gives that
+one's subcommands and flags.
 
 Keep the CLI current with `phantom update`, which replaces the binary in place
 with the latest release. The daemon is updated by hand for now — download

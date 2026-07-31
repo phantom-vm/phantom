@@ -110,7 +110,7 @@ function showHelp(groups: CommandGroup[], path: string[], log: (line: string) =>
 
   if (!sub) {
     log(renderGroup(group));
-    log(`\nRun 'phantom help ${name} <subcommand>' for one in full.`);
+    log(`\nRun 'phantom ${name} <subcommand> --help' for one in full.`);
     return;
   }
 
@@ -145,8 +145,8 @@ Usage
 Commands
 ${renderIndex(groups)}
 
-Run 'phantom help <command>' for a command's subcommands, or add --help to any
-of them.
+Run 'phantom <command> --help' for a command's subcommands, and again on a
+subcommand for its flags.
 
 Examples
   phantom image list
