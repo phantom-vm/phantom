@@ -7,9 +7,10 @@ import Virtualization
 /// again from scratch on every start, so without a record on disk a VM sized at
 /// creation would silently revert to the defaults the next time it booted.
 ///
-/// Bundles created before this file existed have none, and read back as
-/// `.legacy` — the 4 CPUs / 16GB that used to be hardcoded, so nothing resizes
-/// underneath an existing VM.
+/// Every path that makes a bundle writes the file, so one without it is a bundle
+/// from before it existed. Those read back as `.defaults` like anything else:
+/// there is no compatibility owed to them at this stage, and carrying a second
+/// constant to hold them at their old size cost more than it was worth.
 struct VMSettings: Codable, Equatable {
     var cpuCount: Int
     /// Bytes, matching `VZVirtualMachineConfiguration.memorySize`
@@ -19,11 +20,11 @@ struct VMSettings: Codable, Equatable {
 
     private static let gigabyte: UInt64 = 1024 * 1024 * 1024
 
-    /// What a *new* VM gets when nobody says otherwise: half the host's cores
-    /// and a quarter of its memory, leaving the majority of both to the Mac the
-    /// VM is a guest on. `clamped()` because a small host can honour neither —
-    /// on an 8GB machine the floor below is already more than the framework will
-    /// hand out.
+    /// What a VM gets when nobody says otherwise: half the host's cores and a
+    /// quarter of its memory, leaving the majority of both to the Mac the VM is
+    /// a guest on. `clamped()` because a small host can honour neither — on an
+    /// 8GB machine the floor below is already more than the framework will hand
+    /// out.
     ///
     /// Derived rather than constant: the sizes around it already are (the CPU
     /// ceiling is the host's core count), and one number cannot be right for both
@@ -37,11 +38,6 @@ struct VMSettings: Codable, Equatable {
             memorySize: max(host.physicalMemory / 4, 8 * gigabyte)
         ).clamped()
     }
-
-    /// The size every VM was before `vm.json` existed. Only a bundle without one
-    /// reads back as this — it is what those VMs have been booting with, and the
-    /// host-derived default must not resize them years later.
-    static let legacy = VMSettings(cpuCount: 4, memorySize: 16 * gigabyte)
 
     // MARK: - Allowed Ranges
 
@@ -69,15 +65,13 @@ struct VMSettings: Codable, Equatable {
 
     // MARK: - Persistence
 
-    /// Read a bundle's settings. A missing or unreadable file means a bundle
-    /// from before this file existed, which is `.legacy` — not `.defaults`,
-    /// which would resize an existing VM the first time it booted under a
-    /// host-derived default.
+    /// Read a bundle's settings, falling back to the defaults when the file is
+    /// missing or unreadable.
     static func load(from bundlePath: URL) -> VMSettings {
         let path = bundlePath.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: path),
               let settings = try? JSONDecoder().decode(VMSettings.self, from: data) else {
-            return .legacy
+            return .defaults
         }
         return settings.clamped()
     }

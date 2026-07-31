@@ -198,7 +198,7 @@ nobody.
 │   │   ├── AuxiliaryStorage  # Binary blob
 │   │   ├── MachineIdentifier # Binary blob
 │   │   ├── HardwareModel     # Binary blob
-│   │   └── vm.json           # CPU count + memory size (absent = the pre-vm.json 4 / 16GB)
+│   │   └── vm.json           # CPU count + memory size (absent = host-derived defaults)
 │   │
 │   └── vm-def456/
 │       └── ...
@@ -256,20 +256,19 @@ registering again, which replaces the file.
 
 `vm.json` has to exist because a VM is configured from scratch on *every* start,
 not just at creation — without a record on disk, a VM sized at creation would
-quietly revert to the defaults on its next boot. A bundle without the file (any
-VM created before it existed) reads back as `VMSettings.legacy`, 4 CPUs / 16GB,
-exactly what used to be hardcoded, so nothing resizes underneath an existing VM.
-Values are clamped to what the host allows on the way in and on the way out, and
-a clone inherits its source's sizing.
+quietly revert to the defaults on its next boot. Values are clamped to what the
+host allows on the way in and on the way out, and a clone inherits its source's
+sizing.
 
-A **new** VM, by contrast, is sized from the machine it is created on:
-`VMSettings.defaults` is half the host's cores and a quarter of its memory, with
-a floor of 8GB — a quarter of a 16GB Mac is 4GB, which is under what Xcode and
-the simulators want. Derived rather than constant because the bounds around it
-always were (the CPU ceiling is the host's core count), and one number cannot be
-right for both an 8-core laptop and a 24-core Studio. The two are separate
-constants on purpose: `legacy` describes VMs that already exist, `defaults`
-describes the next one.
+Those defaults are read off the machine the VM is created on: `VMSettings.defaults`
+is half the host's cores and a quarter of its memory, with a floor of 8GB — a
+quarter of a 16GB Mac is 4GB, which is under what Xcode and the simulators want.
+Derived rather than constant because the bounds around it always were (the CPU
+ceiling is the host's core count), and one number cannot be right for both an
+8-core laptop and a 24-core Studio. A bundle with no `vm.json` — one from before
+the file existed — falls back to the same defaults and is resized accordingly;
+holding those VMs at their original 4 CPUs / 16GB is not compatibility this stage
+of the project is paying a second constant for.
 
 `MachineIdentifier` **travels with the disk** — it is carried into an image on
 save, restored from the image, and copied by a clone, never regenerated. The
