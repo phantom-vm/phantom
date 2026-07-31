@@ -11,12 +11,6 @@ import SwiftUI
 ///   again, which throws the current registration away. The button renames
 ///   itself and the sheet says so before that happens.
 struct GitLabRunnerConfigSheet: View {
-    /// macOS lets Virtualization.framework run two macOS guests at a time, and a
-    /// job is a VM — so a third concurrent job could only ever wait for a slot.
-    /// The value already in the file is shown as it is rather than clamped
-    /// silently; the stepper simply won't climb past this.
-    static let maxConcurrent = 2
-
     @Bindable var vm: VMManager
 
     @Environment(\.dismiss) private var dismiss
@@ -166,7 +160,14 @@ struct GitLabRunnerConfigSheet: View {
             }
 
             Section {
-                Stepper("Concurrent jobs: \(concurrent)", value: $concurrent, in: 1...Self.maxConcurrent)
+                // The value already in the file is shown as it is rather than
+                // clamped behind the user's back; the stepper just won't climb
+                // past the ceiling.
+                Stepper(
+                    "Concurrent jobs: \(concurrent)",
+                    value: $concurrent,
+                    in: 1...GitLabRunnerManager.maxConcurrent
+                )
                 Text("Each job gets its own VM, and Virtualization.framework runs at most two macOS VMs at a time — so two is the ceiling, whatever the runner would accept.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -179,21 +180,34 @@ struct GitLabRunnerConfigSheet: View {
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
-            } else if original != nil && reregisters {
+            } else if hasChanges {
                 Section {
-                    // Said before it happens: nothing else on screen would show
-                    // that applying this discards a registration.
-                    Label(
-                        "Changing the URL or token registers again from scratch. The current registration is discarded, GitLab gets a new runner, and the old one stays listed there until you remove it.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    // Both of these are said before they happen, because nothing
+                    // else on screen would show that applying costs a
+                    // registration, or that it interrupts work in progress.
+                    if original != nil && reregisters {
+                        note(
+                            "Changing the URL or token registers again from scratch. The current registration is discarded, GitLab gets a new runner, and the old one stays listed there until you remove it.",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                    }
+                    if runner.isRunning {
+                        note(
+                            "The runner reads its config at startup, so applying restarts it. A job running right now would be interrupted.",
+                            systemImage: "arrow.clockwise"
+                        )
+                    }
                 }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func note(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Actions

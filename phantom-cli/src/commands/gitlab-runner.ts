@@ -5,6 +5,11 @@ import { basename } from "node:path";
 import { homedir } from "node:os";
 import { usageError, type Command } from "../command";
 
+/// Mirrors `GitLabRunnerManager.maxConcurrent`, which is where it is enforced:
+/// Virtualization.framework runs at most two macOS guests at a time, and every
+/// job is a VM.
+const MAX_CONCURRENT = 2;
+
 // One record for both the router and `phantom help`, like every other group.
 // (These used to be pseudo-subcommands: the group took its whole arg vector and
 // dispatched internally, which cost it its own "Unknown subcommand" line and
@@ -16,9 +21,11 @@ export const commands: Record<string, Command> = {
     details: [
       "--token <token>   Runner authentication token (create under Settings → CI/CD → Runners)",
       "--url <url>       GitLab instance URL (default: https://gitlab.com)",
-      "--concurrent <n>  Max concurrent jobs (default: 1)",
+      `--concurrent <n>  Max concurrent jobs, 1 to ${MAX_CONCURRENT} (default: 1)`,
       "",
       "Jobs choose their VM image with the 'image:' keyword (phantom image list).",
+      `Virtualization.framework runs at most ${MAX_CONCURRENT} macOS VMs at a time, and every job is a VM.`,
+      "Setup registers and restarts the runner, so a job running now would be interrupted.",
     ],
     multiArgHandler: (...args: string[]) => setup(args),
   },
@@ -278,7 +285,21 @@ async function setup(args: string[]) {
     process.exit(1);
   }
 
+  // Refused here as well as in the daemon, which is the real boundary: the
+  // daemon would reject it before touching the existing registration, but only
+  // after a round trip that says nothing about why.
+  if (concurrent !== undefined && !(concurrent >= 1 && concurrent <= MAX_CONCURRENT)) {
+    console.error(`Error: --concurrent must be between 1 and ${MAX_CONCURRENT}`);
+    console.error(
+      `Virtualization.framework runs at most ${MAX_CONCURRENT} macOS VMs at a time, and every job is a VM.`
+    );
+    process.exit(1);
+  }
+
   console.log("Setting up GitLab runner (downloads gitlab-runner on first run, may take a minute)...");
+  // The runner reads its config at startup, so setup stops and starts it. Said
+  // here rather than after the fact, while it can still be interrupted.
+  console.log("This registers and restarts the runner — a job running right now would be interrupted.");
   const resp = await sendRequest(
     {
       method: "gitlab.setup",

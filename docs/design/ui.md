@@ -192,6 +192,11 @@ its output separately.
   patches the file and bounces the process, GitLab never hears about it), while a new
   URL or token can only be applied by registering again — so the button renames itself
   to **Re-register** and the sheet says what that discards *before* it happens.
+  Both consequences are stated before they happen, since nothing else on screen would
+  show them: that applying discards a registration, and that it restarts the runner and
+  so interrupts a job in flight. Concurrency tops out at two — every job is a VM and
+  Virtualization.framework runs two macOS guests at a time — and a larger value already
+  in the file is displayed as it is rather than clamped behind the user's back.
   The token is prefilled so that changing the URL doesn't cost one, masked behind a
   reveal toggle: it is plain text in `config.toml` either way, and hiding it in the
   GUI only keeps it off a screen someone is sharing. Registering writes the CLI's

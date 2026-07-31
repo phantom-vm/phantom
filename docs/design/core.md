@@ -231,7 +231,11 @@ a shape `gitlab-runner register` controls — matched by regex rather than by ta
 TOML dependency. `concurrent` is the one setting phantom edits in place (`setConcurrent`):
 it is a global key rather than a `[[runners]]` one, so GitLab is not involved and the
 registration survives, but the runner only reads it at startup, so a running process is
-bounced. Everything else GitLab knows about — the URL and the token — can only change by
+bounced — which interrupts a job in flight, so both the GUI and the CLI say so before
+they do it. It is capped at `GitLabRunnerManager.maxConcurrent` (2), enforced in the
+manager because the GUI, the CLI and the API all arrive there: Virtualization.framework
+runs at most two macOS guests at a time and every job is a VM, so a third concurrent job
+could only wait for a slot. Everything else GitLab knows about — the URL and the token — can only change by
 registering again, which replaces the file.
 
 **VM Bundle Contents**:

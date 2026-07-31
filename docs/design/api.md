@@ -258,9 +258,9 @@ Or on error:
 - **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
 
 ### gitlab.setup
-- **Params**: `url` (string), `token` (string), `cliPath` (string), `concurrent` (int, optional)
+- **Params**: `url` (string), `token` (string), `cliPath` (string), `concurrent` (int, optional, 1–2)
 - **Purpose**: One-shot managed GitLab Runner setup
-- **Implementation**: Downloads the pinned gitlab-runner binary to `gitlab-runner/<version>/` if missing (clears quarantine xattr), writes a template config pointing the custom executor at `cliPath`, runs `gitlab-runner register --non-interactive`, then starts the runner as a supervised child process. Re-running replaces the previous registration. Jobs select their VM image via the `image:` keyword (`CUSTOM_ENV_CI_JOB_IMAGE`) and run as `admin` by default (`PHANTOM_EXEC_USER` overrides).
+- **Implementation**: Downloads the pinned gitlab-runner binary to `gitlab-runner/<version>/` if missing (clears quarantine xattr), writes a template config pointing the custom executor at `cliPath`, runs `gitlab-runner register --non-interactive`, then starts the runner as a supervised child process. Re-running replaces the previous registration, and always restarts the runner — it reads its config at startup, so a job in flight is interrupted. `concurrent` above `GitLabRunnerManager.maxConcurrent` (2) is refused *before* anything is torn down, so a rejected value doesn't cost the caller its registration: Virtualization.framework runs at most two macOS guests at a time and every job is a VM, so a third concurrent job could only queue. Jobs select their VM image via the `image:` keyword (`CUSTOM_ENV_CI_JOB_IMAGE`) and run as `admin` by default (`PHANTOM_EXEC_USER` overrides).
 - **Response**: gitlab.status payload
 
 ### gitlab.status

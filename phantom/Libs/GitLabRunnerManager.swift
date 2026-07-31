@@ -14,6 +14,12 @@ class GitLabRunnerManager {
 
     static let runnerVersion = "v18.11.2"
 
+    /// macOS lets Virtualization.framework run two macOS guests at a time, and
+    /// every CI job is a VM — so a third concurrent job could only ever wait for
+    /// a slot. Enforced here rather than in each caller: the GUI's stepper, the
+    /// CLI's `--concurrent` and the API all end up in this class.
+    static let maxConcurrent = 2
+
     // MARK: - State
 
     enum State: Equatable {
@@ -123,6 +129,9 @@ class GitLabRunnerManager {
     /// Re-running replaces the previous registration. Jobs pick their VM image
     /// via the `image:` keyword — the runner has no image configuration.
     func setup(url: String, token: String, cliPath: String, concurrent: Int?) async throws {
+        // Before anything is torn down: a rejected value should not cost the
+        // caller its existing registration.
+        if let concurrent { try Self.validate(concurrent: concurrent) }
         do {
             try await performSetup(url: url, token: token, cliPath: cliPath, concurrent: concurrent)
         } catch {
@@ -182,6 +191,7 @@ class GitLabRunnerManager {
     /// runner only reads it at startup, so a running process is bounced.
     func setConcurrent(_ concurrent: Int) throws {
         guard isConfigured else { throw GitLabRunnerError.notConfigured }
+        try Self.validate(concurrent: concurrent)
         try patchConcurrent(concurrent)
         log("concurrent set to \(concurrent)")
         if isRunning {
@@ -340,6 +350,12 @@ class GitLabRunnerManager {
         try template.write(to: templatePath, atomically: true, encoding: .utf8)
     }
 
+    static func validate(concurrent: Int) throws {
+        guard (1...maxConcurrent).contains(concurrent) else {
+            throw GitLabRunnerError.concurrentOutOfRange(concurrent)
+        }
+    }
+
     /// `register --template-config` only merges [[runners]] settings, so the
     /// global `concurrent` key has to be patched after registration
     private func patchConcurrent(_ concurrent: Int) throws {
@@ -448,6 +464,7 @@ enum GitLabRunnerError: LocalizedError {
     case downloadFailed(String)
     case registrationFailed(String)
     case notConfigured
+    case concurrentOutOfRange(Int)
 
     var errorDescription: String? {
         switch self {
@@ -457,6 +474,9 @@ enum GitLabRunnerError: LocalizedError {
             return "Runner registration failed: \(output.trimmingCharacters(in: .whitespacesAndNewlines))"
         case .notConfigured:
             return "GitLab runner is not set up — run 'phantom gitlab-runner setup' first"
+        case .concurrentOutOfRange(let value):
+            return
+                "concurrent must be between 1 and \(GitLabRunnerManager.maxConcurrent) (got \(value)) — Virtualization.framework runs at most \(GitLabRunnerManager.maxConcurrent) macOS VMs at a time, and every job is a VM"
         }
     }
 }
