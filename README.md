@@ -2,8 +2,7 @@
 
 # Phantom
 
-The macOS VM orchestrator. Pull an image, boot a VM, run commands inside it —
-over vsock, so there is nothing in the guest to log into.
+The macOS VM orchestrator. Pull an image, boot a VM, run commands inside it.
 
 ## Quick start
 
