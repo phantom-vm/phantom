@@ -11,6 +11,12 @@ import SwiftUI
 ///   again, which throws the current registration away. The button renames
 ///   itself and the sheet says so before that happens.
 struct GitLabRunnerConfigSheet: View {
+    /// macOS lets Virtualization.framework run two macOS guests at a time, and a
+    /// job is a VM — so a third concurrent job could only ever wait for a slot.
+    /// The value already in the file is shown as it is rather than clamped
+    /// silently; the stepper simply won't climb past this.
+    static let maxConcurrent = 2
+
     @Bindable var vm: VMManager
 
     @Environment(\.dismiss) private var dismiss
@@ -126,22 +132,31 @@ struct GitLabRunnerConfigSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
 
-                HStack(spacing: 6) {
-                    if revealToken {
-                        TextField("Token", text: $token)
-                            .textFieldStyle(.roundedBorder)
-                            .autocorrectionDisabled()
-                    } else {
-                        SecureField("Token", text: $token)
-                            .textFieldStyle(.roundedBorder)
+                // Spelled out rather than left to the field's own label, so the
+                // reveal button can sit *inside* the value column: leading the
+                // field, not trailing it, which is what keeps this field's right
+                // edge flush with the URL field above it.
+                LabeledContent("Token") {
+                    HStack(spacing: 6) {
+                        Button {
+                            revealToken.toggle()
+                        } label: {
+                            Image(systemName: revealToken ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(revealToken ? "Hide the token" : "Show the token")
+
+                        Group {
+                            if revealToken {
+                                TextField("Token", text: $token)
+                                    .autocorrectionDisabled()
+                            } else {
+                                SecureField("Token", text: $token)
+                            }
+                        }
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
                     }
-                    Button {
-                        revealToken.toggle()
-                    } label: {
-                        Image(systemName: revealToken ? "eye.slash" : "eye")
-                    }
-                    .buttonStyle(.borderless)
-                    .help(revealToken ? "Hide the token" : "Show the token")
                 }
 
                 Text("Create the token in GitLab under Settings → CI/CD → Runners. It is stored in plain text in config.toml either way — hiding it here only keeps it off a shared screen.")
@@ -151,8 +166,8 @@ struct GitLabRunnerConfigSheet: View {
             }
 
             Section {
-                Stepper("Concurrent jobs: \(concurrent)", value: $concurrent, in: 1...32)
-                Text("Each job gets its own VM, so this is bounded by what the Mac can boot at once, not by the runner.")
+                Stepper("Concurrent jobs: \(concurrent)", value: $concurrent, in: 1...Self.maxConcurrent)
+                Text("Each job gets its own VM, and Virtualization.framework runs at most two macOS VMs at a time — so two is the ceiling, whatever the runner would accept.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
