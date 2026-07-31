@@ -43,12 +43,6 @@ function stateFilePath(jobId: string): string {
   return `/tmp/phantom-gitlab-runner-${jobId}`;
 }
 
-/// Left behind when a cancel deleted the VM, so the stages GitLab runs after a
-/// cancelled script can say what happened instead of reporting a missing VM.
-function cancelledFilePath(jobId: string): string {
-  return `${stateFilePath(jobId)}.cancelled`;
-}
-
 /// Who the job's commands run as. Job scripts run as the admin user by default
 /// — macOS CI tooling (brew, xcodebuild, simulators) misbehaves as root.
 /// Override with a PHANTOM_EXEC_USER CI variable; "root" skips the user wrap
@@ -79,10 +73,9 @@ async function prepare() {
   const vmId = createResp.result?.vmId as string;
 
   // 2. Claim the VM before the restore rather than after it. A cancel during
-  // those minutes used to leave cleanup nothing to go on: the daemon finished
-  // restoring, booted the VM, and it stayed up with no job left to serve.
+  // those minutes leaves cleanup something to delete; otherwise the daemon
+  // finishes restoring, boots the VM, and it stays up with no job left to serve.
   await Bun.write(stateFilePath(jobId), vmId);
-  installCancelHandler(jobId, vmId);
 
   // 3. Wait out the restore, which the daemon runs in the background and
   // finishes by booting the VM. Decompressing a 90GB disk takes minutes, so the
@@ -152,53 +145,19 @@ async function warnIfNoGitLabRunner(vmId: string, image: string) {
   console.error(`[phantom] WARNING: gitlab-runner installed if this job needs them.`);
 }
 
-let cancelling = false;
-
-/// Stop a cancelled job by deleting its VM.
+/// A cancel reaches the custom executor as a SIGTERM on the stage that is
+/// running, and this process dies on it in about 90ms. That is all it has to
+/// do: the daemon notices the client hanging up, drops the exec, and the guest
+/// agent stops the job's script and everything under it. GitLab then runs the
+/// stages that follow a cancelled script — after_script, uploading artifacts
+/// for the now-failed job — in a VM that is still healthy, and `cleanup_exec`
+/// deletes it.
 ///
-/// A cancel reaches the custom executor as a SIGTERM on the run stage, and the
-/// default disposition kills this process in about 90ms — which is the problem,
-/// not the fix: the daemon is never told, so the job script goes on running
-/// inside the guest. The agent serves one command at a time, so GitLab's next
-/// stage — uploading artifacts for the now-failed job, in that same VM — waits
-/// behind a build nobody wants any more. A measured cancel spent 4m41s there,
-/// which is what a cancel that "takes minutes" actually was.
-///
-/// The VM belongs to this job and cleanup deletes it moments later anyway, so
-/// the shortest true answer to a cancel is to delete it now: the script, its
-/// compiler, everything in the guest stops with the VM. The cost is the
-/// artifact upload for a cancelled job, which is not worth four minutes.
-function installCancelHandler(jobId: string, vmId: string) {
-  const onCancel = async (signal: string) => {
-    if (cancelling) return;
-    cancelling = true;
-    console.error(`[phantom] ${signal} — job cancelled, deleting VM ${vmId}`);
-    // Written first: if the delete hangs long enough for the runner to lose
-    // patience and SIGKILL us, the later stages still know why the VM is gone.
-    await Bun.write(cancelledFilePath(jobId), vmId);
-    const resp = await sendRequest({ method: "vm.delete", params: { vmId } });
-    if (resp.error) console.error(`[phantom] VM delete failed: ${resp.error.message}`);
-    // A build failure, not a system failure: `retry: when: runner_system_failure`
-    // would put a cancelled job straight back in the queue.
-    process.exit(BUILD_FAILURE);
-  };
-
-  process.on("SIGTERM", () => void onCancel("SIGTERM"));
-  process.on("SIGINT", () => void onCancel("SIGINT"));
-}
-
-async function run(scriptPath: string, stage?: string) {
+/// This needs the agent from v1.6.0 or later in the guest. Against an older
+/// image the command runs on with nobody listening, and those stages queue
+/// behind it: the four-minute cancel this was all about.
+async function run(scriptPath: string) {
   const jobId = getJobId();
-
-  // GitLab keeps invoking this stage after a cancelled script — after_script,
-  // uploading artifacts for the now-failed job, cleaning up file variables —
-  // and each of those runs in a VM that is no longer there. One invocation per
-  // sub-stage, so the stage is named: two identical lines in a row otherwise
-  // read as one line logged twice.
-  if (await Bun.file(cancelledFilePath(jobId)).exists()) {
-    console.error(`[phantom] Job was cancelled — skipping ${stage ?? "this stage"}, the VM is gone`);
-    process.exit(BUILD_FAILURE);
-  }
 
   let vmId: string;
   try {
@@ -207,8 +166,6 @@ async function run(scriptPath: string, stage?: string) {
     console.error(`[phantom] State file not found for job ${jobId}`);
     process.exit(SYSTEM_FAILURE);
   }
-
-  installCancelHandler(jobId, vmId);
 
   // Collect CI env vars (CUSTOM_ENV_* → strip prefix → export statements)
   const envExports = Object.entries(process.env)
@@ -248,20 +205,12 @@ async function run(scriptPath: string, stage?: string) {
     exitCode = SYSTEM_FAILURE;
   }
 
-  // A cancel deletes the VM out from under this stream, so however it ended —
-  // an error, or the daemon's -1 for a command whose VM vanished — the code is
-  // not this stage's to report. Park and let the cancel handler exit instead of
-  // racing it: GitLab reads anything that is neither of its two codes as a
-  // system failure, and `process.exit(-1)` is an exit code of 255.
-  if (cancelling) await new Promise(() => {});
-
   process.exit(exitCode);
 }
 
 async function cleanup() {
   const jobId = getJobId();
   const stateFile = stateFilePath(jobId);
-  const cancelledFile = cancelledFilePath(jobId);
 
   let vmId: string;
   try {
@@ -271,16 +220,9 @@ async function cleanup() {
     return;
   }
 
-  // The cancel already did this stage's work.
-  if (await Bun.file(cancelledFile).exists()) {
-    console.error(`[phantom] VM ${vmId} was deleted when the job was cancelled`);
-  } else {
-    console.error(`[phantom] Deleting VM ${vmId}...`);
-    await sendRequest({ method: "vm.delete", params: { vmId } });
-  }
-
+  console.error(`[phantom] Deleting VM ${vmId}...`);
+  await sendRequest({ method: "vm.delete", params: { vmId } });
   try { unlinkSync(stateFile); } catch {}
-  try { unlinkSync(cancelledFile); } catch {}
   console.error(`[phantom] Cleanup complete`);
 }
 
@@ -354,7 +296,7 @@ export async function gitlabRunner(...args: string[]) {
       console.error("Usage: phantom gitlab-runner run <script> <stage>");
       process.exit(SYSTEM_FAILURE);
     }
-    await run(scriptPath, args[2]);
+    await run(scriptPath);
   } else if (subcommand === "cleanup") {
     await cleanup();
   } else if (subcommand === "setup") {

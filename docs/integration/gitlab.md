@@ -128,30 +128,32 @@ Re-running `setup` replaces the previous registration (e.g. to change the base i
 
 ## Cancelling a Job
 
-Pressing **Cancel** deletes the job's VM, and everything running inside it stops
-with the VM — typically under a second.
+Pressing **Cancel** stops the job's script inside the VM, and the stages GitLab
+runs afterwards — `after_script`, uploading artifacts for the now-failed job —
+go ahead normally in a VM that is still healthy. `cleanup_exec` then deletes it.
+Measured end to end, a cancel is over in **under twenty seconds**, most of that
+the artifact stage doing its job.
 
-That is blunter than it looks, and deliberately so. A cancel reaches the
-executor as a `SIGTERM` on the stage that is running; nothing the host can say
-over vsock stops a command already running in the guest, and GitLab keeps going
-with the stages that follow a cancelled script — `after_script`, then uploading
-artifacts for the now-failed job — all of them inside that same VM. Since the
-guest agent serves one command at a time, those stages used to queue behind the
-build nobody wanted any more: a measured cancel took **4m41s**, all of it spent
-waiting for an `xcodebuild` that had already been cancelled.
+Nothing in the executor needs to do anything clever for this. The cancel arrives
+as a `SIGTERM` on the stage that is running and the CLI dies on it in about
+90ms; the daemon notices the client has hung up, drops the exec, and the guest
+agent takes that as its cue to stop the script and every process under it.
 
-The trade: **a cancelled job uploads no artifacts**. The stages that run after
-the cancel find the VM gone and say so:
+**This needs an image whose agent is v1.6.0 or newer** — the catalog images
+published on 2026-07-31 and anything built since. Against an older image nothing
+stops the abandoned script, and because the agent there serves one command at a
+time, the stages after the cancel queue behind a build nobody wants: a measured
+cancel took **4m41s**, all of it waiting for an `xcodebuild` that had already
+been cancelled. `phantom image pull <name>` refreshes a stale copy.
 
-```
-[phantom] SIGTERM — job cancelled, deleting VM vm-41399188
-[phantom] Job was cancelled — skipping upload_artifacts_on_failure, the VM is gone
-[phantom] Job was cancelled — skipping cleanup_file_variables, the VM is gone
-```
+Whether a cancelled job uploads artifacts depends on when it was cancelled, not
+on the cancel: the stage runs either way and uploads whatever the job had
+produced by then. A job cancelled mid-compile has nothing to show; one cancelled
+after its tests wrote their results uploads them as usual.
 
-A cancel during the restore is handled the same way, so a VM that is still
-decompressing is deleted rather than left to finish, boot, and sit there with no
-job to serve.
+A cancel during the restore is handled by the same path — `prepare` records the
+VM before the restore begins, so `cleanup_exec` deletes it rather than leaving
+it to finish booting with no job to serve.
 
 ## Job Execution User
 
