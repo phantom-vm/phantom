@@ -50,6 +50,11 @@ and every endpoint behind the TCP one.
 **Transport**: TCP on localhost:9090
 **Format**: Newline-delimited JSON
 **Pattern**: One request per connection (stateless)
+**Size**: A request is read until its newline, across as many reads as that
+takes, and is capped at 16MB. Requests are not always small — `vm.exec` and
+`vm.execStream` carry the command in full, and a CI job's whole script arrives
+base64-encoded inside one. Both ends write in as many passes as the socket
+accepts, rather than assuming one write leaves nothing behind.
 
 **Request Structure**:
 ```json

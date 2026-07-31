@@ -36,6 +36,26 @@ export interface StreamChunk {
 
 // MARK: - TCP Client
 
+/// A request written in as many passes as the socket needs.
+///
+/// `socket.write` returns how many bytes it took, not how many it was given —
+/// the rest has to wait for the socket to drain. Requests are not always small
+/// (a job's whole script is base64-encoded into a `vm.execStream` command), and
+/// a partial write left the daemon holding half a request, waiting for a
+/// delimiter that was still sitting in this process.
+function requestWriter(request: APIRequest) {
+  const bytes = new TextEncoder().encode(JSON.stringify(request) + "\n");
+  let written = 0;
+
+  return (socket: { write(data: Uint8Array): number }) => {
+    while (written < bytes.length) {
+      const n = socket.write(bytes.subarray(written));
+      if (n <= 0) return; // Socket is full — the drain handler resumes this
+      written += n;
+    }
+  };
+}
+
 export async function sendStreamingRequest(
   request: APIRequest,
   onChunk: (chunk: StreamChunk) => void,
@@ -54,6 +74,8 @@ export async function sendStreamingRequest(
   const timer = setTimeout(() => {
     if (rejector) rejector(new Error("Streaming request timed out"));
   }, timeoutMs);
+
+  const writeRequest = requestWriter(request);
 
   await Bun.connect({
     hostname: "localhost",
@@ -86,9 +108,11 @@ export async function sendStreamingRequest(
         clearTimeout(timer);
         if (rejector) rejector(error);
       },
+      drain(_socket) {
+        writeRequest(_socket);
+      },
       open(_socket) {
-        const requestJson = JSON.stringify(request) + "\n";
-        _socket.write(requestJson);
+        writeRequest(_socket);
       },
     },
   });
@@ -116,6 +140,8 @@ export async function sendRequest(
     }
   }, timeoutMs);
 
+  const writeRequest = requestWriter(request);
+
   await Bun.connect({
     hostname: "localhost",
     port: 9090,
@@ -140,10 +166,11 @@ export async function sendRequest(
           responseRejector(error);
         }
       },
+      drain(_socket) {
+        writeRequest(_socket);
+      },
       open(_socket) {
-        // Send request with newline delimiter
-        const requestJson = JSON.stringify(request) + "\n";
-        _socket.write(requestJson);
+        writeRequest(_socket);
       },
     },
   });

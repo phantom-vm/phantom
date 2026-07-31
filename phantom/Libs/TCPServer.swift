@@ -107,8 +107,16 @@ class TCPServer {
         connection.start(queue: .global())
     }
 
-    private func receiveRequest(on connection: NWConnection) {
-        // Read up to 64KB
+    /// The largest request the server will assemble before giving up on finding
+    /// a delimiter. A `vm.execStream` carries a job's whole script base64-encoded
+    /// in its command, so requests are not always small; an unbounded buffer on
+    /// an open socket is a different problem.
+    private static let maxRequestBytes = 16 * 1024 * 1024
+
+    private func receiveRequest(on connection: NWConnection, buffered: Data = Data()) {
+        // A request ends at a newline, not at a read boundary. Keep reading
+        // until one arrives: 64KB holds most requests but not a job script of
+        // any size, and those used to be rejected as malformed.
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
             if let error {
                 print("TCPServer: receive error: \(error)")
@@ -116,15 +124,29 @@ class TCPServer {
                 return
             }
 
-            guard let data else {
-                connection.cancel()
+            var buffer = buffered
+            if let data { buffer.append(data) }
+
+            if let newlineIndex = buffer.firstIndex(of: 0x0A) {
+                let requestData = buffer.prefix(upTo: newlineIndex)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    await self.processRequest(requestData, connection: connection)
+                }
                 return
             }
 
-            // Find newline delimiter
-            guard let newlineIndex = data.firstIndex(of: 0x0A) else {
-                // No newline yet - for simplicity, we'll just reject invalid requests
-                // Production code should buffer and keep reading
+            guard buffer.count <= Self.maxRequestBytes else {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let message = "Request exceeds \(Self.maxRequestBytes / (1024 * 1024))MB without a newline delimiter"
+                    self.sendResponse(self.errorResponse(code: "invalid_request", message: message), to: connection)
+                }
+                return
+            }
+
+            // The client stopped talking mid-request.
+            guard !isComplete else {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let errorData = self.errorResponse(code: "invalid_request", message: "Request must end with newline")
@@ -133,11 +155,9 @@ class TCPServer {
                 return
             }
 
-            let requestData = data.prefix(upTo: newlineIndex)
-
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.processRequest(requestData, connection: connection)
+                self.receiveRequest(on: connection, buffered: buffer)
             }
         }
     }

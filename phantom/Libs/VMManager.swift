@@ -662,9 +662,7 @@ class VMManager {
                 var requestData = try JSONEncoder().encode(request)
                 requestData.append(0x0A) // newline delimiter
 
-                requestData.withUnsafeBytes { ptr in
-                    _ = write(fd, ptr.baseAddress!, ptr.count)
-                }
+                Self.writeAll(requestData, to: fd)
 
                 // Read response (newline-delimited JSON)
                 let responseData = try await readLine(from: fd)
@@ -726,9 +724,7 @@ class VMManager {
                 var requestData = try JSONEncoder().encode(request)
                 requestData.append(0x0A)
 
-                requestData.withUnsafeBytes { ptr in
-                    _ = write(fd, ptr.baseAddress!, ptr.count)
-                }
+                Self.writeAll(requestData, to: fd)
 
                 // Read streaming chunks until we get an "exit" chunk
                 let exitCode: Int32 = try await withCheckedThrowingContinuation { cont in
@@ -793,6 +789,28 @@ class VMManager {
         }
 
         throw lastError ?? PhantomError.connectionClosed
+    }
+
+    /// Write every byte, however many passes the socket takes.
+    ///
+    /// `write` reports what it accepted, not what it was handed. A large
+    /// request — a job script, or a binary carried in base64 — would otherwise
+    /// reach the agent truncated, leaving it waiting for a delimiter still
+    /// sitting in this process.
+    private nonisolated static func writeAll(_ data: Data, to fd: Int32) {
+        data.withUnsafeBytes { raw in
+            guard var pointer = raw.baseAddress else { return }
+            var remaining = raw.count
+            while remaining > 0 {
+                let written = write(fd, pointer, remaining)
+                if written <= 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                pointer = pointer.advanced(by: written)
+                remaining -= written
+            }
+        }
     }
 
     private func readLine(from fd: Int32) async throws -> Data {
