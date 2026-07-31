@@ -1,3 +1,5 @@
+<img src="docs/assets/hero.png" width="1012" alt="Phantom, the macOS VM orchestrator: the app showing a running VM with its details and command output, beside a terminal where phantom vm exec runs xcodebuild -version inside the guest and prints Xcode 26.6.">
+
 # Phantom
 
 The macOS VM orchestrator. Pull an image, boot a VM, run commands inside it —
