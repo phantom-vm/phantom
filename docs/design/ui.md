@@ -62,7 +62,10 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   — including one the CLI started, since `OCIImageManager.state` is shared —
   shows as a progress banner above the list, and a failed one stays there until
   dismissed. A *completed* one gets no banner: it put an image in the list below,
-  which says it better than a line of text.
+  which says it better than a line of text. While one runs with nothing in the
+  list yet, the "No Images" empty state stands down — the banner already accounts
+  for what is coming, and telling you to pull an image mid-pull reads as advice to
+  start what is running.
 - **Acquiring vs. having** — a list column shows what you have; getting another
   one is an action, and actions are sheets behind the **+**. `CreateVMSheet`
   restores a VM from a local image, `PullImageSheet` lists the published catalog

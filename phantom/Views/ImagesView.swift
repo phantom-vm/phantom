@@ -18,6 +18,11 @@ struct ImageListView: View {
             }
 
             localList
+                // Nothing else in this column asks for height, so without this
+                // the whole stack — banner included — is centred as one block
+                // and the progress row floats in the middle of the pane while
+                // the empty state sits below it.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Images")
         .toolbar {
@@ -39,7 +44,14 @@ struct ImageListView: View {
 
     @ViewBuilder
     private var localList: some View {
-        if images.isEmpty {
+        if images.isEmpty, case .some(.running) = banner {
+            // A pull or save in flight is what the list will hold once it
+            // finishes, and the banner above already says so — the empty
+            // state's "pull one with the + button" would read as advice to
+            // start the operation that is already running. Blank, not absent:
+            // something has to hold the height or the banner re-centres.
+            Color.clear
+        } else if images.isEmpty {
             // Description only, no button — the '+' over the detail column is
             // the one way to get an image, and a second control here would
             // teach a spot that stops existing as soon as this pane has a list
