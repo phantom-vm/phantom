@@ -46,17 +46,17 @@ phantom image build -f recipes/xcode-26-6.yaml
 steps:
   - name: xcode
     script: ../provision/install-xcode.sh
-    serve: ~/Downloads/Xcode-26.6.0+17F113.xip   # or env: { XCODE_SRC: https://… }
     env:
-      XCODE_SRC: ${serve}
+      XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
     expect: XCODE_INSTALL_DONE
     timeout: 4h
 ```
 
-`XCODE_SRC` is either a URL the guest can reach — downloaded inside the guest,
-so 10GB never passes through the host — or, with `serve:`, a local `.xip` that
-the CLI hands the guest over an ephemeral HTTP server on the vmnet bridge for
-the duration of the step. Apple's signature on the archive is checked by
+`XCODE_SRC` is a URL the guest can reach — downloaded inside the guest, so 10GB
+never passes through the host. Apple requires a login for the real one, so the
+recipe points at the build network's own copy. With only a local `.xip`, use
+`serve:` and `${serve}` instead: the CLI hands that file to the guest over an
+ephemeral HTTP server on the vmnet bridge for the duration of the step. Apple's signature on the archive is checked by
 `xip --expand`, which is also what makes the download safe to trust.
 
 Every simulator runtime is downloaded too (`xcodebuild -downloadAllPlatforms`),

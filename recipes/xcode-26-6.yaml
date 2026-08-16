@@ -26,18 +26,21 @@ steps:
     expect: GITLAB_RUNNER_INSTALL_DONE
     timeout: 15m
 
-  # Apple requires a login to download Xcode, so no URL can be checked in:
-  # point this at your own copy of the .xip and it is served to the guest over
-  # the vmnet bridge for the duration of the step — no 10GB detour through a
-  # shared folder, and `xip --expand` verifies Apple's signature on the way in.
+  # Apple requires a login to download Xcode, so this cannot be a public URL —
+  # it points at the build network's own copy, which the guest fetches itself
+  # over the NAT bridge. No 10GB detour through the host, and `xip --expand`
+  # verifies Apple's signature on the way in.
   #
-  # Change the version here and in `description` together; the file name is the
-  # only place the exact build (17F113) is written down.
+  # The URL is where the exact build (17F113) is written down: change it and
+  # `description` together. Building somewhere without that server? Put the
+  # .xip on this Mac and hand it over instead:
+  #
+  #   serve: ~/Downloads/Xcode-26.6.0+17F113.xip
+  #   env: { XCODE_SRC: "${serve}" }
   - name: xcode
     script: ../provision/install-xcode.sh
-    serve: ~/Downloads/Xcode-26.6.0+17F113.xip
     env:
-      XCODE_SRC: ${serve}
+      XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
     expect: XCODE_INSTALL_DONE
     # A ~10GB copy, the xip expansion, first launch, and every simulator
     # runtime — the runtimes are the reason this is measured in hours.

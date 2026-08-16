@@ -92,9 +92,8 @@ steps:
 
   - name: xcode
     script: ../provision/install-xcode.sh
-    serve: ~/Downloads/Xcode-26.6.0+17F113.xip
     env:
-      XCODE_SRC: ${serve}
+      XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
     expect: XCODE_INSTALL_DONE
     timeout: 4h
 ```
@@ -162,10 +161,13 @@ prints back from the registry rather than the mark on the build host.
 
 `from:` boots a VM from a finished image instead of installing macOS, so Setup
 Assistant and provisioning are already done. The Xcode step installs from a
-`.xip` named by `XCODE_SRC`: a URL is fetched by the guest itself (no 10GB
-detour through the host), while `serve:` hands the guest a local file over an
-ephemeral HTTP server on the vmnet bridge — Apple requires a login to download
-Xcode, so a URL cannot be checked in and `serve:` is the usual answer.
+`.xip` named by `XCODE_SRC`. Apple requires a login to download Xcode, so the
+URL is never a public one: [recipes/xcode-26-6.yaml](../recipes/xcode-26-6.yaml)
+points at the build network's own file server and the guest fetches it itself,
+with no 10GB detour through the host. Building somewhere without such a server,
+`serve:` hands the guest a `.xip` sitting on this Mac instead, over an ephemeral
+HTTP server on the vmnet bridge. Either way the URL or file name is where the
+exact Xcode build is written down.
 `xip --expand` verifies Apple's signature on the archive, which doubles as the
 integrity check. Every simulator runtime is downloaded too, since Xcode ships
 with none and otherwise every CI job would pay for that.
