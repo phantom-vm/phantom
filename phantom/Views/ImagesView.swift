@@ -227,13 +227,10 @@ struct ImageDetailView: View {
                 // other path lets you choose.
                 Button("Create VM") { onCreateVM(info.name) }
 
-                Spacer()
-
                 Button("Delete", role: .destructive) {
                     confirmingDelete = true
                 }
             }
-            .frame(maxWidth: 420)
         }
     }
 
