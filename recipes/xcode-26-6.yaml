@@ -58,11 +58,15 @@ steps:
   # The installer takes whatever XCODE_SRC points at, so it cannot know which
   # Xcode this image claims to be — that check belongs here, where the claim is
   # made. grep exits non-zero on a mismatch, which fails the build.
+  # Every check runs as admin, because that is the environment a CI job gets:
+  # a step otherwise runs as root under `/bin/sh -c`, whose PATH comes from
+  # launchd and does not include /usr/local/bin — so a tool this image is
+  # supposed to provide can be missing for jobs and still answer here.
   - name: verify
     run: |
-      xcodebuild -version | grep -q 'Xcode 26.6'
-      xcrun simctl list runtimes | grep -q iOS
-      gitlab-runner --version | grep -q 18.11.2
+      su - admin -c 'xcodebuild -version' | grep -q 'Xcode 26.6'
+      su - admin -c 'xcrun simctl list runtimes' | grep -q iOS
+      su - admin -c 'gitlab-runner --version' | grep -q 18.11.2
       su - admin -c 'bun --version' | grep -q 1.3.14
       su - admin -c 'mise --version'
     timeout: 5m
