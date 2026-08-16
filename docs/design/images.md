@@ -133,13 +133,13 @@ steps:
   - name: gitlab-runner
     script: ../provision/install-gitlab-runner.sh
     env: { RUNNER_VERSION: v18.11.2 }
-    expect: GITLAB_RUNNER_INSTALL_DONE
     timeout: 15m
   - name: xcode
     script: ../provision/install-xcode.sh
     env: { XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip }
-    expect: XCODE_INSTALL_DONE
     timeout: 4h
+  - name: verify
+    run: xcodebuild -version | grep -q 'Xcode 26.6'
 ```
 
 A step does exactly one thing, four keys wide:
@@ -147,7 +147,9 @@ A step does exactly one thing, four keys wide:
 - **`script`** — a file, sent as the command body. **`run`** — an inline command. One or the other, never both.
 - **`env`** — prepended to the body as `KEY='value'` lines rather than passed as arguments, because `vm.exec` appends its args to the command string, which for a multi-line script body would land them on the last line instead of on the script. This is how `XCODE_SRC` and `RUNNER_VERSION` have always reached their scripts.
 - **`serve`** — a local file the guest cannot otherwise reach, served over an ephemeral HTTP server bound to the host side of the vmnet NAT bridge for the duration of the step. `${serve}` in `env` or `run` expands to its URL. A 10GB `.xip` never leaves the host disk and needs no shared folder. A `serve` nothing reads, or a `${serve}` with nothing served, is an error — either one means the guest would never be told the URL.
-- **`expect`** — text the step must print to count as done, for a script that can exit 0 having skipped the work it was there to do. Both installers already end with such a marker. **`timeout`** (`90s`/`15m`/`4h`, default 30m) bounds a hung step.
+- **`timeout`** (`90s`/`15m`/`4h`, default 30m) bounds a hung step.
+
+**A step's verdict is its exit code**, and there is no key for anything else. Every script here runs under `set -e`, so a failure lands as a non-zero status — the same thing provisioning has always been judged by. An assertion beyond "the script ran" is a step that makes it: `run: xcodebuild -version | grep -q 'Xcode 26.6'` fails the build on a mismatch. That distinction is worth keeping, because the two assertions belong in different places — a script asserts its own correctness, while *which Xcode this image claims to be* is the recipe's claim, and `install-xcode.sh` installs whatever `XCODE_SRC` points at without knowing.
 
 **Validation happens before the VM exists**: schema, names, the one-of rule, duplicate step names, every `script` and `serve` path. An unknown key is an error rather than ignored noise — a recipe is meant to be the account of an image, and a misspelled key that is quietly dropped makes it a false one. `--dry-run` prints the resolved plan (paths, env, timeouts) and asks the daemon nothing, so a recipe can be checked in a second instead of an hour into a build. Paths inside a recipe resolve against the recipe's own directory, never the shell's, so a recipe works from anywhere.
 

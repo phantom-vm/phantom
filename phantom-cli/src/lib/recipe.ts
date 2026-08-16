@@ -14,7 +14,6 @@
 //     - name: gitlab-runner
 //       script: provision/install-gitlab-runner.sh
 //       env: { RUNNER_VERSION: v18.11.2 }
-//       expect: GITLAB_RUNNER_INSTALL_DONE
 //     - name: xcode
 //       script: provision/install-xcode.sh
 //       serve: ~/Downloads/Xcode-26.6.0.xip
@@ -48,10 +47,6 @@ export interface RecipeStep {
   /// How long the step may take. A guest install that hangs must not hang the
   /// build forever, and the honest limits differ by hours between steps.
   timeoutMs: number;
-  /// Text the step must print to count as done. A script that exits 0 having
-  /// silently skipped its work is the failure this catches — both installers
-  /// already end with such a marker.
-  expect?: string;
 }
 
 export interface Recipe {
@@ -87,7 +82,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 const NAME_RULE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const RECIPE_KEYS = new Set(["schema", "name", "description", "from", "steps"]);
-const STEP_KEYS = new Set(["name", "script", "run", "env", "serve", "timeout", "expect"]);
+const STEP_KEYS = new Set(["name", "script", "run", "env", "serve", "timeout"]);
 
 /// `4h`, `90m`, `30s`, or a bare number of seconds.
 function parseDuration(value: unknown, path: string, step: string): number {
@@ -229,10 +224,6 @@ function parseStep(entry: unknown, index: number, path: string, seen: Set<string
   if (step.serve !== undefined && (typeof step.serve !== "string" || !step.serve.trim())) {
     throw new RecipeError(path, "serve must be a path to a local file", step.name);
   }
-  if (step.expect !== undefined && (typeof step.expect !== "string" || !step.expect.trim())) {
-    throw new RecipeError(path, "expect must be the text the step prints when it succeeds", step.name);
-  }
-
   const body = hasScript ? "" : (step.run as string);
   const usesServe = [body, ...Object.values(env)].some((v) => v.includes("${serve}"));
   if (step.serve && !usesServe) {
@@ -253,7 +244,6 @@ function parseStep(entry: unknown, index: number, path: string, seen: Set<string
     env,
     serve: typeof step.serve === "string" ? step.serve : undefined,
     timeoutMs: step.timeout === undefined ? DEFAULT_TIMEOUT_MS : parseDuration(step.timeout, path, step.name),
-    expect: typeof step.expect === "string" ? step.expect : undefined,
   };
 }
 

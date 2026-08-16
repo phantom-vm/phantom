@@ -87,15 +87,19 @@ steps:
     script: ../provision/install-gitlab-runner.sh
     env:
       RUNNER_VERSION: v18.11.2
-    expect: GITLAB_RUNNER_INSTALL_DONE
     timeout: 15m
 
   - name: xcode
     script: ../provision/install-xcode.sh
     env:
       XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
-    expect: XCODE_INSTALL_DONE
     timeout: 4h
+
+  # The installer takes whatever XCODE_SRC points at, so only the recipe knows
+  # which Xcode this image claims to be. grep exits non-zero on a mismatch.
+  - name: verify
+    run: xcodebuild -version | grep -q 'Xcode 26.6'
+    timeout: 5m
 ```
 
 | Key | Means |
@@ -109,7 +113,6 @@ steps:
 | `steps[].run` | An inline command instead of a file. One of `script`/`run`, never both |
 | `steps[].env` | Prepended as `KEY='value'` lines — how `XCODE_SRC` and `RUNNER_VERSION` reach their scripts |
 | `steps[].serve` | A local file served to the guest over the vmnet bridge for this step. `${serve}` (in `env` or `run`) is its URL |
-| `steps[].expect` | Text the step must print to count as done — catches a script that exits 0 having skipped its work |
 | `steps[].timeout` | `90s`, `15m`, `4h`. Default 30m |
 
 Everything is checked before a VM is created — unknown keys included, since a
@@ -123,9 +126,11 @@ prints the resolved plan (which script, which env, which file served, how long
 each step may take) and talks to no daemon at all.
 
 Each step is one `vm.exec` over vsock, run as root in the guest, with its output
-echoed as it arrives. A step that exits non-zero, or that never prints its
-`expect`, stops the build naming itself — the intermediate VM is left behind for
-inspection.
+echoed as it arrives. A step that exits non-zero stops the build naming itself,
+and the intermediate VM is left behind for inspection. That exit code is the
+whole verdict — there is no "must print this" key, because a step that wants to
+assert more is a step that greps for it, and the scripts already run under
+`set -e`.
 
 ## gitlab-runner
 

@@ -45,7 +45,6 @@ describe("a recipe that is one", () => {
     const step = parseRecipe(minimal, "recipe.yaml").steps[0]!;
     expect(step.timeoutMs).toBe(30 * 60_000);
     expect(step.env).toEqual({});
-    expect(step.expect).toBeUndefined();
   });
 
   test("timeouts come in seconds, minutes and hours", () => {
@@ -77,6 +76,12 @@ describe("a recipe that is one", () => {
 describe("a recipe that is not", () => {
   test("names the file it is complaining about", () => {
     expect(refusal("schema: 1\n", "recipes/x.yaml")).toStartWith("recipes/x.yaml:");
+  });
+
+  // A step's verdict is its exit code. There is no key for "must print X" —
+  // asserting more than "the script ran" is a step that greps for it.
+  test("there is no expect key", () => {
+    expect(refusal(`${minimal}    expect: XCODE_INSTALL_DONE\n`)).toContain("unknown key 'expect'");
   });
 
   test("a misspelled key is an error, not a shrug", () => {

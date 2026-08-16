@@ -48,7 +48,6 @@ steps:
     script: ../provision/install-xcode.sh
     env:
       XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
-    expect: XCODE_INSTALL_DONE
     timeout: 4h
 ```
 

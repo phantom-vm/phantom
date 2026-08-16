@@ -29,15 +29,12 @@ export interface GuestRun {
   /// script body lands them on the last line instead of on the script.
   env?: Record<string, string>;
   timeoutMs: number;
-  /// Text the run must print to count as done, for a script that can exit 0
-  /// having skipped the work it was there to do.
-  expect?: string;
   /// Names the step in an error, so a failed build says which one failed.
   label: string;
 }
 
 /// Runs one thing in the guest over vsock, echoing its output as it comes back.
-export async function runInGuest({ vmId, body, env, timeoutMs, expect, label }: GuestRun) {
+export async function runInGuest({ vmId, body, env, timeoutMs, label }: GuestRun) {
   const assignments = Object.entries(env ?? {})
     .map(([key, value]) => `${key}=${quote(value)}`)
     .join("\n");
@@ -47,11 +44,12 @@ export async function runInGuest({ vmId, body, env, timeoutMs, expect, label }: 
   const log = (res.stdout as string) ?? "";
   for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
 
+  // The exit code is the whole verdict. Every script here runs under `set -e`,
+  // so a failure anywhere in it lands as a non-zero status, and a step that
+  // wants to assert something beyond "the script ran" is a step that greps for
+  // it — an assertion belongs in a command, not in a key of the recipe format.
   if (res.exitCode !== 0) {
     throw new Error(`${label} exited ${res.exitCode}: ${res.stderr ?? ""}`);
-  }
-  if (expect && !log.includes(expect)) {
-    throw new Error(`${label} did not report completion (no '${expect}' in its output)`);
   }
   return log;
 }

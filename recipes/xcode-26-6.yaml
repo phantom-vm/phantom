@@ -23,7 +23,6 @@ steps:
     script: ../provision/install-gitlab-runner.sh
     env:
       RUNNER_VERSION: v18.11.2
-    expect: GITLAB_RUNNER_INSTALL_DONE
     timeout: 15m
 
   # Apple requires a login to download Xcode, so this cannot be a public URL —
@@ -41,7 +40,16 @@ steps:
     script: ../provision/install-xcode.sh
     env:
       XCODE_SRC: http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
-    expect: XCODE_INSTALL_DONE
     # A ~10GB copy, the xip expansion, first launch, and every simulator
     # runtime — the runtimes are the reason this is measured in hours.
     timeout: 4h
+
+  # The installer takes whatever XCODE_SRC points at, so it cannot know which
+  # Xcode this image claims to be — that check belongs here, where the claim is
+  # made. grep exits non-zero on a mismatch, which fails the build.
+  - name: verify
+    run: |
+      xcodebuild -version | grep -q 'Xcode 26.6'
+      xcrun simctl list runtimes | grep -q iOS
+      gitlab-runner --version | grep -q 18.11.2
+    timeout: 5m

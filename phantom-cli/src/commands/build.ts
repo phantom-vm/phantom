@@ -98,7 +98,6 @@ function printPlan(recipe: Recipe, opts: BuildOptions) {
     if (step.serve) {
       console.log(`       serves ${resolveAgainstRecipe(recipe.path, step.serve)} over the vmnet bridge`);
     }
-    if (step.expect) console.log(`       must print "${step.expect}"`);
     console.log(`       up to ${formatDuration(step.timeoutMs)}`);
   }
 
@@ -190,7 +189,6 @@ async function runStep(recipe: Recipe, step: RecipeStep, vmId: string) {
       body,
       env,
       timeoutMs: step.timeoutMs,
-      expect: step.expect,
       label: `step '${step.name}'`,
     });
   } finally {
