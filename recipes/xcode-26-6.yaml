@@ -11,8 +11,17 @@ description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
 from: tahoe-base
 
 steps:
-  # First, because it is a 60MB download that fails in seconds — finding out
-  # after three hours of Xcode install would be a waste of an afternoon.
+  # macOS ships no JavaScript runtime. Baking one in means a step — or a CI job
+  # — can be TypeScript instead of shell, without 90MB of download first.
+  - name: bun
+    script: ../provision/install-bun.sh
+    env:
+      BUN_VERSION: 1.3.14
+    timeout: 10m
+
+  # Then the runner, because it is a 60MB download that fails in seconds —
+  # finding out after three hours of Xcode install would be a waste of an
+  # afternoon.
   #
   # Every image CI runs on needs this: GitLab's custom executor runs *every*
   # stage inside the job environment, so a job declaring artifacts: or cache:
@@ -52,4 +61,5 @@ steps:
       xcodebuild -version | grep -q 'Xcode 26.6'
       xcrun simctl list runtimes | grep -q iOS
       gitlab-runner --version | grep -q 18.11.2
+      bun --version | grep -q 1.3.14
     timeout: 5m

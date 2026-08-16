@@ -130,6 +130,10 @@ name: xcode-26-6
 description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
 from: tahoe-base
 steps:
+  - name: bun
+    script: ../provision/install-bun.sh
+    env: { BUN_VERSION: 1.3.14 }
+    timeout: 10m
   - name: gitlab-runner
     script: ../provision/install-gitlab-runner.sh
     env: { RUNNER_VERSION: v18.11.2 }

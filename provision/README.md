@@ -106,6 +106,12 @@ phantom image build -f recipes/xcode-26-6-runner-bump.yaml --replace
   layout shifts but tied to a macOS version's wording.
 - **provision.sh** — post-install system configuration, run inside the guest as
   root through the agent.
+- **install-bun.sh** — puts the pinned `bun` binary on the guest's PATH, so a
+  build step or a CI job can be TypeScript instead of shell (macOS ships no
+  JavaScript runtime). Reads `BUN_VERSION` (or `$1`). Installed to
+  `/usr/local/bin` rather than through bun.sh's installer, which unpacks into
+  the invoking user's `~/.bun` — and these scripts run as root, so the admin
+  user jobs run as would never see it.
 - **install-gitlab-runner.sh** — puts the pinned `gitlab-runner` binary on the
   guest's PATH. Reads `RUNNER_VERSION` (or `$1`), defaulting to the pin in the
   script. See [gitlab-runner in the guest](#gitlab-runner-in-the-guest).
