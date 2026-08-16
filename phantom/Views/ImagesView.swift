@@ -81,10 +81,13 @@ struct ImageListView: View {
     /// A *completed* one gets no banner: it put an image in the list below, which
     /// says it better than a line of text. A failure has no such trace, and until
     /// the GUI could start a save the only failures were the CLI's own, reported
-    /// in the terminal that asked for them.
+    /// in the terminal that asked for them. A cancelled one leaves no trace
+    /// either — deliberately, since the partial image is deleted — so it is said
+    /// here too, and told apart from a failure.
     private enum Banner {
         case running(progress: Double, message: String)
         case failed(String)
+        case cancelled(String)
     }
 
     private var banner: Banner? {
@@ -95,6 +98,8 @@ struct ImageListView: View {
             .running(progress: progress, message: message)
         case .error(let message):
             .failed(message)
+        case .cancelled(let message):
+            .cancelled(message)
         case .idle, .completed:
             nil
         }
@@ -104,11 +109,38 @@ struct ImageListView: View {
     private func operationBanner(_ banner: Banner) -> some View {
         switch banner {
         case .running(let progress, let message):
-            VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(message)
+                        .font(.caption)
+                        .lineLimit(2)
+                    ProgressView(value: progress)
+                }
+                // No confirmation: the operation the button interrupts is the one
+                // named right beside it, and what a cancel destroys is an image
+                // that does not exist yet. Stays up while the transfer unwinds —
+                // that takes as long as the chunk in flight.
+                Button(vm.imageManager.isCancelling ? "Cancelling…" : "Cancel") {
+                    vm.imageManager.cancel()
+                }
+                .controlSize(.small)
+                .disabled(vm.imageManager.isCancelling)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .cancelled(let message):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
                 Text(message)
                     .font(.caption)
                     .lineLimit(2)
-                ProgressView(value: progress)
+                Spacer(minLength: 8)
+                // Dismissed by hand, like a failure: the banner is the only
+                // account of an operation that left nothing behind on purpose.
+                Button("Dismiss") { vm.imageManager.clearTerminalState() }
+                    .controlSize(.small)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)

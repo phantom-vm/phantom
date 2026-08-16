@@ -59,7 +59,7 @@ struct SaveImageSheet: View {
     private var isBusy: Bool {
         switch vm.imageManager.state {
         case .saving, .pushing, .pulling: true
-        case .idle, .completed, .error: false
+        case .idle, .completed, .cancelled, .error: false
         }
     }
 

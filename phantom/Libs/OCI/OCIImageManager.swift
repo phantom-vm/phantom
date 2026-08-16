@@ -15,6 +15,7 @@ class OCIImageManager {
         case pushing(progress: Double, message: String)
         case pulling(progress: Double, message: String)
         case completed(message: String)
+        case cancelled(message: String)
         case error(String)
 
         static func == (lhs: OperationState, rhs: OperationState) -> Bool {
@@ -24,6 +25,7 @@ class OCIImageManager {
             case (.pushing(let a, let am), .pushing(let b, let bm)): return a == b && am == bm
             case (.pulling(let a, let am), .pulling(let b, let bm)): return a == b && am == bm
             case (.completed(let a), .completed(let b)): return a == b
+            case (.cancelled(let a), .cancelled(let b)): return a == b
             case (.error(let a), .error(let b)): return a == b
             default: return false
             }
@@ -31,6 +33,45 @@ class OCIImageManager {
     }
 
     private(set) var state: OperationState = .idle
+
+    // MARK: - Cancellation
+
+    /// Cancels the detached task doing the transfer. Held here because that task
+    /// is what has to stop — cancelling whatever `await`s it would not reach the
+    /// work, since a detached task takes no cancellation from its caller.
+    private var cancelRunningTask: (@Sendable () -> Void)?
+
+    /// Set by `cancel()`, read by the operation's failure path. What the work
+    /// throws on cancellation depends on where it was — `CancellationError` from
+    /// a chunk loop, `URLError.cancelled` from a transfer in flight — so the
+    /// asking is what marks the outcome as cancelled, not the error.
+    private var cancelRequested = false
+
+    /// A cancel has been asked for and the operation has not unwound yet. The
+    /// gap is a chunk of work long, so the GUI has something to say in it.
+    var isCancelling: Bool { cancelRequested && !isTerminalState }
+
+    /// Stop the running operation. Returns what is being cancelled (`"save"`,
+    /// `"push"`, `"pull"`), or nil when nothing is running.
+    ///
+    /// Returns as soon as the task is told to stop; the state only becomes
+    /// `.cancelled` once the work unwinds and its partial image is removed,
+    /// which is a moment later. Callers poll `state` for that.
+    @discardableResult
+    func cancel() -> String? {
+        let operation: String
+        switch state {
+        case .saving: operation = "save"
+        case .pushing: operation = "push"
+        case .pulling: operation = "pull"
+        case .idle, .completed, .cancelled, .error: return nil
+        }
+
+        cancelRequested = true
+        cancelRunningTask?()
+        log("Cancelling image \(operation)...")
+        return operation
+    }
 
     // MARK: - Storage
 
@@ -85,6 +126,8 @@ class OCIImageManager {
 
         state = .saving(progress: 0, message: "Preparing...")
         log("Saving VM to image '\(name)'...")
+        cancelRequested = false
+        defer { cancelRunningTask = nil }
 
         let finalDir = imagesDir.appendingPathComponent(name)
         let replacing = replace && FileManager.default.fileExists(atPath: finalDir.path)
@@ -107,7 +150,7 @@ class OCIImageManager {
                 }
             }
 
-            let chunkMetadata = try await Task.detached { () -> [OCIDiskLayerizer.ChunkMetadata] in
+            let work = Task.detached { () -> [OCIDiskLayerizer.ChunkMetadata] in
                 if FileManager.default.fileExists(atPath: imageDir.path) {
                     throw OCIError.imageAlreadyExists(name)
                 }
@@ -152,7 +195,9 @@ class OCIImageManager {
                 }
 
                 return metadata
-            }.value
+            }
+            cancelRunningTask = { work.cancel() }
+            let chunkMetadata = try await work.value
 
             // Back on MainActor — build manifest from metadata (lightweight)
             state = .saving(progress: 0.95, message: "Writing manifest...")
@@ -197,9 +242,16 @@ class OCIImageManager {
             state = .completed(message: "Image '\(name)' saved")
 
         } catch {
-            log("Failed to save image: \(error.localizedDescription)")
-            state = .error(error.localizedDescription)
+            // Either way the half-written image goes: for a replace that is the
+            // staging directory, and the old image is still where it was.
             try? FileManager.default.removeItem(at: imageDir)
+            if cancelRequested {
+                log("Save of image '\(name)' cancelled")
+                state = .cancelled(message: "Save of '\(name)' cancelled")
+            } else {
+                log("Failed to save image: \(error.localizedDescription)")
+                state = .error(error.localizedDescription)
+            }
         }
     }
 
@@ -436,6 +488,8 @@ class OCIImageManager {
 
         state = .pushing(progress: 0, message: "Preparing push...")
         log("Pushing image '\(name)' to \(reference)...")
+        cancelRequested = false
+        defer { cancelRunningTask = nil }
 
         let updateProgress: @Sendable (Double, String) -> Void = { [weak self] progress, message in
             Task { @MainActor [weak self] in
@@ -449,7 +503,7 @@ class OCIImageManager {
                 Task { @MainActor [weak self] in self?.log(msg) }
             }
 
-            try await Task.detached {
+            let work = Task.detached {
                 guard FileManager.default.fileExists(atPath: imageDir.path) else {
                     throw OCIError.imageNotFound(name)
                 }
@@ -497,6 +551,11 @@ class OCIImageManager {
                 // pairing a directory listing with the manifest by position —
                 // with all-zero chunks omitted, only the index is meaningful.
                 for (i, layer) in diskLayers.enumerated() {
+                    // The upload of one chunk is what a cancel interrupts (the
+                    // URLSession call throws); this is what stops the loop from
+                    // starting the next one.
+                    try Task.checkCancellation()
+
                     let progress = 0.1 + Double(i) / Double(diskLayers.count) * 0.8
                     updateProgress(progress, "Pushing chunk \(i + 1)/\(diskLayers.count)...")
 
@@ -519,13 +578,23 @@ class OCIImageManager {
                 try await client.pushManifest(manifest, reference: ref.reference)
 
                 bgLog("Image '\(name)' pushed to \(reference)")
-            }.value
+            }
+            cancelRunningTask = { work.cancel() }
+            try await work.value
 
             state = .completed(message: "Image '\(name)' pushed to \(reference)")
 
         } catch {
-            log("Push failed: \(error.localizedDescription)")
-            state = .error(error.localizedDescription)
+            if cancelRequested {
+                // Nothing local to undo — the blobs already uploaded stay in the
+                // registry, unreferenced, until it collects them: a push writes
+                // the manifest last, so a cancelled one publishes no tag.
+                log("Push of image '\(name)' cancelled")
+                state = .cancelled(message: "Push of '\(name)' cancelled")
+            } else {
+                log("Push failed: \(error.localizedDescription)")
+                state = .error(error.localizedDescription)
+            }
         }
     }
 
@@ -549,8 +618,33 @@ class OCIImageManager {
 
         // Before anything else: a bad name would otherwise reach the failure
         // path below, which deletes the directory it names.
+        //
+        // The reference is parsed here rather than inside the transfer because
+        // the name may come out of it — and the failure path can only clean up
+        // after a pull it knows the directory of, whoever chose the name.
+        let ref: OCIReference
+        let imageName: String
+        let imageDir: URL
         do {
-            if let name { try Self.validate(name: name) }
+            ref = try OCIReference(parsing: reference)
+            // A name taken from the reference is as unchecked as one that was
+            // passed in — the registry chose it, not us.
+            imageName = name ?? ref.namespace.split(separator: "/").last.map(String.init) ?? "pulled-image"
+            try Self.validate(name: imageName)
+
+            // Claiming the directory is also part of this: from here on the
+            // directory is this pull's, so the failure path can remove it
+            // without having to ask whether the bytes in it are someone else's.
+            imageDir = imagesDir.appendingPathComponent(imageName)
+            if FileManager.default.fileExists(atPath: imageDir.path) {
+                guard replace else { throw OCIError.imageAlreadyExists(imageName) }
+                log("Replacing existing image '\(imageName)'")
+                try FileManager.default.removeItem(at: imageDir)
+            }
+            try FileManager.default.createDirectory(at: imageDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: imageDir.appendingPathComponent("disk"), withIntermediateDirectories: true
+            )
         } catch {
             log("Pull failed: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
@@ -559,6 +653,8 @@ class OCIImageManager {
 
         state = .pulling(progress: 0, message: "Preparing pull...")
         log("Pulling image from \(reference)...")
+        cancelRequested = false
+        defer { cancelRunningTask = nil }
 
         let updateProgress: @Sendable (Double, String) -> Void = { [weak self] progress, message in
             Task { @MainActor [weak self] in
@@ -566,32 +662,15 @@ class OCIImageManager {
             }
         }
 
-        let imagesDir = self.imagesDir
         let bgLog: @Sendable (String) -> Void = { [weak self] msg in
             Task { @MainActor [weak self] in self?.log(msg) }
         }
 
         do {
-            let imageName = try await Task.detached { () -> String in
-                let ref = try OCIReference(parsing: reference)
+            let work = Task.detached {
                 let creds = RegistryCredentials.load(for: ref.registry, username: username, password: password)
                 let client = OCIRegistryClient(reference: ref, credentials: creds)
-
-                // A name taken from the reference is as unchecked as one that
-                // was passed in — the registry chose it, not us.
-                let imageName = name ?? ref.namespace.split(separator: "/").last.map(String.init) ?? "pulled-image"
-                try Self.validate(name: imageName)
-                let imageDir = imagesDir.appendingPathComponent(imageName)
-
-                if FileManager.default.fileExists(atPath: imageDir.path) {
-                    guard replace else { throw OCIError.imageAlreadyExists(imageName) }
-                    bgLog("Replacing existing image '\(imageName)'")
-                    try FileManager.default.removeItem(at: imageDir)
-                }
-
-                try FileManager.default.createDirectory(at: imageDir, withIntermediateDirectories: true)
                 let diskDir = imageDir.appendingPathComponent("disk")
-                try FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
 
                 // Pull manifest
                 updateProgress(0.05, "Pulling manifest...")
@@ -675,17 +754,23 @@ class OCIImageManager {
                 try encoder.encode(record).write(to: imageDir.appendingPathComponent("pulled.json"))
 
                 bgLog("Image '\(imageName)' pulled from \(reference)")
-                return imageName
-            }.value
+            }
+            cancelRunningTask = { work.cancel() }
+            try await work.value
 
             state = .completed(message: "Image '\(imageName)' pulled from \(reference)")
 
         } catch {
-            log("Pull failed: \(error.localizedDescription)")
-            state = .error(error.localizedDescription)
-            if let name = name {
-                let imageDir = imagesDir.appendingPathComponent(name)
-                try? FileManager.default.removeItem(at: imageDir)
+            // The image is only whole once the pull finishes, so whatever was
+            // written goes — otherwise `image list` would show a name whose disk
+            // chunks stop partway.
+            try? FileManager.default.removeItem(at: imageDir)
+            if cancelRequested {
+                log("Pull of image '\(imageName)' cancelled")
+                state = .cancelled(message: "Pull of '\(imageName)' cancelled")
+            } else {
+                log("Pull failed: \(error.localizedDescription)")
+                state = .error(error.localizedDescription)
             }
         }
     }
@@ -707,17 +792,17 @@ class OCIImageManager {
 
     // MARK: - Helpers
 
-    /// Drop a finished operation's state. Nothing else clears `.error` — the next
-    /// operation is what normally replaces it — so the GUI's banner would keep a
-    /// failure on screen forever without a way to say it has been read. A running
-    /// operation is left alone.
+    /// Drop a finished operation's state. Nothing else clears `.error` or
+    /// `.cancelled` — the next operation is what normally replaces them — so the
+    /// GUI's banner would keep a failure on screen forever without a way to say
+    /// it has been read. A running operation is left alone.
     func clearTerminalState() {
         if isTerminalState { state = .idle }
     }
 
     private var isTerminalState: Bool {
         switch state {
-        case .completed, .error, .idle: return true
+        case .completed, .cancelled, .error, .idle: return true
         default: return false
         }
     }

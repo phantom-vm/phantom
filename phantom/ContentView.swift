@@ -90,7 +90,7 @@ struct ContentView: View {
     /// the directory on every update.
     private var imagesReloadKey: Bool {
         switch vm.imageManager.state {
-        case .idle, .completed, .error: true
+        case .idle, .completed, .cancelled, .error: true
         case .saving, .pushing, .pulling: false
         }
     }

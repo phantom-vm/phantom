@@ -250,12 +250,19 @@ Or on error:
 ### image.pull
 - **Params**: `reference` (string), `name` (string, optional), `username` (string, optional), `password` (string, optional)
 - **Purpose**: Pull an image from an OCI registry to local storage
-- **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory. An omitted `name` is taken from the last path segment of the reference and has to satisfy the same naming rule as `image.save` — the registry picked it, so it is checked like any other input.
+- **Implementation**: Fire-and-forget. Fetches manifest, downloads config/nvram/disk blobs, saves to local image directory. An omitted `name` is taken from the last path segment of the reference and has to satisfy the same naming rule as `image.save` — the registry picked it, so it is checked like any other input. The name is resolved and its directory claimed (existing one replaced, or refused) *before* the transfer starts, so a pull that fails or is cancelled partway can delete what it wrote without having to work out whether the bytes under that name are its own — and a refusal to overwrite cannot itself take out the image it refused to overwrite.
 - **Response**: `{"status": "started", "message": "Pulling image from ..."}`
+
+### image.cancel
+- **Purpose**: Stop the running save, push or pull
+- **Implementation**: Cancels the detached task the transfer runs in. The image manager holds that task's `cancel()` precisely because a detached task takes no cancellation from whoever awaits it. Cancellation is cooperative and reaches the work in two ways: a transfer in flight throws (URLSession cancels the request), and the chunk loops check between chunks — so a cancel lands within one chunk, not immediately. The operation then unwinds through its own failure path, which deletes the part-written image directory; a push has nothing local to undo, and since the manifest is written last it publishes no tag. Whether that path reports `cancelled` or `error` is decided by whether a cancel was *asked for*, not by the error thrown, which varies with where the work was.
+- **Response**: `{"status": "cancelling", "operation": "pull", "message": "..."}`, or `{"status": "idle", "message": "No image operation is running"}`
+- **Note**: Answers as soon as the task is told to stop, before the state turns over — nothing running is not an error, since the operation may have finished between the listing that showed it and this call. The caller polls `image.status` for the outcome, which is what `phantom image cancel` does.
 
 ### image.status
 - **Purpose**: Poll current image operation state (saving, pushing, pulling)
-- **Response**: `{"state": "idle|saving|pushing|pulling|completed|error", "progress": 0.5, "message": "..."}`
+- **Response**: `{"state": "idle|saving|pushing|pulling|completed|cancelled|error", "progress": 0.5, "message": "..."}`
+- **Note**: `cancelled` is a terminal state of its own rather than an `error`, so a client can tell an operation that was stopped on purpose (and cleaned up after itself) from one that failed. Like `error`, it stays until the next operation replaces it or the GUI's Dismiss clears it.
 
 ### gitlab.setup
 - **Params**: `url` (string), `token` (string), `cliPath` (string), `concurrent` (int, optional, 1–2)

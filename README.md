@@ -63,6 +63,7 @@ phantom vm list | start | stop | delete
 phantom vm vnc <id>              # open a VNC session to the VM's display
 phantom vm screenshot <id>       # capture its framebuffer
 phantom image list | catalog | pull | delete
+phantom image cancel             # stop a pull (or save/push) already running
 ```
 
 `phantom` on its own lists the commands; `--help` after any of them gives that

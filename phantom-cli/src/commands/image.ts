@@ -105,13 +105,60 @@ export async function imageCatalog() {
   );
 }
 
-/// A status line, but only while an operation is actually running.
+/// A status line for an operation that is running — or was cancelled, which is
+/// the one finished state worth a line: it deleted whatever it had written, so
+/// the listing below is the same listing as before and says nothing about it.
 /// completed/error/idle are skipped so a finished op doesn't linger in the
 /// listing (and so create-from-image's state can't leak in here).
 function printInProgress(status: { state?: string; progress?: number; message?: string } | undefined) {
-  if (!status?.state || !["saving", "pushing", "pulling"].includes(status.state)) return;
+  if (!status?.state) return;
+  if (status.state === "cancelled") {
+    console.log(`[cancelled] ${status.message ?? ""}\n`);
+    return;
+  }
+  if (!["saving", "pushing", "pulling"].includes(status.state)) return;
   const pct = status.progress != null ? ` ${Math.floor(status.progress * 100)}%` : "";
   console.log(`[${status.state}${pct}] ${status.message ?? ""}\n`);
+}
+
+/// Stop the running save/push/pull. The daemon answers as soon as the transfer
+/// is told to stop, so this waits for the state to turn over rather than
+/// reporting a cancellation that hasn't happened yet — a chunk in flight has to
+/// finish first, and the partial image is deleted after that.
+export async function imageCancel() {
+  const response = await sendRequest({ method: "image.cancel" });
+
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  if (response.result?.status !== "cancelling") {
+    console.log("No image operation is running.");
+    return;
+  }
+
+  const operation = response.result.operation as string;
+  console.log(`Cancelling image ${operation}...`);
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const status = (await sendRequest({ method: "image.status" })).result as
+      | { state?: string; message?: string }
+      | undefined;
+    if (status?.state === "cancelled") {
+      console.log(status.message ?? `Image ${operation} cancelled`);
+      return;
+    }
+    // The operation beat the cancel to the finish — say so rather than claim
+    // credit for stopping it.
+    if (status?.state === "completed" || status?.state === "error") {
+      console.log(`The ${operation} finished before it could be cancelled: ${status.message ?? status.state}`);
+      return;
+    }
+  }
+
+  console.log(`Still stopping. Check 'phantom image list' for the ${operation}'s final state.`);
 }
 
 export async function imageDelete(name?: string) {
@@ -355,6 +402,11 @@ export const commands: Record<string, Command> = {
       "--password <pass>  Registry password",
     ],
     multiArgHandler: imagePull,
+  },
+  cancel: {
+    usage: "",
+    description: "Stop the running save, push or pull",
+    handler: imageCancel as Command["handler"],
   },
   delete: { usage: "<name>", description: "Delete a local image", handler: imageDelete as Command["handler"] },
 };

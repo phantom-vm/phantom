@@ -384,6 +384,27 @@ let observation = installer.progress.observe(\.fractionCompleted) { progress, _ 
 }
 ```
 
+**Cancelling detached work**: an image operation's heavy I/O runs in
+`Task.detached`, which by design inherits nothing from its caller — including
+cancellation, so cancelling whoever `await`s it would not reach the transfer.
+`OCIImageManager` therefore keeps the task's `cancel()` for the duration of the
+operation, and `cancel()` calls it:
+
+```swift
+let work = Task.detached { ... }          // the transfer
+cancelRunningTask = { work.cancel() }     // what image.cancel reaches
+defer { cancelRunningTask = nil }
+try await work.value
+```
+
+Inside, cancellation is cooperative: task-group children *do* inherit it, a
+transfer in flight throws through URLSession, and the chunk loops
+`Task.checkCancellation()` between chunks — so a cancel lands within one chunk
+rather than immediately, and the operation unwinds through its own failure path,
+which is what deletes the part-written image. That path distinguishes cancelled
+from failed by a `cancelRequested` flag, not by the error: what is thrown depends
+on where the work happened to be.
+
 ---
 
 ## State Management
@@ -415,7 +436,8 @@ class IPSWManager {
 class OCIImageManager {
     private(set) var state: OperationState = .idle
     // .idle | .saving(progress, message) | .pushing(progress, message)
-    // | .pulling(progress, message) | .completed(message) | .error(message)
+    // | .pulling(progress, message) | .completed(message)
+    // | .cancelled(message) | .error(message)
 
     func save(name:bundlePath:) async { ... }
     func list() -> [ImageInfo] { ... }
@@ -423,6 +445,7 @@ class OCIImageManager {
     func restore(image:into:progress:) async throws { ... }
     func push(name:reference:username:password:) async { ... }
     func pull(reference:name:username:password:) async { ... }
+    func cancel() -> String? { ... }   // nil when nothing is running
 }
 
 @MainActor

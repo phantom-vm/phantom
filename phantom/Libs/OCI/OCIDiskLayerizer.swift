@@ -77,7 +77,11 @@ nonisolated enum OCIDiskLayerizer {
 
             func schedule(_ i: Int) {
                 group.addTask {
-                    (i, try compressChunk(fd: fd, index: i, fileSize: fileSize, outputDir: outputDir))
+                    // A cancelled save is meant to stop within a chunk or two,
+                    // not run the disk out: compressing one is uninterruptible,
+                    // so this is where the ones not yet started drop out.
+                    try Task.checkCancellation()
+                    return (i, try compressChunk(fd: fd, index: i, fileSize: fileSize, outputDir: outputDir))
                 }
                 next += 1
                 inFlight += 1

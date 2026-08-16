@@ -22,7 +22,7 @@ struct VMDetailView: View {
     private var imageOperationRunning: Bool {
         switch vm.imageManager.state {
         case .saving, .pushing, .pulling: true
-        case .idle, .completed, .error: false
+        case .idle, .completed, .cancelled, .error: false
         }
     }
 

@@ -66,6 +66,14 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   list yet, the "No Images" empty state stands down — the banner already accounts
   for what is coming, and telling you to pull an image mid-pull reads as advice to
   start what is running.
+- **Cancelling** — the running banner carries a **Cancel** beside the progress
+  bar, the only place the operation is shown and so the only place it can be
+  stopped. No confirmation: what it interrupts is named right beside it, and what
+  it destroys is an image that does not exist yet. The button reads *Cancelling…*
+  and dims until the daemon's state turns over, because a cancel lands only when
+  the chunk in flight is done. The result is its own banner — dismissible, and
+  visibly not a failure — since a cancelled operation deletes what it wrote and
+  would otherwise leave no trace at all.
 - **Acquiring vs. having** — a list column shows what you have; getting another
   one is an action, and actions are sheets behind the **+**. `CreateVMSheet`
   restores a VM from a local image, `PullImageSheet` lists the published catalog

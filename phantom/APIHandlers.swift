@@ -104,6 +104,8 @@ struct APIHandlers {
             return try await handleImagesPush(params: request.params)
         case "image.pull":
             return try await handleImagesPull(params: request.params)
+        case "image.cancel":
+            return try await handleImagesCancel()
         case "gitlab.setup":
             return try await handleGitLabSetup(params: request.params)
         case "gitlab.status":
@@ -719,6 +721,26 @@ struct APIHandlers {
         return AnyCodable(vmManager.gitlabRunnerManager.statusInfo())
     }
 
+    /// Stop the running save/push/pull. Answers as soon as the transfer has been
+    /// told to stop, not once it has: unwinding a pull means abandoning chunk
+    /// downloads and deleting a part-written image, and the caller is a
+    /// fire-and-forget client that polls `image.status` for the rest. Nothing
+    /// running is not an error — the operation may have finished between the
+    /// listing that showed it and this call.
+    private func handleImagesCancel() async throws -> AnyCodable {
+        guard let operation = vmManager.imageManager.cancel() else {
+            return AnyCodable([
+                "status": "idle",
+                "message": "No image operation is running"
+            ])
+        }
+        return AnyCodable([
+            "status": "cancelling",
+            "operation": operation,
+            "message": "Cancelling image \(operation)"
+        ])
+    }
+
     private func handleImagesStatus() async throws -> AnyCodable {
         switch vmManager.imageManager.state {
         case .idle:
@@ -731,6 +753,8 @@ struct APIHandlers {
             return AnyCodable(["state": "pulling", "progress": progress, "message": message] as [String: Any])
         case .completed(let message):
             return AnyCodable(["state": "completed", "message": message] as [String: Any])
+        case .cancelled(let message):
+            return AnyCodable(["state": "cancelled", "message": message] as [String: Any])
         case .error(let message):
             return AnyCodable(["state": "error", "message": message] as [String: Any])
         }
