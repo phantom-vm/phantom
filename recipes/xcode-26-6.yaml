@@ -13,10 +13,12 @@ from: tahoe-base
 steps:
   # macOS ships no JavaScript runtime. Baking one in means a step — or a CI job
   # — can be TypeScript instead of shell, without 90MB of download first.
+  #
+  # Through mise, which tahoe-base carries, and as admin, because that is who
+  # mise is installed for and who CI jobs run as. Steps otherwise run as root,
+  # whose home is 0700 — tools installed there would be invisible to a job.
   - name: bun
-    script: ../provision/install-bun.sh
-    env:
-      BUN_VERSION: 1.3.14
+    run: su - admin -c 'mise use --global bun@1.3.14'
     timeout: 10m
 
   # Then the runner, because it is a 60MB download that fails in seconds —
@@ -61,5 +63,6 @@ steps:
       xcodebuild -version | grep -q 'Xcode 26.6'
       xcrun simctl list runtimes | grep -q iOS
       gitlab-runner --version | grep -q 18.11.2
-      bun --version | grep -q 1.3.14
+      su - admin -c 'bun --version' | grep -q 1.3.14
+      su - admin -c 'mise --version'
     timeout: 5m

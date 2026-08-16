@@ -2,7 +2,8 @@
 # Phantom base-image provisioning — runs inside the guest as root (via the
 # phantom-agent over vsock) once Setup Assistant is done and the agent is
 # installed. Prepares a hands-off CI-friendly macOS: passwordless sudo, auto
-# login, and no sleep / screensaver / screen lock.
+# login, no sleep / screensaver / screen lock, the command line tools, and mise
+# for everything a later image or a job installs.
 #
 #   phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"
 #
@@ -11,6 +12,9 @@ set -e
 
 USER_NAME=admin
 USER_PASS=admin
+# Pinned, like every other version this image bakes in: an image should be able
+# to say what is in it. MISE_VERSION= overrides it for one build.
+MISE_VERSION="${MISE_VERSION:-v2026.8.6}"
 
 echo "Enabling passwordless sudo for $USER_NAME..."
 echo "$USER_NAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/admin-nopasswd
@@ -30,6 +34,33 @@ pmset -a sleep 0 displaysleep 0 2>/dev/null || true
 echo "Disabling screensaver and screen lock..."
 defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0
 sysadminctl -screenLock off -password "$USER_PASS" 2>/dev/null || true
+
+echo "Installing mise $MISE_VERSION as $USER_NAME..."
+# The tool manager every later image and every CI job gets its runtimes from.
+# It belongs in the base rather than in a recipe because it is not a toolchain —
+# it is how toolchains arrive, and a layered image asking for bun should not
+# first have to arrange for something to install bun with.
+#
+# Installed as the admin user, the way mise documents it and the way a person
+# would: this script runs as root, and mise keeps its tools under the invoking
+# user's home. Installed by root they would live in /var/root (mode 0700) —
+# invisible to the admin user CI jobs actually run as.
+su - "$USER_NAME" -c "MISE_VERSION='$MISE_VERSION' curl -fsSL https://mise.run | sh"
+
+# Two shell files, because the two ways into this guest read different ones:
+#
+#   ~/.zshrc   — an interactive terminal, where `mise activate` is what mise
+#                recommends: it puts the tools of the current directory's config
+#                on PATH and keeps up as you cd around.
+#   ~/.zshenv  — every zsh, interactive or not, which is the only one that
+#                reaches `su - admin -c '<command>'`: a non-interactive login
+#                shell never reads .zshrc, and that is exactly how vm.exec and
+#                every CI job stage arrive. Hence the shims directory, which is
+#                what mise itself points CI and scripts at.
+su - "$USER_NAME" -c 'grep -q "mise activate" ~/.zshrc 2>/dev/null || echo "eval \"\$(~/.local/bin/mise activate zsh)\"" >> ~/.zshrc'
+su - "$USER_NAME" -c 'grep -q "mise/shims" ~/.zshenv 2>/dev/null || echo "export PATH=\"\$HOME/.local/share/mise/shims:\$HOME/.local/bin:\$PATH\"" >> ~/.zshenv'
+
+su - "$USER_NAME" -c "mise --version"
 
 echo "Installing Xcode Command Line Tools (needed for git in CI)..."
 # Headless CLT install: the marker file makes softwareupdate list CLT packages
