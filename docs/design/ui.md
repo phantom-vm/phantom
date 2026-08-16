@@ -50,7 +50,7 @@ catalog image, pulled ready to boot; a macOS restore image is how those images g
 `PHANTOM_ADMIN_MODE` for the same reason, and the GUI used to contradict that by
 keeping a restore-image panel in the sidebar of every install. The daemon still
 serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
-`phantom image build --ipsw` is how a base image is produced.
+`phantom image build-base` is how a base image is produced.
 
 - **Sidebar** — two groups. The things the daemon manages (VMs, Images), each with
   a live count, then a **Daemon** group for the daemon itself: its Log and its

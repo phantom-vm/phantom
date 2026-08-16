@@ -1,5 +1,6 @@
 import { sendRequest } from "../lib/api";
 import { buildCommand } from "./build";
+import { buildBaseCommand } from "./build-base";
 import { publishCommand } from "./publish";
 import {
   fetchCatalog,
@@ -416,6 +417,7 @@ export const commands: Record<string, Command> = {
 // and the parser that enforces it stay in one file.
 export const adminCommands: Record<string, Command> = {
   build: buildCommand,
+  "build-base": buildBaseCommand,
   publish: publishCommand,
 };
 

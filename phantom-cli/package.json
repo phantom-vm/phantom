@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && bun build src/main.ts --compile --minify --outfile dist/phantom",
-    "install-bin": "bun run build && mv dist/phantom ~/.local/bin/phantom"
+    "install-bin": "bun run build && mv dist/phantom ~/.local/bin/phantom",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14"

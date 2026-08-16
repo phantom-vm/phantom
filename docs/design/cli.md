@@ -2,7 +2,7 @@
 
 CLI that sends JSON-RPC requests to the daemon.
 
-**One binary, one entry point** (`src/main.ts`, built by `bun run build`), with the image-authoring commands (`ipsw`, `image build`, `image publish`, `vm boot-script`) gated behind the `PHANTOM_ADMIN_MODE` env var — `src/admin.ts`. Outside admin mode they are hidden from `phantom help` and answer with an error naming the variable rather than "unknown subcommand". This is presentation only: the commands are compiled into every binary, and the daemon API keeps all endpoints regardless of what the caller is showing in its help. It is explicitly **not** an access-control boundary. (Earlier versions shipped two binaries from two entry points, `main.ts` and `main-admin.ts`, so the user build's import graph excluded the authoring code; that saved 16KB on a 63MB binary — the Bun runtime dominates — and cost two release assets and two build scripts, so it was collapsed.) Each `commands/*.ts` module exports `Command` records — usage, description, option detail and the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`).
+**One binary, one entry point** (`src/main.ts`, built by `bun run build`), with the image-authoring commands (`ipsw`, `image build`, `image build-base`, `image publish`, `vm boot-script`) gated behind the `PHANTOM_ADMIN_MODE` env var — `src/admin.ts`. Outside admin mode they are hidden from `phantom help` and answer with an error naming the variable rather than "unknown subcommand". This is presentation only: the commands are compiled into every binary, and the daemon API keeps all endpoints regardless of what the caller is showing in its help. It is explicitly **not** an access-control boundary. (Earlier versions shipped two binaries from two entry points, `main.ts` and `main-admin.ts`, so the user build's import graph excluded the authoring code; that saved 16KB on a 63MB binary — the Bun runtime dominates — and cost two release assets and two build scripts, so it was collapsed.) Each `commands/*.ts` module exports `Command` records — usage, description, option detail and the handler at one declaration site — that both the router and `phantom help` read directly (see `command.ts`, `cli.ts`).
 
 **Entry point**: `phantom-cli/src/main.ts` — argument routing in `router.ts`, help rendering in `command.ts`/`cli.ts`, handlers under `commands/`.
 
@@ -31,10 +31,13 @@ phantom-cli/
     ├── main.ts          # CLI entry point and command registry
     ├── router.ts        # Command routing
     ├── lib/api.ts       # TCP client (batch + streaming)
+    ├── lib/recipe.ts    # the build recipe: parse, validate, resolve paths
+    ├── lib/guest.ts     # what both builders share: exec in the guest, serve a file, wait out a save
     └── commands/
         ├── vm.ts            # create, list, start, stop, exec, display, vnc, boot-script, screenshot, delete
         ├── image.ts         # list, catalog, delete, save, push, pull, cancel
-        ├── build.ts         # image build orchestrator
+        ├── build.ts         # image build — recipe → layered image
+        ├── build-base.ts    # image build-base — IPSW → base image
         ├── ipsw.ts          # IPSW management
         ├── gitlab-runner.ts # GitLab custom executor
         └── health.ts        # Daemon health check
@@ -52,8 +55,14 @@ Not every command follows it: `image catalog`/`image pull` also read the public 
 
 **Long operations are started, not awaited** — `image save`/`push`/`pull` return as soon as the daemon has taken the job, and the progress is read back with `image list`, which prints the running operation above the listing. `image cancel` is the exception that waits: it asks the daemon to stop, then polls `image.status` until the state turns over, because the answer a user wants is "it stopped", not "it has been asked to". An operation that finished first is reported as such rather than claimed as cancelled. A cancelled operation deletes what it wrote, so it is also the one finished state `image list` still prints — nothing in the listing below would otherwise show that anything happened.
 
-The endpoints these commands call are documented in [api.md](api.md). `image build`
-is the one command that is more than a wrapper around an endpoint — it orchestrates
-a whole pipeline, described in [images.md](images.md#automated-image-building-image-build).
+The endpoints these commands call are documented in [api.md](api.md). The two
+builders are the commands that are more than a wrapper around an endpoint — each
+orchestrates a whole pipeline, described in
+[images.md](images.md#automated-image-building). They are deliberately two
+commands: `image build-base` turns an IPSW into a base image and is driven by
+flags, while `image build` layers onto a base image and is driven by a recipe
+file (`lib/recipe.ts`), because what goes on top of a base is what someone has to
+read back a year later. Validation of a recipe happens before any daemon call —
+`--dry-run` is that validation with the plan printed and nothing else done.
 
 **Self-update**: `phantom update` looks up the latest release through the GitHub API, downloads that release's own `phantom-cli` asset by its versioned URL (never `releases/latest/download/`, which could move between the lookup and the fetch), writes it beside the running binary and `rename(2)`s it over `process.execPath` — atomic, and safe while executing, since this process keeps the inode it is already running. There is no signature check: release.yml signs and notarizes the daemon app but not this binary, so HTTPS to github.com is the whole trust anchor, exactly as much as the README's curl install it replaces. Two guards matter: a local version newer than the latest release is reported rather than silently downgraded (`--force` overrides), and the command refuses to run from a source checkout, where `process.execPath` is the *bun* binary and "updating" would overwrite the user's bun. The daemon has no equivalent — updating it is still manual.

@@ -9,6 +9,8 @@ image, with no manual interaction.
 IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ provision.sh (vsock) ─▶ image.save
 ```
 
+These four steps are what `phantom image build-base <name>` runs unattended.
+
 1. **Install** — `phantom vm deploy --ipsw <id>` installs macOS headlessly.
 2. **Setup Assistant** — `phantom vm boot-script <vm-id> --file provision/setup-tahoe.txt`
    drives Setup Assistant over VNC (keystrokes + OCR clicks): creates a local
@@ -16,7 +18,7 @@ IPSW ─▶ vm.create (headless install) ─▶ setup-tahoe.txt (VNC) ─▶ pro
    desktop, and installs the agent by fetching the published `phantom-agent-install.sh`
    release asset over the guest's NAT network (the installer checks the
    binary against a SHA-256 pinned at release time). After this the agent
-   answers on vsock. For a dev agent, see `image build --agent-url` in
+   answers on vsock. For a dev agent, see `image build-base --agent-url` in
    [phantom-agent/README.md](../phantom-agent/README.md).
 3. **Provision** — `phantom vm exec <vm-id> -- sh -c "$(cat provision/provision.sh)"`
    (or copy the script in) configures passwordless sudo, auto-login, and
@@ -33,15 +35,28 @@ is minutes of decompression instead of an hour of installing:
 tahoe-base ─▶ vm.create --fromImage ─▶ install-xcode.sh (vsock) ─▶ image.save
 ```
 
+What that layer contains is not typed at the prompt but written down, in a
+recipe under [recipes/](../recipes/) — the scripts here are what its steps run:
+
 ```bash
-phantom image build xcode-26-6 --image tahoe-base \
-  --xcode http://192.168.1.127:9001/xcodes/Xcode-26.6.0%2B17F113.xip
+phantom image build -f recipes/xcode-26-6.yaml
 ```
 
-The `--xcode` value is either a URL the guest can reach — downloaded inside the
-guest, so 10GB never passes through the host — or a local `.xip` path, which
-the CLI serves to the guest over an ephemeral HTTP server on the vmnet bridge
-for the duration of the install. Apple's signature on the archive is checked by
+```yaml
+steps:
+  - name: xcode
+    script: ../provision/install-xcode.sh
+    serve: ~/Downloads/Xcode-26.6.0+17F113.xip   # or env: { XCODE_SRC: https://… }
+    env:
+      XCODE_SRC: ${serve}
+    expect: XCODE_INSTALL_DONE
+    timeout: 4h
+```
+
+`XCODE_SRC` is either a URL the guest can reach — downloaded inside the guest,
+so 10GB never passes through the host — or, with `serve:`, a local `.xip` that
+the CLI hands the guest over an ephemeral HTTP server on the vmnet bridge for
+the duration of the step. Apple's signature on the archive is checked by
 `xip --expand`, which is also what makes the download safe to trust.
 
 Every simulator runtime is downloaded too (`xcodebuild -downloadAllPlatforms`),
@@ -50,11 +65,16 @@ several GB in every CI job. The build log ends with `simctl list runtimes` and
 `simctl list devices available` so you can see which destinations the image can
 test against.
 
+The recipe format is documented in
+[docs/authoring-images.md](../docs/authoring-images.md#recipes).
+
 ## gitlab-runner in the guest
 
-Every layered image `phantom image build --image` produces gets `gitlab-runner`
-installed into `/usr/local/bin` (skip it with `--no-gitlab-runner`; base builds
-skip it by default, `--gitlab-runner` forces it). GitLab's custom executor
+A recipe that lists this script installs `gitlab-runner` into the guest's
+`/usr/local/bin`; one that does not, does not — there is no default any more,
+which is why every recipe for a CI image starts with this step. Base images
+skip it: they are foundations to layer onto, not CI targets. GitLab's custom
+executor
 runs *every* stage of a job inside the job environment, so a job declaring
 `artifacts:` or `cache:` invokes `gitlab-runner artifacts-uploader` /
 `cache-archiver` **inside the VM**. When the binary isn't there the stage prints
@@ -67,15 +87,17 @@ and is skipped — the job still passes and the artifact never reaches GitLab.
 Baking it in keeps that out of every project's `before_script`, and off the
 network on every job.
 
-The version is pinned in `install-gitlab-runner.sh`; `--gitlab-runner-version`
-overrides it for one build. It does not have to match the host runner the daemon
+The version is pinned in `install-gitlab-runner.sh`, and a recipe's
+`env: { RUNNER_VERSION: … }` overrides it for that image — where it is then
+written down rather than remembered. It does not have to match the host runner the daemon
 manages — only the artifact/cache protocol has to line up — but keep the two
 roughly in step.
 
-To add it to an image that predates this, rebuild that image from itself:
+To add it to an image that predates this, rebuild that image from itself — a
+recipe whose `from:` is its own `name:`:
 
 ```bash
-phantom image build xcode-26-6 --image xcode-26-6 --replace
+phantom image build -f recipes/xcode-26-6-runner-bump.yaml --replace
 ```
 
 ## Files

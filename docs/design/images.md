@@ -76,25 +76,85 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 6. Write the image's MachineIdentifier — **last**, because `loadExistingVMs` takes the four bundle files as proof of a usable VM, and a daemon killed mid-restore would otherwise leave a half-decompressed disk to be adopted on the next launch. An image saved before the identifier was recorded has none to restore, and falls back to a generated one
 7. Boot the VM; a failure anywhere above removes the bundle and leaves the instance in `error` (which `vm.delete` clears)
 
-## Automated Image Building (`image build`)
+## Automated Image Building
 
-`phantom image build <name>` is a CLI-side orchestrator ([phantom-cli/src/commands/build.ts](../../phantom-cli/src/commands/build.ts)) that chains existing daemon endpoints into a hands-off pipeline. All the sequencing and long-polling lives in the CLI; the daemon stays a set of primitive operations.
+Two commands, because these are two different jobs and only one of them is worth
+declaring. Both are CLI-side orchestrators that chain existing daemon endpoints
+into a hands-off pipeline — all the sequencing and long-polling lives in the
+CLI, and the daemon stays a set of primitive operations.
+
+| Command | Produces | Described by |
+|---|---|---|
+| `image build-base <name>` | A base image: macOS installed from an IPSW, the agent, provisioning | Flags ([build-base.ts](../../phantom-cli/src/commands/build-base.ts)) |
+| `image build -f <recipe.yaml>` | A layered image: a base plus whatever a toolchain needs | A recipe ([build.ts](../../phantom-cli/src/commands/build.ts)) |
+
+### Base images (`image build-base`)
 
 1. **Resolve IPSW** — `ipsw.list`; use `--ipsw` or the single downloaded IPSW
 2. **Install** — `vm.create` (returns `vmId` immediately), poll `vm.list` until `running`
 3. **Setup Assistant** — `vm.bootScript` with `provision/setup-tahoe.txt`, poll `vm.bootScript.status` until `completed`; this also bootstraps the agent inside the guest via one VNC-typed Terminal command that fetches the published `phantom-agent-install.sh` release asset and runs it as root (the installer checks the binary against a SHA-256 pinned at release time). `--agent-url` rewrites that fetch to a dev-served installer, so agent development doesn't require cutting a release
 4. **Provision** — `vm.exec` runs `provision/provision.sh` over vsock (passwordless sudo, auto-login, no sleep)
-5. **Install gitlab-runner** (layered builds by default; base builds only with `--gitlab-runner`) — see below
-6. **Install Xcode** (optional `--xcode <url|path>`) — see below
-7. **Stop** — `vm.stop` (preceded by `sync` over vsock, since `vm.stop` is a force stop)
-8. **Save** — `image.save` (`--replace` to overwrite the same name), poll `image.list` until the image appears
-9. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
+5. **Stop** — `vm.stop` (preceded by `sync` over vsock, since `vm.stop` is a force stop)
+6. **Save** — `image.save` (`--replace` to overwrite the same name), poll `image.status` until the save ends
+7. **Cleanup** — `vm.delete` the intermediate VM (unless `--keep-vm`)
 
-**gitlab-runner** is baked into every layered image by default (base builds skip it — CI jobs run on the toolchain images layered on top, and `--gitlab-runner` forces it onto a base build), by running [provision/install-gitlab-runner.sh](../../provision/install-gitlab-runner.sh) in the guest (`RUNNER_VERSION=` prepended the same way as `XCODE_SRC=`). It curls the pinned `gitlab-runner-darwin-arm64` to `/usr/local/bin`. This is not optional cosmetics: GitLab's custom executor runs *every* stage of a job inside the job environment, so `upload_artifacts_on_success` and the cache stages shell out to `gitlab-runner artifacts-uploader` / `cache-archiver` **in the guest**. Without the binary there, those stages log `Missing gitlab-runner. Uploading artifacts is disabled.`, the job still passes, and the artifact never arrives. The step runs before Xcode so a 60MB failure surfaces in seconds rather than after a three-hour install. The guest version is pinned in the script and deliberately independent of the host runner the daemon manages — the two only need to agree on the artifact/cache protocol, not on a build.
+**Why this one has no recipe.** It runs once per macOS release, and its middle
+is VNC keystrokes against Setup Assistant in a guest with no agent to run
+anything in — the boot script has to be rewritten whenever Apple rewords a pane,
+and it is not a step in the sense the recipe format means. A base image is macOS,
+the agent and provisioning; everything else belongs in a layer on top.
 
-**Layering onto an existing image** — `--image <name>` replaces steps 1–4 with a single `vm.create --fromImage` (plus the same `vm.list` poll, now watching `restoring(N%)`), since that image already has macOS installed, Setup Assistant done, the agent installed and provisioning applied. This is how toolchain images are built on top of a base: minutes of decompression instead of an hour of installing. `--image` and `--ipsw` are mutually exclusive. An image can also be layered onto *itself* (`--image <name> <name> --replace`), which is how a finished image gets a small addition — a runner bump, say — without rebuilding the toolchain.
+### Layered images (`image build -f <recipe.yaml>`)
 
-**Xcode installation** (`--xcode <url|path>`) runs [provision/install-xcode.sh](../../provision/install-xcode.sh) inside the guest over vsock, with the source passed as an `XCODE_SRC=` line prepended to the script body (`vm.exec`'s `args` are appended to the command string, which a multi-line body cannot use). A URL is downloaded by the guest itself — no 10GB detour through the host; a local path is served to the guest over an ephemeral HTTP server bound to the host side of the vmnet NAT bridge, alive only for the duration of the install. The script expands the `.xip` (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
+```
+recipe.yaml → vm.create --fromImage → step → step → … → sync → vm.stop → image.save
+```
+
+`vm.create --fromImage` replaces the install and provisioning of a base build
+with one restore — the base already has macOS, the agent and provisioning, so
+this is minutes of decompression rather than an hour of installing. Then each of
+the recipe's steps is one `vm.exec` over vsock, and the result is saved under the
+name the recipe carries. An image can be rebuilt onto *itself* (`from:` its own
+name, with `--replace`), which is how a finished image gets a small addition —
+a runner bump, say — without rebuilding the toolchain.
+
+**The recipe is the point.** What a toolchain image contains used to live in the
+flags somebody typed that day, the pins inside `provision/*.sh`, and a commit
+message; nothing in the repo said "this image is these steps". A recipe is that
+statement, checked in beside the image it describes ([recipes/](../../recipes/)),
+and it is what a build record can later record verbatim.
+
+```yaml
+schema: 1
+name: xcode-26-6
+description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
+from: tahoe-base
+steps:
+  - name: gitlab-runner
+    script: ../provision/install-gitlab-runner.sh
+    env: { RUNNER_VERSION: v18.11.2 }
+    expect: GITLAB_RUNNER_INSTALL_DONE
+    timeout: 15m
+  - name: xcode
+    script: ../provision/install-xcode.sh
+    serve: ~/Downloads/Xcode-26.6.0+17F113.xip
+    env: { XCODE_SRC: "${serve}" }
+    expect: XCODE_INSTALL_DONE
+    timeout: 4h
+```
+
+A step does exactly one thing, four keys wide:
+
+- **`script`** — a file, sent as the command body. **`run`** — an inline command. One or the other, never both.
+- **`env`** — prepended to the body as `KEY='value'` lines rather than passed as arguments, because `vm.exec` appends its args to the command string, which for a multi-line script body would land them on the last line instead of on the script. This is how `XCODE_SRC` and `RUNNER_VERSION` have always reached their scripts.
+- **`serve`** — a local file the guest cannot otherwise reach, served over an ephemeral HTTP server bound to the host side of the vmnet NAT bridge for the duration of the step. `${serve}` in `env` or `run` expands to its URL. A 10GB `.xip` never leaves the host disk and needs no shared folder. A `serve` nothing reads, or a `${serve}` with nothing served, is an error — either one means the guest would never be told the URL.
+- **`expect`** — text the step must print to count as done, for a script that can exit 0 having skipped the work it was there to do. Both installers already end with such a marker. **`timeout`** (`90s`/`15m`/`4h`, default 30m) bounds a hung step.
+
+**Validation happens before the VM exists**: schema, names, the one-of rule, duplicate step names, every `script` and `serve` path. An unknown key is an error rather than ignored noise — a recipe is meant to be the account of an image, and a misspelled key that is quietly dropped makes it a false one. `--dry-run` prints the resolved plan (paths, env, timeouts) and asks the daemon nothing, so a recipe can be checked in a second instead of an hour into a build. Paths inside a recipe resolve against the recipe's own directory, never the shell's, so a recipe works from anywhere.
+
+**gitlab-runner is now a step like any other.** It used to be baked into every layered build by default; a recipe states it or the image does not have it. This is not optional cosmetics for a CI image: GitLab's custom executor runs *every* stage of a job inside the job environment, so `upload_artifacts_on_success` and the cache stages shell out to `gitlab-runner artifacts-uploader` / `cache-archiver` **in the guest**. Without the binary there, those stages log `Missing gitlab-runner. Uploading artifacts is disabled.`, the job still passes, and the artifact never arrives. Put it first in a recipe, as [recipes/xcode-26-6.yaml](../../recipes/xcode-26-6.yaml) does: a 60MB download that fails in seconds beats finding out after a three-hour Xcode install. The guest version is pinned in the recipe and deliberately independent of the host runner the daemon manages — the two only need to agree on the artifact/cache protocol, not on a build.
+
+**Xcode installation** runs [provision/install-xcode.sh](../../provision/install-xcode.sh) in the guest with `XCODE_SRC` naming either a URL the guest downloads itself — no 10GB detour through the host — or a `serve`d local `.xip`. The script expands the archive (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
 
 ## Image Catalog (distribution)
 

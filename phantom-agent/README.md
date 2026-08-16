@@ -15,7 +15,7 @@ sudo sh /tmp/phantom-agent-install.sh
 ```
 
 This is exactly what `provision/setup-tahoe.txt` types into the guest during
-`image build`. It installs:
+`image build-base`. It installs:
 - Binary to `/usr/local/bin/phantom-agent`
 - launchd daemon plist to `/Library/LaunchDaemons/`
 - Loads and starts the daemon
@@ -108,7 +108,7 @@ To get a dev build into a VM:
     http://192.168.64.1:8642/phantom-agent > /tmp/agent-serve/phantom-agent-install.sh
   python3 -m http.server 8642 --directory /tmp/agent-serve &
 
-  phantom image build my-base --agent-url http://192.168.64.1:8642/phantom-agent-install.sh
+  phantom image build-base my-base --agent-url http://192.168.64.1:8642/phantom-agent-install.sh
   ```
 
 ## Management

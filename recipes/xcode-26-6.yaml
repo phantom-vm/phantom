@@ -1,0 +1,44 @@
+# The published xcode-26-6 image: what a CI job that builds an iOS app needs.
+#
+#   phantom image build -f recipes/xcode-26-6.yaml
+#
+# Layered onto the base image rather than installed from scratch — macOS, the
+# agent and provisioning are already in tahoe-base, so this is minutes of
+# decompression instead of an hour of installing.
+schema: 1
+name: xcode-26-6
+description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
+from: tahoe-base
+
+steps:
+  # First, because it is a 60MB download that fails in seconds — finding out
+  # after three hours of Xcode install would be a waste of an afternoon.
+  #
+  # Every image CI runs on needs this: GitLab's custom executor runs *every*
+  # stage inside the job environment, so a job declaring artifacts: or cache:
+  # shells out to `gitlab-runner artifacts-uploader` in the guest. Without the
+  # binary there the stage prints a warning, the job still passes, and the
+  # artifact never arrives.
+  - name: gitlab-runner
+    script: ../provision/install-gitlab-runner.sh
+    env:
+      RUNNER_VERSION: v18.11.2
+    expect: GITLAB_RUNNER_INSTALL_DONE
+    timeout: 15m
+
+  # Apple requires a login to download Xcode, so no URL can be checked in:
+  # point this at your own copy of the .xip and it is served to the guest over
+  # the vmnet bridge for the duration of the step — no 10GB detour through a
+  # shared folder, and `xip --expand` verifies Apple's signature on the way in.
+  #
+  # Change the version here and in `description` together; the file name is the
+  # only place the exact build (17F113) is written down.
+  - name: xcode
+    script: ../provision/install-xcode.sh
+    serve: ~/Downloads/Xcode-26.6.0+17F113.xip
+    env:
+      XCODE_SRC: ${serve}
+    expect: XCODE_INSTALL_DONE
+    # A ~10GB copy, the xip expansion, first launch, and every simulator
+    # runtime — the runtimes are the reason this is measured in hours.
+    timeout: 4h

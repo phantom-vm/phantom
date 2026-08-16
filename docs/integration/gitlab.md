@@ -114,7 +114,7 @@ Prepare warns rather than letting that happen quietly:
 ```
 
 The fix is to build the image with the binary in it — layer it
-(`phantom image build <name> --image <name> --replace`) or pass
+(`phantom image build -f <recipe.yaml> --replace`) or pass
 `--gitlab-runner` to a base build — rather than curling the binary in a
 `before_script`. A job that needs no artifacts or cache can ignore the warning.
 

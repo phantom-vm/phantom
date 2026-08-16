@@ -3,7 +3,8 @@
 For whoever produces the images everyone else pulls. Users don't need any of
 this — they run `phantom image pull <name>`.
 
-`ipsw`, `image build`, `image publish` and `vm boot-script` are hidden unless
+`ipsw`, `image build`, `image build-base`, `image publish` and `vm boot-script`
+are hidden unless
 `PHANTOM_ADMIN_MODE` is set:
 
 ```bash
@@ -17,15 +18,16 @@ any caller. Don't treat the variable as a permission boundary.
 
 ## The whole pipeline
 
-Run from the repo root, so the default script paths under [provision/](../provision/)
-resolve:
+Run from the repo root, so `image build-base`'s default script paths under
+[provision/](../provision/) resolve (a recipe's paths resolve against the recipe
+itself, so `image build` works from anywhere):
 
 ```bash
 phantom ipsw list                                   # catalog of macOS restore images
 phantom ipsw pull 26.3                              # ~14GB from Apple's CDN
 
-phantom image build tahoe-base
-phantom image build xcode-26-6 --image tahoe-base --xcode <url-or-path-to-xip>
+phantom image build-base tahoe-base
+phantom image build -f recipes/xcode-26-6.yaml
 phantom image publish xcode-26-6 --description "macOS 26 + Xcode 26.6 + all simulator runtimes"
 ```
 
@@ -33,10 +35,16 @@ Three steps, three different jobs:
 
 | Command | What it does | Roughly |
 |---|---|---|
-| `image build <name> --ipsw` | IPSW → installed, provisioned, agent-equipped base image | ~1 hour |
-| `image build <name> --image <base>` | Layers a toolchain onto a finished image, skipping install and provisioning | Depends on the toolchain |
-| `image build <name> --image <name> --replace` | Rebuilds an image in place — the cheap way to add one thing | Decompress + save |
+| `image build-base <name>` | IPSW → installed, provisioned, agent-equipped base image | ~1 hour |
+| `image build -f <recipe.yaml>` | Layers a toolchain onto a base image, as the recipe describes | Depends on the toolchain |
 | `image publish <name>` | Pushes to the registry and rewrites the catalog users read | ~40 min for 55GB |
+
+**The two builds are separate commands on purpose.** A base build happens once
+per macOS release and is driven by flags; what goes *on top* is declared in a
+recipe checked into [recipes/](../recipes/), because that is the part anyone
+will need to read back later. Rebuilding an image in place — the cheap way to
+add one thing — is a recipe whose `from:` is its own name, built with
+`--replace`.
 
 ## Building a base image
 
@@ -63,23 +71,82 @@ sudo and auto-login. Authoring one for a new release is the one case
 where [doing it by hand](#doing-it-by-hand) earns its keep.
 [provision/README.md](../provision/README.md) covers the scripts themselves.
 
-## gitlab-runner
+## Recipes
 
-Layered (`--image`) builds install `gitlab-runner` into the guest's
-`/usr/local/bin` ([provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh)),
-because GitLab's custom executor runs a job's artifact and cache stages *inside*
-the VM — without the binary they are silently skipped and `artifacts:` never
-uploads anything. Base builds from an IPSW skip it: they are foundations to
-layer toolchains onto, not CI targets. `--gitlab-runner` forces it onto a base
-build (do this if CI jobs will run on the base image directly),
-`--no-gitlab-runner` skips it on a layered build, `--gitlab-runner-version <v>`
-overrides the pin.
+A layered image is a recipe: the base it starts from, and the steps that turn it
+into something a CI job can run on.
 
-An image built before this can be refreshed without redoing its toolchain, by
-layering it onto itself:
+```yaml
+schema: 1
+name: xcode-26-6
+description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
+from: tahoe-base
+
+steps:
+  - name: gitlab-runner
+    script: ../provision/install-gitlab-runner.sh
+    env:
+      RUNNER_VERSION: v18.11.2
+    expect: GITLAB_RUNNER_INSTALL_DONE
+    timeout: 15m
+
+  - name: xcode
+    script: ../provision/install-xcode.sh
+    serve: ~/Downloads/Xcode-26.6.0+17F113.xip
+    env:
+      XCODE_SRC: ${serve}
+    expect: XCODE_INSTALL_DONE
+    timeout: 4h
+```
+
+| Key | Means |
+|---|---|
+| `schema` | `1`. Refused otherwise, rather than half-read |
+| `name` | The image this produces — same rule as any image name |
+| `from` | The base image to layer onto. Its own name, with `--replace`, rebuilds in place |
+| `description` | Free text. Say what a reader would want to know a year from now |
+| `steps[].name` | Names the step in the build output, and must be unique |
+| `steps[].script` | A script file, sent as the command body. Paths resolve against the recipe's own directory |
+| `steps[].run` | An inline command instead of a file. One of `script`/`run`, never both |
+| `steps[].env` | Prepended as `KEY='value'` lines — how `XCODE_SRC` and `RUNNER_VERSION` reach their scripts |
+| `steps[].serve` | A local file served to the guest over the vmnet bridge for this step. `${serve}` (in `env` or `run`) is its URL |
+| `steps[].expect` | Text the step must print to count as done — catches a script that exits 0 having skipped its work |
+| `steps[].timeout` | `90s`, `15m`, `4h`. Default 30m |
+
+Everything is checked before a VM is created — unknown keys included, since a
+recipe that quietly ignores a typo is no longer an account of the image:
 
 ```bash
-phantom image build xcode-26-6 --image xcode-26-6 --replace
+phantom image build -f recipes/xcode-26-6.yaml --dry-run
+```
+
+prints the resolved plan (which script, which env, which file served, how long
+each step may take) and talks to no daemon at all.
+
+Each step is one `vm.exec` over vsock, run as root in the guest, with its output
+echoed as it arrives. A step that exits non-zero, or that never prints its
+`expect`, stops the build naming itself — the intermediate VM is left behind for
+inspection.
+
+## gitlab-runner
+
+`gitlab-runner` in the guest's `/usr/local/bin`
+([provision/install-gitlab-runner.sh](../provision/install-gitlab-runner.sh)) is
+a step like any other now — a recipe lists it or the image does not have it.
+Every image CI runs on wants it: GitLab's custom executor runs a job's artifact
+and cache stages *inside* the VM, and without the binary they are silently
+skipped and `artifacts:` never uploads anything. Put it first, as
+[recipes/xcode-26-6.yaml](../recipes/xcode-26-6.yaml) does — a 60MB download
+that fails in seconds beats finding out after a three-hour Xcode install. Base
+images don't have it: they are foundations to layer onto, not CI targets.
+
+## Rebuilding an image in place
+
+An image can be refreshed without redoing its toolchain, by layering it onto
+itself — a recipe whose `from:` is its own `name:`, built with `--replace`:
+
+```bash
+phantom image build -f recipes/xcode-26-6-runner-bump.yaml --replace
 ```
 
 `--replace` writes the new copy alongside the old one and swaps it in only when
@@ -93,11 +160,12 @@ prints back from the registry rather than the mark on the build host.
 
 ## Layering a toolchain
 
-`--image <name>` boots a VM from a finished image instead of installing macOS, so
-Setup Assistant and provisioning are already done. `--xcode <url|path>` then
-installs Xcode from a `.xip`: a URL is fetched by the guest itself (no 10GB
-detour through the host), a local path is served to the guest over an ephemeral
-HTTP server on the vmnet bridge.
+`from:` boots a VM from a finished image instead of installing macOS, so Setup
+Assistant and provisioning are already done. The Xcode step installs from a
+`.xip` named by `XCODE_SRC`: a URL is fetched by the guest itself (no 10GB
+detour through the host), while `serve:` hands the guest a local file over an
+ephemeral HTTP server on the vmnet bridge — Apple requires a login to download
+Xcode, so a URL cannot be checked in and `serve:` is the usual answer.
 `xip --expand` verifies Apple's signature on the archive, which doubles as the
 integrity check. Every simulator runtime is downloaded too, since Xcode ships
 with none and otherwise every CI job would pay for that.
@@ -185,7 +253,7 @@ changed wording.
 7. **Provision and save** — apply [provision/provision.sh](../provision/provision.sh),
    then `phantom vm stop <vm-id>` and `phantom image save <vm-id> <name>`.
 
-Steps 2–7 are exactly what `phantom image build --ipsw` does unattended.
+Steps 2–7 are exactly what `phantom image build-base` does unattended.
 
 ## Related
 
