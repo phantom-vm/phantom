@@ -14,8 +14,8 @@
       "name": "xcode-26-6",
       "description": "macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes + mise/bun + gitlab-runner",
       "repository": "ghcr.io/phantom-vm/xcode-26-6",
-      "digest": "sha256:ae1834c5d05755d8019dd0d7e3eb43d4d15fabd813d365564af44a461522c516",
-      "compressedSize": 56783561034,
+      "digest": "sha256:04553de516c1cd7fe2b62d2a4448235e5a5255058d520905ae79f2d9d23df364",
+      "compressedSize": 57765368742,
       "diskSize": 96636764160,
       "published": "2026-08-18"
     }
