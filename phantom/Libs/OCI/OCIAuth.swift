@@ -7,9 +7,28 @@ class OCIAuth {
     private var cachedToken: String?
     private var tokenExpiresAt: Date?
     private let credentials: RegistryCredentials?
+    /// The challenge this registry last answered with, kept so a token can be
+    /// renewed against the same realm when the registry refuses without
+    /// bothering to challenge again — which is what ghcr does with an expired
+    /// token part-way through a long push.
+    private var lastChallenge: String?
 
     init(credentials: RegistryCredentials?) {
         self.credentials = credentials
+    }
+
+    /// Credentials to re-authenticate with, when there are any. Anonymous
+    /// access has nothing to renew and a refusal is simply a refusal.
+    var credentialsForRefresh: RegistryCredentials? { credentials }
+
+    /// Ask for a fresh token on the terms this registry gave last time.
+    func refreshLastChallenge(namespace: String, credentials: RegistryCredentials) async throws {
+        guard let lastChallenge else {
+            throw OCIError.authFailed("Registry refused the request and offered no way to re-authenticate")
+        }
+        cachedToken = nil
+        tokenExpiresAt = nil
+        try await handleChallenge(wwwAuthenticate: lastChallenge, namespace: namespace)
     }
 
     /// Get an authorization header value for requests.
@@ -31,6 +50,7 @@ class OCIAuth {
     /// - Parameter wwwAuthenticate: The WWW-Authenticate header value
     func handleChallenge(wwwAuthenticate: String, namespace: String) async throws {
         let challenge = try WWWAuthenticateChallenge(rawValue: wwwAuthenticate)
+        lastChallenge = wwwAuthenticate
 
         if challenge.scheme.lowercased() == "basic" {
             // Basic auth — credentials are already in authorizationHeader()

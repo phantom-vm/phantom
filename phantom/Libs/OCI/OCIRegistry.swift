@@ -154,10 +154,26 @@ class OCIRegistryClient {
         // First attempt
         var (data, response) = try await rawRequest(method, url: url, headers: headers, body: body)
 
-        // Handle 401 — negotiate auth and retry
-        if response.statusCode == 401 {
-            if let wwwAuth = response.value(forHTTPHeaderField: "WWW-Authenticate") ?? response.value(forHTTPHeaderField: "Www-Authenticate") {
-                try await auth.handleChallenge(wwwAuthenticate: wwwAuth, namespace: reference.namespace)
+        // Negotiate auth and retry.
+        //
+        // 401 is the documented way a registry asks for a token. **403 is how
+        // ghcr answers an expired one**, which a push long enough to outlive a
+        // token walks into halfway through: a 57GB image takes forty minutes,
+        // the token does not last that long, and the upload died at 36% with
+        // "403: initiating blob upload" — a permission error for a permission
+        // we had a moment earlier. Both get one re-negotiation; if the second
+        // answer is also a refusal, it is a real one and the caller hears it.
+        if response.statusCode == 401 || response.statusCode == 403 {
+            let header = response.value(forHTTPHeaderField: "WWW-Authenticate")
+                ?? response.value(forHTTPHeaderField: "Www-Authenticate")
+            if let header {
+                try await auth.handleChallenge(wwwAuthenticate: header, namespace: reference.namespace)
+                (data, response) = try await rawRequest(method, url: url, headers: headers, body: body)
+            } else if response.statusCode == 403, let credentials = auth.credentialsForRefresh {
+                // A 403 need not carry a challenge to re-authenticate against.
+                // The realm is the one this registry used to hand out the token
+                // in the first place, so ask again on the same terms.
+                try await auth.refreshLastChallenge(namespace: reference.namespace, credentials: credentials)
                 (data, response) = try await rawRequest(method, url: url, headers: headers, body: body)
             }
         }
