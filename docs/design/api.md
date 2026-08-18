@@ -227,10 +227,11 @@ Or on error:
 - **Response**: `{"status": "deleted", "vmId": "vm-abc"}`
 
 ### image.save
-- **Params**: `vmId` (string), `name` (string), `replace` (bool, optional — default false)
+- **Params**: `vmId` (string), `name` (string), `replace` (bool, optional — default false), `build` (object, optional)
 - **Purpose**: Save a stopped VM as a local OCI image
 - **Implementation**: Fire-and-forget. Reads HardwareModel (base64-encoded into config JSON), copies AuxiliaryStorage as nvram.bin, chunks disk.img into 512MB LZ4-compressed layers, writes manifest.json. An existing name is an error unless `replace` is set, in which case the new copy is built in a hidden staging directory and moved into place only once the manifest is written — a failed save leaves the old image intact, at the cost of room for both while it runs. Replacing drops the old `pulled.json`, since the locally built bytes no longer come from that digest.
 - **Naming**: `name` becomes the image's directory under `images/`, so it takes the same characters as a VM's name — letters, digits, `-` and `_`, up to 64 — and anything else is rejected before the save starts. The rule is enforced in the image manager, at the point a name turns into a path, so `image.delete`, `image.push` and `image.pull` hold to it too; the handler checks as well, so a fire-and-forget call answers with the error rather than `started`.
+- **Build record**: `build` is the builder's account of how the image was made — stored verbatim as `build.json`, described in the manifest as a layer of its own (`application/vnd.monk-studio.phantom.build.v1`) so push and pull carry it, and summarised into four manifest annotations (`…build.at`, `…build.from`, `…build.parent-digest`, `…build.recipe-sha256`) so a registry can answer for an image without handing it over. The daemon does not model the record beyond those fields: the CLI builds images, so the CLI owns the shape. Omitted for a save with no builder behind it, which then has no record — an answer, not an error.
 - **Response**: `{"status": "started", "message": "Saving VM '...' as image '...'"}`
 
 ### image.list
@@ -259,6 +260,12 @@ Or on error:
 - **Implementation**: Cancels the detached task the transfer runs in. The image manager holds that task's `cancel()` precisely because a detached task takes no cancellation from whoever awaits it. Cancellation is cooperative and reaches the work in two ways: a transfer in flight throws (URLSession cancels the request), and the chunk loops check between chunks — so a cancel lands within one chunk, not immediately. The operation then unwinds through its own failure path, which deletes the part-written image directory; a push has nothing local to undo, and since the manifest is written last it publishes no tag. Whether that path reports `cancelled` or `error` is decided by whether a cancel was *asked for*, not by the error thrown, which varies with where the work was.
 - **Response**: `{"status": "cancelling", "operation": "pull", "message": "..."}`, or `{"status": "idle", "message": "No image operation is running"}`
 - **Note**: Answers as soon as the task is told to stop, before the state turns over — nothing running is not an error, since the operation may have finished between the listing that showed it and this call. The caller polls `image.status` for the outcome, which is what `phantom image cancel` does.
+
+### image.inspect
+- **Params**: `name` (string)
+- **Purpose**: What an image says about itself — the build record it carries, and the pull it came from
+- **Response**: `{"name": "xcode-26-6", "build": {…}, "pulledFrom": {…}}`; either key is absent when the image has no such record
+- **Note**: For a *registry* reference the CLI does not come here at all — it reads the manifest's annotations and fetches the record blob directly, so `phantom image inspect ghcr.io/...` answers without pulling the image.
 
 ### image.status
 - **Purpose**: Poll current image operation state (saving, pushing, pulling)

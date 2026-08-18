@@ -11,6 +11,7 @@ Phantom supports saving VMs as OCI-compatible images that can be pushed to and p
 | VM Config | `application/vnd.monk-studio.phantom.config.v1` |
 | NVRAM | `application/vnd.monk-studio.phantom.nvram.v1` |
 | Disk Chunk (LZ4) | `application/vnd.monk-studio.phantom.disk.v1` |
+| Build record | `application/vnd.monk-studio.phantom.build.v1` |
 
 ## OCI Manifest Structure
 
@@ -53,9 +54,9 @@ The OCI config blob is: `{"architecture":"arm64","os":"darwin"}`
 1. Validate VM exists and is stopped
 2. Create `images/<name>/` directory
 3. Base64-encode HardwareModel and MachineIdentifier into `config.json`
-4. Copy AuxiliaryStorage → `nvram.bin`
+4. Copy AuxiliaryStorage → `nvram.bin`, and the builder's account of the build (if there is one) → `build.json`
 5. Chunk `disk.img` → LZ4 compress → `disk/000.lz4`, `disk/002.lz4`, ... (all-zero chunks written nowhere, so the numbering has gaps)
-6. Compute SHA-256 digests, write `manifest.json` with each layer's `chunk-index`
+6. Compute SHA-256 digests, write `manifest.json` with each layer's `chunk-index`, and — when there is a build record — the summary annotations that let a registry answer for the image without handing it over
 
 **Push (Local Image → Registry)**:
 1. Read local `manifest.json`
@@ -161,6 +162,56 @@ A step does exactly one thing, four keys wide:
 **gitlab-runner is now a step like any other.** It used to be baked into every layered build by default; a recipe states it or the image does not have it. This is not optional cosmetics for a CI image: GitLab's custom executor runs *every* stage of a job inside the job environment, so `upload_artifacts_on_success` and the cache stages shell out to `gitlab-runner artifacts-uploader` / `cache-archiver` **in the guest**. Without the binary there, those stages log `Missing gitlab-runner. Uploading artifacts is disabled.`, the job still passes, and the artifact never arrives. Put it first in a recipe, as [recipes/xcode-26-6.yaml](../../recipes/xcode-26-6.yaml) does: a 60MB download that fails in seconds beats finding out after a three-hour Xcode install. The guest version is pinned in the recipe and deliberately independent of the host runner the daemon manages — the two only need to agree on the artifact/cache protocol, not on a build.
 
 **Xcode installation** runs [provision/install-xcode.sh](../../provision/install-xcode.sh) in the guest with `XCODE_SRC` naming either a URL the guest downloads itself — no 10GB detour through the host — or a `serve`d local `.xip`. The script expands the archive (whose Apple signature `xip --expand` verifies, so it doubles as the integrity check), installs to `/Applications/Xcode.app`, then `xcode-select -s`, `xcodebuild -license accept`, `xcodebuild -runFirstLaunch`, and `DevToolsSecurity -enable` so a headless CI VM never faces an authorization prompt. Finally `xcodebuild -downloadAllPlatforms` bakes in every simulator runtime — Xcode ships with none, and paying for them once at build time beats every CI job downloading several GB before it can start.
+
+## The Build Record
+
+A recipe is what an image was *meant* to be, written before the build. The build
+record is what happened, written into the image at save time:
+
+```
+$ phantom image inspect xcode-26-6
+xcode-26-6
+  built     2026-08-18T12:08:56Z by phantom-cli 1.7.0 (daemon 1.7.0)
+  on        macOS 26.5.1 (25F80)
+  from      image tahoe-base @ sha256:b063d502…
+  recipe    recipes/xcode-26-6.yaml  sha256:4e69d258…
+  steps
+    bun              mise use --global bun@1.3.14
+                     as admin over vsock, 1m
+    xcode            ../provision/install-xcode.sh
+                     sha256:1f3a…
+                     XCODE_SRC=http://…/Xcode-26.6.0+17F113.xip
+                     as admin over vsock, 52m
+```
+
+It holds the recipe **verbatim** plus its sha256, every step (name, script path
+and the sha256 of the bytes that ran, inline command, env, which user, whether
+it arrived over vsock or VNC, exit code, duration), what the image was layered
+onto, and the versions of everything involved. A path says which file ran; only
+the hash says which version of it.
+
+**A layer of its own** (`…phantom.build.v1`), so push and pull carry it the way
+they carry a disk chunk, and an image built before records existed simply has
+one fewer layer. **Plus four manifest annotations** — build date, what it came
+from, the parent's digest, the recipe's sha256 — because the manifest is the one
+part of an image a registry hands over without the other 25GB. `image inspect
+ghcr.io/phantom-vm/xcode-26-6:latest` reads the manifest, then fetches just the
+record blob: a few KB against the image behind it.
+
+**The daemon stores it verbatim.** The CLI is what builds images, so it is what
+knows the shape; the daemon decodes only the handful of fields it advertises in
+the annotations and the GUI shows. A richer record is a CLI change alone.
+
+**The chain**: a toolchain image's `from` names the base and, when the base was
+pulled, its registry digest — so a reader can walk from the image to the base it
+was layered onto to the IPSW that base came from. A base built on this Mac has
+never been named by a registry, so its digest is absent until it is published;
+that is a gap in the chain and is printed as one ("built locally, no registry
+digest") rather than papered over.
+
+**What has no record**: an image from `phantom image save` by hand or from the
+GUI's Save as Image. There is no builder behind those, so there is nothing
+truthful to write, and `inspect` says so.
 
 ## Image Catalog (distribution)
 

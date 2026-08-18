@@ -185,6 +185,27 @@ export class RegistryClient {
     return token;
   }
 
+  /// The manifest itself, for a reader that wants what is in it rather than
+  /// what it hashes to — its annotations, and the layer list.
+  async manifest(): Promise<{
+    layers?: { mediaType: string; digest: string; size: number }[];
+    annotations?: Record<string, string>;
+  }> {
+    const res = await this.request("GET", `/manifests/${this.ref.reference}`, {
+      headers: { Accept: MANIFEST_TYPE },
+    });
+    if (!res.ok) throw new Error(`could not read the manifest (${res.status})`);
+    return (await res.json()) as never;
+  }
+
+  /// One blob. Used for the build record, which is a few KB — the rest of an
+  /// image is 25GB and belongs to `image pull`.
+  async blob(digest: string): Promise<string> {
+    const res = await this.request("GET", `/blobs/${digest}`);
+    if (!res.ok) throw new Error(`could not read blob ${digest} (${res.status})`);
+    return await res.text();
+  }
+
   /// Digest the registry holds for a reference — authoritative, since only the
   /// registry knows the exact manifest bytes it stored.
   async manifestDigest(): Promise<string> {

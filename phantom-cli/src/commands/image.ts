@@ -9,6 +9,8 @@ import {
   resolve,
   type Catalog,
 } from "../lib/catalog";
+import { RegistryClient } from "../lib/oci";
+import type { BuildRecord } from "../lib/record";
 import { usageError, type Command } from "../command";
 
 interface LocalImage {
@@ -161,6 +163,102 @@ export async function imageCancel() {
 
   console.log(`Still stopping. Check 'phantom image list' for the ${operation}'s final state.`);
 }
+
+/// Where an image came from. Locally that is the record it carries; for a
+/// registry reference it is the manifest's annotations, plus the record itself
+/// when the image has one — a few KB, so asking is free, unlike the 25GB behind
+/// it.
+export async function imageInspect(target?: string) {
+  if (!target) {
+    console.error("Error: an image name or a registry reference is required");
+    console.error("");
+    usage("inspect");
+    process.exit(1);
+  }
+
+  if (target.includes("/")) {
+    await inspectRemote(target);
+    return;
+  }
+
+  const response = await sendRequest({ method: "image.inspect", params: { name: target } });
+  if (response.error) {
+    console.error(`Error: ${response.error.message}`);
+    process.exit(1);
+  }
+
+  const { build, pulledFrom } = response.result as {
+    build?: BuildRecord;
+    pulledFrom?: { reference: string; digest: string; pulledAt: string };
+  };
+
+  console.log(target);
+  if (pulledFrom) {
+    console.log(`  pulled    ${pulledFrom.reference}`);
+    console.log(`            ${pulledFrom.digest} on ${pulledFrom.pulledAt.slice(0, 10)}`);
+  }
+  if (!build) {
+    console.log(pulledFrom ? "" : "  no build record — saved by hand, or built before records existed");
+    return;
+  }
+  printRecord(build);
+}
+
+async function inspectRemote(reference: string) {
+  const client = await RegistryClient.for(reference);
+  const manifest = await client.manifest();
+  const notes = manifest.annotations ?? {};
+
+  console.log(reference);
+
+  // The record itself when the image carries one — a few KB against the 25GB
+  // behind it, so there is no reason to settle for the summary. The manifest's
+  // annotations are that same record's headline, and only get printed when
+  // there is no layer to read: an image published by an older phantom, whose
+  // manifest was annotated by hand or not at all.
+  const layer = manifest.layers?.find(
+    (l) => l.mediaType === "application/vnd.monk-studio.phantom.build.v1"
+  );
+  if (layer) {
+    printRecord(JSON.parse(await client.blob(layer.digest)) as BuildRecord);
+    return;
+  }
+
+  const summary = Object.entries(notes).filter(([k]) => k.startsWith("vnd.monk-studio.phantom.build."));
+  if (summary.length === 0) {
+    console.log("  no build record — published before images carried one");
+    return;
+  }
+  for (const [key, value] of summary) {
+    console.log(`  ${key.replace("vnd.monk-studio.phantom.build.", "").padEnd(14)} ${value}`);
+  }
+}
+
+function printRecord(build: BuildRecord) {
+  console.log(`  built     ${build.builtAt} by ${build.builtBy}${build.daemon ? ` (daemon ${build.daemon})` : ""}`);
+  if (build.host?.macOS) {
+    console.log(`  on        macOS ${build.host.macOS}${build.host.build ? ` (${build.host.build})` : ""}`);
+  }
+  if (build.from.image) {
+    console.log(`  from      image ${build.from.image}${build.from.digest ? ` @ ${build.from.digest}` : " (built locally, no registry digest)"}`);
+  }
+  if (build.from.ipsw) console.log(`  from      IPSW ${build.from.ipsw}`);
+  if (build.recipe) console.log(`  recipe    ${build.recipe.path}  ${build.recipe.sha256}`);
+
+  console.log(`  steps`);
+  for (const step of build.steps) {
+    const what = step.script ?? step.run?.split("\n")[0] ?? "";
+    console.log(`    ${step.name.padEnd(16)} ${what}`);
+    if (step.sha256) console.log(`    ${" ".repeat(16)} ${step.sha256}`);
+    for (const [key, value] of Object.entries(step.env ?? {})) {
+      console.log(`    ${" ".repeat(16)} ${key}=${value}`);
+    }
+    console.log(`    ${" ".repeat(16)} as ${step.user} over ${step.via}, ${formatDuration(step.durationSec)}`);
+  }
+}
+
+const formatDuration = (sec: number) =>
+  sec >= 3600 ? `${(sec / 3600).toFixed(1)}h` : sec >= 60 ? `${Math.round(sec / 60)}m` : `${sec}s`;
 
 export async function imageDelete(name?: string) {
   if (!name) {
@@ -403,6 +501,11 @@ export const commands: Record<string, Command> = {
       "--password <pass>  Registry password",
     ],
     multiArgHandler: imagePull,
+  },
+  inspect: {
+    usage: "<name | registry:tag>",
+    description: "Show how an image was built — locally, or from a registry without pulling it",
+    handler: imageInspect as Command["handler"],
   },
   cancel: {
     usage: "",

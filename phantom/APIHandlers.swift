@@ -106,6 +106,8 @@ struct APIHandlers {
             return try await handleImagesPull(params: request.params)
         case "image.cancel":
             return try await handleImagesCancel()
+        case "image.inspect":
+            return try await handleImagesInspect(params: request.params)
         case "gitlab.setup":
             return try await handleGitLabSetup(params: request.params)
         case "gitlab.status":
@@ -587,10 +589,22 @@ struct APIHandlers {
 
         let replace = params?["replace"]?.value as? Bool ?? false
 
+        // How the image was built, if whoever asked for the save was building
+        // one. Stored verbatim, so the daemon needs no opinion about its shape
+        // beyond the few fields the manifest advertises.
+        var build: Data?
+        if let record = params?["build"]?.value {
+            guard JSONSerialization.isValidJSONObject(record),
+                  let data = try? JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys]) else {
+                throw APIHandlerError.invalidParams("build must be a JSON object")
+            }
+            build = data
+        }
+
         // Start save (async operation)
         Task {
             await vmManager.imageManager.save(
-                name: name, bundlePath: instance.bundlePath, replace: replace
+                name: name, bundlePath: instance.bundlePath, replace: replace, build: build
             )
         }
 
@@ -754,6 +768,33 @@ struct APIHandlers {
             "operation": operation,
             "message": "Cancelling image \(operation)"
         ])
+    }
+
+    /// What an image says about itself: the build record it carries, and the
+    /// pull it came from. Both are absent for an image saved by hand, which is
+    /// an answer rather than an error.
+    private func handleImagesInspect(params: [String: AnyCodable]?) async throws -> AnyCodable {
+        guard let name = params?["name"]?.value as? String else {
+            throw APIHandlerError.missingParam("name")
+        }
+        guard vmManager.imageManager.imageExists(name) else {
+            throw APIHandlerError.invalidParams("Image not found: \(name)")
+        }
+
+        var out: [String: Any] = ["name": name]
+        if let data = try? vmManager.imageManager.buildRecord(for: name),
+           let record = try? JSONSerialization.jsonObject(with: data) {
+            out["build"] = record
+        }
+        if let info = vmManager.imageManager.list().first(where: { $0.name == name }),
+           let pulled = info.pulledFrom {
+            out["pulledFrom"] = [
+                "reference": pulled.reference,
+                "digest": pulled.digest,
+                "pulledAt": pulled.pulledAt
+            ]
+        }
+        return AnyCodable(out)
     }
 
     private func handleImagesStatus() async throws -> AnyCodable {

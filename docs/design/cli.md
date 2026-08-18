@@ -32,10 +32,11 @@ phantom-cli/
     ├── router.ts        # Command routing
     ├── lib/api.ts       # TCP client (batch + streaming)
     ├── lib/recipe.ts    # the build recipe: parse, validate, resolve paths
+    ├── lib/record.ts    # the build record: what actually ran, written into the image
     ├── lib/guest.ts     # what both builders share: exec in the guest, serve a file, wait out a save
     └── commands/
         ├── vm.ts            # create, list, start, stop, exec, display, vnc, boot-script, screenshot, delete
-        ├── image.ts         # list, catalog, delete, save, push, pull, cancel
+        ├── image.ts         # list, catalog, delete, save, push, pull, cancel, inspect
         ├── build.ts         # image build — recipe → layered image
         ├── build-base.ts    # image build-base — IPSW → base image
         ├── ipsw.ts          # IPSW management

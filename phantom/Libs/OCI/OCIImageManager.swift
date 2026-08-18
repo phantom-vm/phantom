@@ -110,7 +110,12 @@ class OCIImageManager {
     ///     rename — so the new copy is written beside the old one and swapped
     ///     in only once it is complete. A failed save leaves the old image
     ///     untouched, at the cost of needing room for both while it runs.
-    func save(name: String, bundlePath: URL, replace: Bool = false) async {
+    ///   - build: How this image was built, as the builder recorded it. Stored
+    ///     verbatim as a layer of its own and summarised into the manifest's
+    ///     annotations, so an image can answer where it came from — locally in
+    ///     full, and remotely from the manifest alone. Nil for a save that has
+    ///     no builder behind it (`image save` by hand, or the GUI).
+    func save(name: String, bundlePath: URL, replace: Bool = false, build: Data? = nil) async {
         guard state == .idle || isTerminalState else {
             state = .error("An operation is already in progress")
             return
@@ -212,7 +217,16 @@ class OCIImageManager {
             let configDesc = OCIDescriptor.from(data: configData, mediaType: PhantomMediaType.vmConfig)
             let nvramDesc = OCIDescriptor.from(data: nvramData, mediaType: PhantomMediaType.nvram)
 
+            // Written beside the config, and described in the manifest, so a
+            // push carries it without knowing what is in it.
+            var buildDesc: OCIDescriptor?
+            if let build {
+                try build.write(to: imageDir.appendingPathComponent("build.json"))
+                buildDesc = OCIDescriptor.from(data: build, mediaType: PhantomMediaType.build)
+            }
+
             var layers: [OCIDescriptor] = [configDesc, nvramDesc]
+            if let buildDesc { layers.append(buildDesc) }
             for chunk in chunkMetadata {
                 let desc = OCIDescriptor(
                     mediaType: PhantomMediaType.disk,
@@ -226,7 +240,12 @@ class OCIImageManager {
                 layers.append(desc)
             }
 
-            let manifest = OCIManifest(config: ociConfigDesc, layers: layers)
+            let annotations = build.flatMap { BuildRecord.from($0)?.annotations }
+            let manifest = OCIManifest(
+                config: ociConfigDesc,
+                layers: layers,
+                annotations: (annotations?.isEmpty == false) ? annotations : nil
+            )
             let manifestData = try manifest.toJSON()
             try manifestData.write(to: imageDir.appendingPathComponent("manifest.json"))
             try ociConfigData.write(to: imageDir.appendingPathComponent("oci-config.json"))
@@ -534,6 +553,16 @@ class OCIImageManager {
                     try await client.pushBlob(data: configData, digest: configLayer.digest)
                 }
 
+                // Push the build record, when the image has one. Images saved
+                // before build records existed simply have no such layer.
+                if let buildLayer = manifest.layers.first(where: { $0.mediaType == PhantomMediaType.build }) {
+                    let buildPath = imageDir.appendingPathComponent("build.json")
+                    let buildData = try Data(contentsOf: buildPath)
+                    if !(try await client.blobExists(digest: buildLayer.digest)) {
+                        try await client.pushBlob(data: buildData, digest: buildLayer.digest)
+                    }
+                }
+
                 // Push NVRAM layer
                 updateProgress(0.1, "Pushing NVRAM...")
                 let nvramPath = imageDir.appendingPathComponent("nvram.bin")
@@ -698,6 +727,13 @@ class OCIImageManager {
                 let nvramData = try await client.pullBlob(digest: nvramLayer.digest)
                 try nvramData.write(to: imageDir.appendingPathComponent("nvram.bin"))
 
+                // Pull the build record, if this image has one — how it was
+                // built travels with it.
+                if let buildLayer = manifest.layers.first(where: { $0.mediaType == PhantomMediaType.build }) {
+                    let buildData = try await client.pullBlob(digest: buildLayer.digest)
+                    try buildData.write(to: imageDir.appendingPathComponent("build.json"))
+                }
+
                 // Pull disk chunk layers.
                 //
                 // Concurrently, because a single connection to a registry CDN is
@@ -773,6 +809,17 @@ class OCIImageManager {
                 state = .error(error.localizedDescription)
             }
         }
+    }
+
+    // MARK: - Build Record
+
+    /// How the image was built, as its builder recorded it — opaque JSON, kept
+    /// verbatim so a richer record needs no daemon release. Nil for an image
+    /// saved by hand, or one built before records existed.
+    func buildRecord(for name: String) throws -> Data? {
+        try Self.validate(name: name)
+        let path = imagesDir.appendingPathComponent(name).appendingPathComponent("build.json")
+        return FileManager.default.contents(atPath: path.path)
     }
 
     // MARK: - Image Directory Access

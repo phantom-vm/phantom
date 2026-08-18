@@ -99,6 +99,7 @@ serves `ipsw.list`/`pull`/`status` and `vm.create --ipswId`, because
   to **Images**, where the banner and then the image itself are: the save runs
   for minutes, and a second progress bar in the VM pane would only be the same
   state drawn twice.
+- **Where an image came from** — the image detail pane reads the build record the image carries and shows it under **Built**: when, by which CLI and daemon, on which macOS, from which base, which recipe (with its sha256) and the steps in order with their durations. An image saved by hand carries no record, and then the section is simply absent — a heading explaining that nothing is known would be noise in the common case. **Pulled From** stays what it was, beneath it: one says how the image was made, the other how this copy got here.
 - **Detail pane** — everything about the selected item, including the lifecycle
   buttons and the exec console; `ContentUnavailableView` when nothing is
   selected. Both panes look their item up by id on every render, so one deleted

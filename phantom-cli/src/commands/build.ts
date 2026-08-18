@@ -1,5 +1,14 @@
 import { call, flushAndStop, runInGuest, serveFile, waitForSave } from "../lib/guest";
 import { loadRecipe, resolveAgainstRecipe, RecipeError, type Recipe, type RecipeStep } from "../lib/recipe";
+import {
+  baseIdentity,
+  provenance,
+  recordStep,
+  sha256,
+  sha256File,
+  type BuildRecord,
+  type RecordedStep,
+} from "../lib/record";
 import { waitForVMRunning } from "../lib/wait";
 import { usageError, type Command } from "../command";
 
@@ -141,16 +150,49 @@ async function run(recipe: Recipe, opts: BuildOptions) {
   await waitForVMRunning(vmId, { onState: (state) => console.log(`    state: ${state}`) });
   console.log(`    VM ${vmId} running`);
 
+  // What actually happened, written into the image at save time: the recipe
+  // verbatim, and each step with the sha256 of the script that ran. A path says
+  // which file; only the hash says which version of it.
+  const recorded: RecordedStep[] = [];
   for (const recipeStep of recipe.steps) {
     step(recipeStep.name);
-    await runStep(recipe, recipeStep, vmId);
+    const { recorded: entry } = await recordStep(
+      {
+        name: recipeStep.name,
+        script: recipeStep.script,
+        sha256: recipeStep.script
+          ? await sha256File(resolveAgainstRecipe(recipe.path, recipeStep.script))
+          : undefined,
+        run: recipeStep.run,
+        env: Object.keys(recipeStep.env).length ? recipeStep.env : undefined,
+        user: "admin",
+        via: "vsock",
+      },
+      () => runStep(recipe, recipeStep, vmId)
+    );
+    recorded.push(entry);
   }
+
+  const record: BuildRecord = {
+    schemaVersion: 1,
+    name: recipe.name,
+    description: recipe.description,
+    builtAt: new Date().toISOString(),
+    ...(await provenance()),
+    from: await baseIdentity(recipe.from),
+    recipe: {
+      path: recipe.path,
+      sha256: sha256(recipe.source),
+      source: recipe.source,
+    },
+    steps: recorded,
+  };
 
   step("Flushing disk and stopping VM");
   await flushAndStop(vmId);
 
   step(`Saving image '${recipe.name}'${opts.replace ? " (replacing)" : ""}`);
-  await call("image.save", { vmId, name: recipe.name, replace: opts.replace }, 60_000);
+  await call("image.save", { vmId, name: recipe.name, replace: opts.replace, build: record }, 60_000);
   await waitForSave(recipe.name);
   console.log(`    image saved`);
 

@@ -9,6 +9,12 @@ enum PhantomMediaType {
     static let vmConfig = "application/vnd.monk-studio.phantom.config.v1"
     static let nvram = "application/vnd.monk-studio.phantom.nvram.v1"
     static let disk = "application/vnd.monk-studio.phantom.disk.v1"
+
+    /// How the image was built — the recipe it came from and what each step
+    /// did. A layer of its own rather than a field in the VM config, so push
+    /// and pull carry it the way they carry everything else, and an image that
+    /// predates it simply has one fewer layer.
+    static let build = "application/vnd.monk-studio.phantom.build.v1"
 }
 
 // MARK: - OCI Manifest
@@ -18,12 +24,17 @@ struct OCIManifest: Codable {
     let mediaType: String
     let config: OCIDescriptor
     var layers: [OCIDescriptor]
+    /// A few facts about the build, repeated here from the build layer because
+    /// the manifest is the one part of an image a registry hands over without
+    /// the other 25GB — `image inspect ghcr.io/...` reads only this.
+    var annotations: [String: String]?
 
-    init(config: OCIDescriptor, layers: [OCIDescriptor]) {
+    init(config: OCIDescriptor, layers: [OCIDescriptor], annotations: [String: String]? = nil) {
         self.schemaVersion = 2
         self.mediaType = PhantomMediaType.ociManifest
         self.config = config
         self.layers = layers
+        self.annotations = annotations
     }
 
     func toJSON() throws -> Data {
@@ -141,6 +152,13 @@ struct PhantomVMConfig: Codable {
 enum PhantomAnnotation {
     static let uncompressedSize = "vnd.monk-studio.phantom.uncompressed-size"
 
+    /// Manifest-level: the build record's summary. Enough to answer "what is
+    /// this and where did it come from" from a HEAD of the manifest.
+    static let buildAt = "vnd.monk-studio.phantom.build.at"
+    static let buildFrom = "vnd.monk-studio.phantom.build.from"
+    static let buildParentDigest = "vnd.monk-studio.phantom.build.parent-digest"
+    static let buildRecipeDigest = "vnd.monk-studio.phantom.build.recipe-sha256"
+
     /// Which 512 MB slot of the disk a chunk layer belongs to.
     ///
     /// All-zero chunks are not stored, so a disk layer's position in the
@@ -223,4 +241,71 @@ struct PullRecord: Codable {
     let reference: String
     let digest: String
     let pulledAt: String
+}
+
+// MARK: - Build Record
+
+/// The build record travels as opaque JSON: the CLI is what builds an image, so
+/// it is what knows the shape, and the daemon storing it verbatim means a
+/// richer record needs no daemon release. What is decoded here is only what the
+/// daemon itself shows — the manifest annotations it writes, and the GUI's
+/// account of where an image came from. Unknown fields are ignored by
+/// construction, and every field is optional, so a record written by a newer
+/// CLI still reads.
+struct BuildRecord: Decodable {
+    let name: String?
+    let description: String?
+    let builtAt: String?
+    let builtBy: String?
+    let daemon: String?
+    let host: Host?
+    let from: From?
+    let recipe: Recipe?
+    let steps: [Step]?
+
+    struct Host: Decodable {
+        let macOS: String?
+        let build: String?
+    }
+
+    struct From: Decodable {
+        let image: String?
+        let ipsw: String?
+        let digest: String?
+
+        /// What the image was made from, in one word for the annotation.
+        var label: String? { image ?? ipsw }
+    }
+
+    struct Recipe: Decodable {
+        let path: String?
+        let sha256: String?
+        let source: String?
+    }
+
+    struct Step: Decodable {
+        let name: String?
+        let script: String?
+        let run: String?
+        let user: String?
+        let via: String?
+        let durationSec: Int?
+    }
+
+    /// Nil for a record this daemon cannot read — which is not an error: the
+    /// record is stored either way, and only the summary is lost.
+    static func from(_ data: Data) -> BuildRecord? {
+        try? JSONDecoder().decode(BuildRecord.self, from: data)
+    }
+
+    /// The few facts the manifest carries, so a registry can answer "what is
+    /// this and where did it come from" without handing over the image.
+    var annotations: [String: String] {
+        var out: [String: String] = [:]
+        if let builtAt { out[PhantomAnnotation.buildAt] = builtAt }
+        if let label = from?.label { out[PhantomAnnotation.buildFrom] = label }
+        if let digest = from?.digest { out[PhantomAnnotation.buildParentDigest] = digest }
+        if let sha = recipe?.sha256 { out[PhantomAnnotation.buildRecipeDigest] = sha }
+        return out
+    }
 }

@@ -178,12 +178,24 @@ struct ImageDetailView: View {
     @State private var confirmingDelete = false
     @State private var errorMessage: String?
 
+    /// How this image was built, if it carries a record. Read from disk on each
+    /// render like everything else in this pane — it is a few KB, and an image's
+    /// record never changes once written.
+    private var build: BuildRecord? {
+        (try? vm.imageManager.buildRecord(for: info.name)).flatMap { $0 }.flatMap(BuildRecord.from)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 Divider()
                 metadata
+
+                if let build {
+                    Divider()
+                    built(build)
+                }
 
                 if let pull = info.pulledFrom {
                     Divider()
@@ -243,6 +255,53 @@ struct ImageDetailView: View {
             DetailRow(label: "Size", value: info.totalSize.formatted(.byteCount(style: .file)))
             DetailRow(label: "Chunks", value: "\(info.diskChunks)")
             DetailRow(label: "Created", value: info.createdAt)
+        }
+    }
+
+    /// The account the image carries of its own making. Says nothing at all for
+    /// an image saved by hand — there is no record to show, and a section
+    /// explaining its absence would be noise in the common case.
+    private func built(_ build: BuildRecord) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Built")
+                .font(.headline)
+
+            if let at = build.builtAt {
+                DetailRow(label: "When", value: at)
+            }
+            if let by = build.builtBy {
+                DetailRow(label: "By", value: by + (build.daemon.map { " · daemon \($0)" } ?? ""))
+            }
+            if let macOS = build.host?.macOS {
+                DetailRow(label: "On", value: "macOS " + macOS + (build.host?.build.map { " (\($0))" } ?? ""))
+            }
+            if let image = build.from?.image {
+                DetailRow(label: "From", value: image + (build.from?.digest.map { " @ \($0)" } ?? ""), monospaced: true)
+            }
+            if let ipsw = build.from?.ipsw {
+                DetailRow(label: "From", value: "IPSW " + ipsw, monospaced: true)
+            }
+            if let recipe = build.recipe?.path {
+                DetailRow(label: "Recipe", value: recipe, monospaced: true)
+            }
+            if let sha = build.recipe?.sha256 {
+                DetailRow(label: "Recipe SHA", value: sha, monospaced: true)
+            }
+
+            if let steps = build.steps, !steps.isEmpty {
+                // Named in order, with what each one ran and how long it took —
+                // the shape of the build, without reprinting the recipe that is
+                // already quoted above by its hash.
+                DetailRow(
+                    label: "Steps",
+                    value: steps.map { step in
+                        let what = step.script ?? step.run?.split(separator: "\n").first.map(String.init) ?? ""
+                        let took = step.durationSec.map { $0 >= 60 ? " · \($0 / 60)m" : " · \($0)s" } ?? ""
+                        return (step.name ?? "step") + "  " + what + took
+                    }.joined(separator: "\n"),
+                    monospaced: true
+                )
+            }
         }
     }
 

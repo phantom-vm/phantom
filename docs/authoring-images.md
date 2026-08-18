@@ -179,6 +179,21 @@ exact Xcode build is written down.
 integrity check. Every simulator runtime is downloaded too, since Xcode ships
 with none and otherwise every CI job would pay for that.
 
+## What the image remembers
+
+Every image a builder produces carries a record of how it was made — the recipe
+verbatim, each step with the sha256 of the script that ran, the base it was
+layered onto, and the versions of everything involved:
+
+```bash
+phantom image inspect xcode-26-6                          # local, in full
+phantom image inspect ghcr.io/phantom-vm/xcode-26-6:latest  # remote, without pulling 25GB
+```
+
+It rides along as its own layer, so a pull brings it with the image, and its
+headline is repeated in the manifest's annotations, which is what makes the
+remote form possible. An image saved by hand has no record and says so.
+
 ## Publishing
 
 ```bash

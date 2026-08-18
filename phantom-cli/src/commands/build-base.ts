@@ -1,6 +1,7 @@
 import { call, flushAndStop, runInGuest, sleep, waitForSave } from "../lib/guest";
 import { waitForVMRunning } from "../lib/wait";
 import { usageError, type Command } from "../command";
+import { provenance, recordStep, sha256File, type BuildRecord, type RecordedStep } from "../lib/record";
 
 // MARK: - image build-base
 //
@@ -131,25 +132,63 @@ async function run(opts: BaseOptions) {
   });
   console.log(`    install complete, VM running`);
 
+  // What went into this image, recorded as it happens. A base build has no
+  // recipe — this is the one build that is flags — so the record is its scripts
+  // and the IPSW it came from.
+  const recorded: RecordedStep[] = [];
+
   // 3. Drive Setup Assistant + install the agent over VNC
   step(`Running boot script (${bootCommands.length} commands)`);
-  await call("vm.bootScript", { vmId, commands: bootCommands }, 60_000);
-  await waitForBootScript(vmId);
+  const boot = await recordStep(
+    {
+      name: "setup-assistant",
+      script: opts.bootScript,
+      sha256: await sha256File(opts.bootScript),
+      // Keystrokes into a guest that has no agent yet, so nothing to exit with.
+      user: "guest-ui",
+      via: "vnc",
+    },
+    async () => {
+      await call("vm.bootScript", { vmId, commands: bootCommands }, 60_000);
+      await waitForBootScript(vmId);
+    }
+  );
+  recorded.push({ ...boot.recorded, exitCode: undefined });
   console.log(`    boot script complete`);
 
   // 4. Provision over vsock (agent is up now)
   step("Provisioning over vsock");
   // 30 min: provisioning includes the headless CLT download + install
-  await runInGuest({
-    vmId,
-    body: provisionBody,
-    timeoutMs: 1_800_000,
-    // The one step that is root by name: it writes the sudoers file admin's
-    // passwordless sudo comes from, so it cannot be the thing that uses it.
-    user: "root",
-    label: "provision script",
-  });
+  const provision = await recordStep(
+    {
+      name: "provision",
+      script: opts.provision,
+      sha256: await sha256File(opts.provision),
+      user: "root",
+      via: "vsock",
+    },
+    () =>
+      runInGuest({
+        vmId,
+        body: provisionBody,
+        timeoutMs: 1_800_000,
+        // The one step that is root by name: it writes the sudoers file admin's
+        // passwordless sudo comes from, so it cannot be the thing that uses it.
+        user: "root",
+        label: "provision script",
+      })
+  );
+  recorded.push(provision.recorded);
   console.log(`    provisioned`);
+
+  const record: BuildRecord = {
+    schemaVersion: 1,
+    name: opts.imageName,
+    builtAt: new Date().toISOString(),
+    ...(await provenance()),
+    from: { ipsw: ipswId },
+    steps: recorded,
+  };
 
   // 5. Flush the guest disk cache, then stop
   step("Flushing disk and stopping VM");
@@ -157,7 +196,7 @@ async function run(opts: BaseOptions) {
 
   // 6. Save the image
   step(`Saving image '${opts.imageName}'${opts.replace ? " (replacing)" : ""}`);
-  await call("image.save", { vmId, name: opts.imageName, replace: opts.replace }, 60_000);
+  await call("image.save", { vmId, name: opts.imageName, replace: opts.replace, build: record }, 60_000);
   await waitForSave(opts.imageName);
   console.log(`    image saved`);
 
