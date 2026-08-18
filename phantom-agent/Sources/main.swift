@@ -6,6 +6,18 @@ struct ExecRequest: Codable {
     let command: String
     let args: [String]?
     let stream: Bool?
+    /// Run the command under a pseudo-terminal. Without one `isatty()` is false
+    /// and an interactive program either refuses or falls back to line mode —
+    /// no colours, no full-screen redraw, no key handling.
+    let tty: Bool?
+    /// The caller's terminal size, so the guest program lays out for the window
+    /// it is actually being watched in. Followed by `resize` frames as it changes.
+    let rows: UInt16?
+    let cols: UInt16?
+    /// The caller's terminal type. A pty with no `TERM` is a terminal nothing
+    /// knows how to draw on: curses gives up, and anything full-screen falls
+    /// back to dumb output.
+    let term: String?
 }
 
 struct ExecResponse: Codable {
@@ -18,6 +30,32 @@ struct StreamChunk: Codable {
     let type: String  // "stdout", "stderr", "exit"
     let data: String?
     let exitCode: Int32?
+    /// "base64" when `data` is not text. A terminal's output is bytes — escape
+    /// sequences, and UTF-8 that splits across reads — so under a tty every
+    /// chunk is base64 rather than a JSON string that a split character would
+    /// silently drop.
+    let encoding: String?
+
+    init(type: String, data: String? = nil, exitCode: Int32? = nil, encoding: String? = nil) {
+        self.type = type
+        self.data = data
+        self.exitCode = exitCode
+        self.encoding = encoding
+    }
+}
+
+/// What the client sends *during* an interactive command: the keystrokes, and
+/// the window size when it changes. Ordinary (non-tty) commands send nothing
+/// after the request, which is why this is only read on the interactive path.
+struct InputFrame: Codable {
+    let type: String  // "stdin", "resize"
+    let data: String?  // base64, for "stdin"
+    let rows: UInt16?
+    let cols: UInt16?
+    /// The caller's terminal type. A pty with no `TERM` is a terminal nothing
+    /// knows how to draw on: curses gives up, and anything full-screen falls
+    /// back to dumb output.
+    let term: String?
 }
 
 // MARK: - Vsock Constants
@@ -271,6 +309,132 @@ func executeCommandStreaming(_ request: ExecRequest, clientFd: Int32) {
     }
 }
 
+// MARK: - Interactive (PTY) Execution
+
+/// Run a command with a pseudo-terminal, so the thing on the other end can be a
+/// person rather than a script: a shell, an editor, an agent that draws over
+/// its own output.
+///
+/// `forkpty` rather than `Process`: the child has to become a session leader
+/// with the pty as its *controlling* terminal, and there is no hook between
+/// fork and exec in Foundation to do that. It also buys the usual terminal
+/// semantics for free — Ctrl-C reaches the foreground process group through the
+/// tty's line discipline instead of needing a signal frame of its own.
+///
+/// One consequence worth knowing: a pty has a single stream, so stderr arrives
+/// interleaved into stdout. That is what a terminal is.
+func executeInteractive(_ request: ExecRequest, clientFd: Int32) {
+    var fullCommand = request.command
+    if let args = request.args, !args.isEmpty {
+        let escaped = args.map { "'\($0.replacingOccurrences(of: "'", with: "'\\''"))'" }
+        fullCommand += " " + escaped.joined(separator: " ")
+    }
+
+    let encoder = JSONEncoder()
+    let writeQueue = DispatchQueue(label: "phantom-agent.write")
+    func sendChunk(_ chunk: StreamChunk) {
+        if let data = try? encoder.encode(chunk) {
+            writeQueue.sync { writeLine(data, to: clientFd) }
+        }
+    }
+
+    var master: Int32 = 0
+    var size = winsize(
+        ws_row: request.rows ?? 24,
+        ws_col: request.cols ?? 80,
+        ws_xpixel: 0,
+        ws_ypixel: 0
+    )
+
+    let pid = forkpty(&master, nil, nil, &size)
+    if pid < 0 {
+        sendChunk(StreamChunk(type: "stderr", data: "forkpty failed: \(String(cString: strerror(errno)))"))
+        sendChunk(StreamChunk(type: "exit", exitCode: -1))
+        return
+    }
+
+    if pid == 0 {
+        // Child. Nothing here may allocate or take a lock — exec immediately.
+        if let term = request.term { setenv("TERM", term, 1) }
+        let argv: [UnsafeMutablePointer<CChar>?] = [
+            strdup("sh"), strdup("-c"), strdup(fullCommand), nil
+        ]
+        execv("/bin/sh", argv)
+        _exit(127)
+    }
+
+    // Parent. Two pumps and a wait: the pty to the client, the client to the
+    // pty, and waitpid for the verdict.
+    let done = NSLock()
+    var finished = false
+    func isFinished() -> Bool { done.lock(); defer { done.unlock() }; return finished }
+
+    // Client → pty: keystrokes, and the window size when it changes. Polled
+    // rather than blocked on, so this thread notices the command exiting
+    // instead of sitting in a read that will never return.
+    let inputThread = Thread {
+        let decoder = JSONDecoder()
+        while !isFinished() {
+            var pfd = pollfd(fd: clientFd, events: Int16(POLLIN), revents: 0)
+            guard poll(&pfd, 1, 200) > 0, pfd.revents & Int16(POLLIN) != 0 else { continue }
+
+            guard let line = readLine(from: clientFd) else {
+                // The client hung up mid-session. Take the whole foreground
+                // process group with it: forkpty made the child a session
+                // leader, so its pid is the group.
+                print("phantom-agent: client hung up — stopping interactive \(pid)")
+                kill(-pid, SIGHUP)
+                DispatchQueue.global().asyncAfter(deadline: .now() + hangUpGracePeriod) {
+                    kill(-pid, SIGKILL)
+                }
+                return
+            }
+            guard let frame = try? decoder.decode(InputFrame.self, from: line) else { continue }
+
+            switch frame.type {
+            case "stdin":
+                if let encoded = frame.data, let bytes = Data(base64Encoded: encoded) {
+                    bytes.withUnsafeBytes { ptr in
+                        _ = write(master, ptr.baseAddress!, ptr.count)
+                    }
+                }
+            case "resize":
+                var updated = winsize(
+                    ws_row: frame.rows ?? size.ws_row,
+                    ws_col: frame.cols ?? size.ws_col,
+                    ws_xpixel: 0,
+                    ws_ypixel: 0
+                )
+                _ = ioctl(master, TIOCSWINSZ, &updated)
+                // The program is told the same way a terminal emulator tells it.
+                kill(-pid, SIGWINCH)
+            default:
+                break
+            }
+        }
+    }
+    inputThread.start()
+
+    // pty → client, until the child closes it.
+    var buffer = [UInt8](repeating: 0, count: 8192)
+    while true {
+        let n = read(master, &buffer, buffer.count)
+        if n <= 0 { break }
+        let data = Data(buffer[0..<n])
+        sendChunk(StreamChunk(type: "stdout", data: data.base64EncodedString(), encoding: "base64"))
+    }
+
+    var status: Int32 = 0
+    waitpid(pid, &status, 0)
+    done.lock(); finished = true; done.unlock()
+    close(master)
+
+    // A shell killed by a signal has no exit status of its own; report it the
+    // way a shell does, so the caller sees 130 for Ctrl-C rather than 0.
+    let exitCode: Int32 = (status & 0x7F) != 0 ? 128 + (status & 0x7F) : (status >> 8) & 0xFF
+    sendChunk(StreamChunk(type: "exit", exitCode: exitCode))
+}
+
 // MARK: - Socket Helpers
 
 func readLine(from fd: Int32) -> Data? {
@@ -311,7 +475,9 @@ func serveClient(_ clientFd: Int32) {
             let request = try decoder.decode(ExecRequest.self, from: lineData)
             print("phantom-agent: executing '\(request.command)' (stream: \(request.stream ?? false))")
 
-            if request.stream == true {
+            if request.tty == true {
+                executeInteractive(request, clientFd: clientFd)
+            } else if request.stream == true {
                 executeCommandStreaming(request, clientFd: clientFd)
             } else {
                 let response = executeCommand(request, clientFd: clientFd)

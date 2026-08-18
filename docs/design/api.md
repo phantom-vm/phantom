@@ -178,12 +178,19 @@ Or on error:
 - **CLI**: `phantom vm exec <vm-id> [--user <name>] -- <command>`
 
 ### vm.execStream
-- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `user` (string, optional), `waitForAgent` (bool, optional)
+- **Params**: `vmId` (string), `command` (string), `args` (string[], optional), `user` (string, optional), `waitForAgent` (bool, optional), `tty` (bool, optional), `rows`/`cols` (int, optional), `term` (string, optional)
 - **Purpose**: Execute command with streaming output. Connection stays open, sending chunks as they arrive.
 - **Protocol**: Newline-delimited JSON chunks:
   - `{"type":"stdout","data":"..."}`
   - `{"type":"stderr","data":"..."}`
   - `{"type":"done","exitCode":0}` (final chunk, connection closes)
+- **Interactive (`tty: true`)**: the guest agent runs the command under a pseudo-terminal (`forkpty`), so `isatty()` is true and a shell, an editor or an agent behaves as it would in a terminal. Then the connection carries traffic **both ways** — what the client sends after the request is the person typing:
+  - `{"type":"stdin","data":"<base64>"}` — keystrokes, written to the pty
+  - `{"type":"resize","rows":40,"cols":120}` — `ioctl(TIOCSWINSZ)` plus a `SIGWINCH` to the foreground group
+- **Under a tty, output is base64**: chunks carry `"encoding":"base64"`, because a terminal's output is bytes — escape sequences, and UTF-8 that can split across reads, which a JSON string would silently drop. A pty has one stream, so stderr arrives interleaved into `stdout`; that is what a terminal is.
+- **`term`** is passed into the child's environment. A pty with no `TERM` is a terminal nothing knows how to draw on.
+- **Signals**: Ctrl-C is not a frame — it is a byte, and the pty's line discipline turns it into SIGINT for the foreground process group, exactly as on a real terminal. The exit code then reports `128 + signal` (130 for SIGINT). One caveat: through `user` (which wraps in `su - <user> -c`), `su` reports its own status, so a signalled command reads as 0 rather than 130.
+- **Hanging up** still kills the command: end of stream from the client closes the vsock connection, and the agent takes that as its cue to `SIGHUP` the whole process group.
 
 ### vm.display
 - **Params**: `vmId` (string)

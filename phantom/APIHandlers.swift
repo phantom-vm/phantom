@@ -4,7 +4,11 @@ import Foundation
 struct APIHandlers {
     let vmManager: VMManager
 
-    func handleStream(_ request: APIRequest, sendChunk: @escaping (Data) -> Void) async {
+    func handleStream(
+        _ request: APIRequest,
+        input: VMManager.ExecInput? = nil,
+        sendChunk: @escaping (Data) -> Void
+    ) async {
         guard let vmId = request.params?["vmId"]?.value as? String else {
             let error = try? JSONEncoder().encode(StreamDoneChunk(type: "done", exitCode: -1, error: "Missing vmId"))
             if let error { sendChunk(error) }
@@ -22,13 +26,25 @@ struct APIHandlers {
             user: user
         )
         let waitForAgent = (request.params?["waitForAgent"]?.value as? Bool) ?? false
+        // A caller with a terminal asks for one: the command then runs under a
+        // pty in the guest, and this connection carries keystrokes down it for
+        // as long as the command lives.
+        let tty = (request.params?["tty"]?.value as? Bool) ?? false
+        let rows = (request.params?["rows"]?.value as? Int).map(UInt16.init)
+        let cols = (request.params?["cols"]?.value as? Int).map(UInt16.init)
+        let term = request.params?["term"]?.value as? String
 
         do {
             let exitCode = try await vmManager.executeCommandStreaming(
                 wrappedCommand,
                 args: args,
                 vmId: vmId,
-                waitForAgent: waitForAgent
+                waitForAgent: waitForAgent,
+                tty: tty,
+                rows: rows,
+                cols: cols,
+                term: term,
+                input: input
             ) { chunk in
                 if let data = try? JSONEncoder().encode(chunk) {
                     sendChunk(data)

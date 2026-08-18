@@ -1,4 +1,4 @@
-import { sendRequest, type VM } from "../lib/api";
+import { sendRequest, sendStreamingRequest, type VM } from "../lib/api";
 import { waitForVMRunning } from "../lib/wait";
 import { usageError, type Command } from "../command";
 
@@ -190,8 +190,101 @@ export async function vmStop(vmId: string) {
   console.log(`VM ${vmId} stopped`);
 }
 
+/// An interactive session: the command runs under a pty in the guest, this
+/// terminal goes raw, and the two are wired together until it exits.
+///
+/// Raw mode is what makes it a terminal rather than a chat: no line editing on
+/// this side, no echo, and Ctrl-C reaching the guest's foreground process group
+/// instead of killing the CLI. Which means the restore matters — every exit
+/// path puts the terminal back, or the shell you return to is unusable.
+async function execInteractive(vmId: string, command: string, user?: string) {
+  const stdin = process.stdin;
+  const wasRaw = stdin.isRaw;
+  const restore = () => {
+    if (stdin.isTTY && stdin.isRaw !== wasRaw) stdin.setRawMode(wasRaw);
+    stdin.pause();
+  };
+
+  if (!stdin.isTTY || !process.stdout.isTTY) {
+    console.error("Error: -it needs a terminal on both ends");
+    console.error("Without one, run the command as usual — its output still streams.");
+    process.exit(1);
+  }
+
+  // An image whose agent predates interactive exec ignores the tty flag and
+  // runs the command the old way — which looks like a terminal that does not
+  // work rather than a feature that is missing. One probe, behaviour rather
+  // than version numbers, so the answer is right whatever the agent reports.
+  const probe = await sendStreamingRequest(
+    {
+      method: "vm.execStream",
+      params: { vmId, command: "test -t 0", tty: true, rows: 24, cols: 80, waitForAgent: true },
+    },
+    () => {},
+    { timeoutMs: 120_000 }
+  );
+  if (probe.exitCode !== 0) {
+    console.error("Error: this VM's guest agent does not support interactive exec");
+    console.error("Its image was built before the agent could allocate a terminal.");
+    console.error("Rebuild the image, or reach the VM with 'phantom vm vnc' meanwhile.");
+    process.exit(1);
+  }
+
+  const params: Record<string, unknown> = {
+    vmId,
+    command,
+    tty: true,
+    rows: process.stdout.rows,
+    cols: process.stdout.columns,
+    term: process.env.TERM ?? "xterm-256color",
+    waitForAgent: true,
+  };
+  if (user) params.user = user;
+
+  try {
+    const { exitCode } = await sendStreamingRequest(
+      { method: "vm.execStream", params },
+      (chunk) => {
+        if (!chunk.data) return;
+        // A pty's output is bytes: escape sequences, and UTF-8 that can split
+        // across reads. Straight through, no line handling.
+        process.stdout.write(
+          chunk.encoding === "base64" ? Buffer.from(chunk.data, "base64") : chunk.data
+        );
+      },
+      {
+        // No timeout: a session lasts as long as someone is using it.
+        timeoutMs: 24 * 3600_000,
+        onOpen: (send) => {
+          stdin.setRawMode(true);
+          stdin.resume();
+
+          const onData = (data: Buffer) =>
+            send({ type: "stdin", data: data.toString("base64") });
+          const onResize = () =>
+            send({ type: "resize", rows: process.stdout.rows, cols: process.stdout.columns });
+
+          stdin.on("data", onData);
+          process.on("SIGWINCH", onResize);
+
+          return () => {
+            stdin.off("data", onData);
+            process.off("SIGWINCH", onResize);
+            restore();
+          };
+        },
+      }
+    );
+    restore();
+    process.exit(exitCode);
+  } catch (err) {
+    restore();
+    throw err;
+  }
+}
+
 export async function vmExec(...args: string[]) {
-  // Parse: <vm-id> [--user <name>] -- <command> [args...]
+  // Parse: <vm-id> [--user <name>] [-it] -- <command> [args...]
   const dashDashIndex = args.indexOf("--");
   if (dashDashIndex === -1 || dashDashIndex === 0) {
     console.error("Error: a -- separator followed by the command is required");
@@ -202,10 +295,13 @@ export async function vmExec(...args: string[]) {
 
   const vmId = args[0]!; // guaranteed present since dashDashIndex >= 1
   let user: string | undefined;
+  let interactive = false;
   for (let i = 1; i < dashDashIndex; i++) {
     if (args[i] === "--user" && i + 1 < dashDashIndex) {
       user = args[i + 1];
       i++;
+    } else if (["-it", "-ti", "-i", "-t", "--tty"].includes(args[i]!)) {
+      interactive = true;
     }
   }
   const command = args.slice(dashDashIndex + 1).join(" ");
@@ -213,6 +309,11 @@ export async function vmExec(...args: string[]) {
   if (!command) {
     console.error("Error: command required after --");
     process.exit(1);
+  }
+
+  if (interactive) {
+    await execInteractive(vmId, command, user);
+    return;
   }
 
   const params: { vmId: string; command: string; user?: string } = { vmId, command };
@@ -441,9 +542,12 @@ export const commands: Record<string, Command> = {
   start: { usage: "<id>", description: "Start a VM", handler: vmStart as Command["handler"] },
   stop: { usage: "<id>", description: "Stop a VM", handler: vmStop as Command["handler"] },
   exec: {
-    usage: "<id> [--user <name>] -- <cmd> [args...]",
+    usage: "<id> [-it] [--user <name>] -- <cmd> [args...]",
     description: "Run a command inside a VM over vsock",
     details: [
+      "-it            Interactive: the command runs under a pty in the guest and",
+      "               this terminal is wired to it, so a shell, an editor or an",
+      "               agent works. Needs a terminal on both ends.",
       "--user <name>  Run as this user instead of admin, through a login shell.",
       "               'root' is the privileged case; it has launchd's PATH, which",
       "               excludes /usr/local/bin and the mise shims, so a binary",

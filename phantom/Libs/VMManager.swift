@@ -621,12 +621,76 @@ class VMManager {
         let command: String
         let args: [String]?
         let stream: Bool?
+        /// Run it under a pty in the guest, for a caller that is a terminal.
+        let tty: Bool?
+        let rows: UInt16?
+        let cols: UInt16?
+        let term: String?
+
+        init(command: String, args: [String]?, stream: Bool?, tty: Bool? = nil, rows: UInt16? = nil, cols: UInt16? = nil, term: String? = nil) {
+            self.command = command
+            self.args = args
+            self.stream = stream
+            self.tty = tty
+            self.rows = rows
+            self.cols = cols
+            self.term = term
+        }
     }
 
     nonisolated struct StreamChunk: Codable, Sendable {
         let type: String  // "stdout", "stderr", "exit"
         let data: String?
         let exitCode: Int32?
+        /// "base64" when `data` is bytes rather than text — everything a pty
+        /// produces, since a terminal's output is not guaranteed to be either
+        /// valid UTF-8 at a read boundary or printable.
+        let encoding: String?
+
+        init(type: String, data: String? = nil, exitCode: Int32? = nil, encoding: String? = nil) {
+            self.type = type
+            self.data = data
+            self.exitCode = exitCode
+            self.encoding = encoding
+        }
+    }
+
+    /// Keystrokes and window sizes on their way *to* a running command.
+    ///
+    /// The daemon is a relay here: frames arrive from the API client and are
+    /// written, unread, down the vsock connection the command is running on.
+    /// Buffered until that connection exists, because a caller that starts
+    /// typing before the agent answers is not doing anything wrong.
+    nonisolated final class ExecInput: @unchecked Sendable {
+        private let lock = NSLock()
+        private var sink: ((Data) -> Void)?
+        private var pending: [Data] = []
+
+        func send(_ line: Data) {
+            lock.lock()
+            if let sink {
+                lock.unlock()
+                sink(line)
+            } else {
+                pending.append(line)
+                lock.unlock()
+            }
+        }
+
+        func attach(_ sink: @escaping (Data) -> Void) {
+            lock.lock()
+            let queued = pending
+            pending = []
+            self.sink = sink
+            lock.unlock()
+            queued.forEach(sink)
+        }
+
+        func detach() {
+            lock.lock()
+            sink = nil
+            lock.unlock()
+        }
     }
 
     nonisolated struct ExecResponse: Codable, Sendable {
@@ -707,6 +771,11 @@ class VMManager {
         args: [String]? = nil,
         vmId: String,
         waitForAgent: Bool = false,
+        tty: Bool = false,
+        rows: UInt16? = nil,
+        cols: UInt16? = nil,
+        term: String? = nil,
+        input: ExecInput? = nil,
         onChunk: @escaping (StreamChunk) -> Void
     ) async throws -> Int32 {
         guard let instance = vmInstances[vmId],
@@ -730,11 +799,23 @@ class VMManager {
                 let connection = try await socketDevice.connect(toPort: 9001)
                 let fd = connection.fileDescriptor
 
-                let request = ExecRequest(command: command, args: args, stream: true)
+                let request = ExecRequest(
+                    command: command, args: args, stream: true,
+                    tty: tty ? true : nil, rows: rows, cols: cols, term: term
+                )
                 var requestData = try JSONEncoder().encode(request)
                 requestData.append(0x0A)
 
                 Self.writeAll(requestData, to: fd)
+
+                // From here the connection carries traffic both ways: chunks up
+                // from the guest, keystrokes down to it.
+                input?.attach { line in
+                    var payload = line
+                    payload.append(0x0A)
+                    Self.writeAll(payload, to: fd)
+                }
+                defer { input?.detach() }
 
                 // Read streaming chunks until we get an "exit" chunk.
                 //

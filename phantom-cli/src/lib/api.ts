@@ -32,6 +32,9 @@ export interface StreamChunk {
   data?: string;
   exitCode?: number;
   error?: string;
+  /// "base64" when `data` is bytes rather than text — everything that comes
+  /// back from a pty.
+  encoding?: string;
 }
 
 // MARK: - TCP Client
@@ -59,12 +62,20 @@ function requestWriter(request: APIRequest) {
 export async function sendStreamingRequest(
   request: APIRequest,
   onChunk: (chunk: StreamChunk) => void,
-  options?: { timeoutMs?: number }
+  options?: {
+    timeoutMs?: number;
+    /// Called once the connection is up, with a way to keep writing to it —
+    /// how an interactive session sends keystrokes and window sizes to a
+    /// command that is already running. Whatever it returns is run when the
+    /// stream ends, for putting the terminal back.
+    onOpen?: (write: (frame: unknown) => void) => (() => void) | void;
+  }
 ): Promise<{ exitCode: number }> {
   const timeoutMs = options?.timeoutMs ?? 3600_000; // 1 hour default for streaming
   let buffer = "";
   let resolver: ((value: { exitCode: number }) => void) | null = null;
   let rejector: ((error: Error) => void) | null = null;
+  let teardown: (() => void) | void;
 
   const promise = new Promise<{ exitCode: number }>((resolve, reject) => {
     resolver = resolve;
@@ -75,7 +86,37 @@ export async function sendStreamingRequest(
     if (rejector) rejector(new Error("Streaming request timed out"));
   }, timeoutMs);
 
-  const writeRequest = requestWriter(request);
+  // One queue for everything this side sends: the request, then any frames an
+  // interactive session adds. `socket.write` reports how many bytes it took,
+  // not how many it was given, so what is left waits for the drain.
+  const queue: Uint8Array[] = [new TextEncoder().encode(JSON.stringify(request) + "\n")];
+  let offset = 0;
+  let socketRef: { write(data: Uint8Array): number } | null = null;
+
+  const flush = () => {
+    if (!socketRef) return;
+    while (queue.length) {
+      const head = queue[0]!;
+      const n = socketRef.write(head.subarray(offset));
+      if (n <= 0) return;
+      offset += n;
+      if (offset >= head.length) {
+        queue.shift();
+        offset = 0;
+      }
+    }
+  };
+
+  const send = (frame: unknown) => {
+    queue.push(new TextEncoder().encode(JSON.stringify(frame) + "\n"));
+    flush();
+  };
+
+  const finish = (exitCode: number) => {
+    clearTimeout(timer);
+    if (teardown) teardown();
+    if (resolver) resolver({ exitCode });
+  };
 
   await Bun.connect({
     hostname: "localhost",
@@ -93,8 +134,7 @@ export async function sendStreamingRequest(
           try {
             const chunk: StreamChunk = JSON.parse(line);
             if (chunk.type === "done") {
-              clearTimeout(timer);
-              if (resolver) resolver({ exitCode: chunk.exitCode ?? -1 });
+              finish(chunk.exitCode ?? -1);
               _socket.end();
               return;
             }
@@ -106,13 +146,23 @@ export async function sendStreamingRequest(
       },
       error(_socket, error) {
         clearTimeout(timer);
+        if (teardown) teardown();
         if (rejector) rejector(error);
       },
+      close() {
+        // The daemon closing without a done chunk is still the end of the
+        // session — a terminal left in raw mode would be worse than a wrong
+        // exit code.
+        if (teardown) teardown();
+      },
       drain(_socket) {
-        writeRequest(_socket);
+        socketRef = _socket;
+        flush();
       },
       open(_socket) {
-        writeRequest(_socket);
+        socketRef = _socket;
+        flush();
+        teardown = options?.onOpen?.(send);
       },
     },
   });

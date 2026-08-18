@@ -111,6 +111,21 @@ To get a dev build into a VM:
   phantom image build-base my-base --agent-url http://192.168.64.1:8642/phantom-agent-install.sh
   ```
 
+## Interactive commands
+
+`stream: true` with `tty: true` runs the command under a pseudo-terminal —
+`forkpty`, so the child is a session leader with the pty as its *controlling*
+terminal, which is what makes Ctrl-C reach the foreground process group through
+the line discipline rather than needing a signal of its own. The client then
+sends `{"type":"stdin","data":"<base64>"}` and `{"type":"resize","rows":…,"cols":…}`
+frames on the same connection for as long as the command runs, and output comes
+back base64-encoded (a terminal emits bytes, not text). `term` is set in the
+child's environment before exec.
+
+`forkpty` rather than `Process`: there is no hook between fork and exec in
+Foundation to call `setsid`/`TIOCSCTTY`, and without a controlling terminal the
+pty is only half of one.
+
 ## Management
 
 **Restart:**

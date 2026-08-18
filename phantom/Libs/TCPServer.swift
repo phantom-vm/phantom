@@ -173,11 +173,14 @@ class TCPServer {
             return
         }
 
-        // Streaming methods keep the connection open
+        // Streaming methods keep the connection open — and, for an interactive
+        // one, keep listening: what the client sends after the request is the
+        // person typing, which is relayed to the guest rather than ignored.
         if request.method == "vm.execStream" {
             let handlers = APIHandlers(vmManager: vmManager)
-            await withHangUpCancellation(on: connection) {
-                await handlers.handleStream(request) { chunk in
+            let input = VMManager.ExecInput()
+            await withInputRelay(on: connection, into: input) {
+                await handlers.handleStream(request, input: input) { chunk in
                     self.sendChunk(chunk, to: connection)
                 }
             }
@@ -190,6 +193,46 @@ class TCPServer {
             await handlers.handle(request)
         }
         sendResponse(responseData, to: connection)
+    }
+
+    /// Run `work` while forwarding whatever the client sends into `input`, and
+    /// cancelling it if the client hangs up.
+    ///
+    /// The plain streaming case sends nothing after its request, which is why
+    /// this used to be a single receive that only watched for the hang-up. An
+    /// interactive one sends a frame per keystroke, so the receive re-arms and
+    /// the lines go to the guest; end-of-stream still means the caller is gone,
+    /// and the command it left running is stopped.
+    private func withInputRelay<T: Sendable>(
+        on connection: NWConnection,
+        into input: VMManager.ExecInput,
+        _ work: @escaping @Sendable () async -> T
+    ) async -> T {
+        let task = Task { await work() }
+
+        @Sendable func receiveMore(buffered: Data) {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
+                if isComplete || error != nil {
+                    task.cancel()
+                    return
+                }
+                var buffer = buffered
+                if let data { buffer.append(data) }
+
+                // Frames are newline-delimited, like everything else on this
+                // socket; a keystroke can arrive split across two reads.
+                while let newline = buffer.firstIndex(of: 0x0A) {
+                    let line = Data(buffer[buffer.startIndex..<newline])
+                    buffer = Data(buffer[buffer.index(after: newline)...])
+                    if !line.isEmpty { input.send(line) }
+                }
+                if task.isCancelled { return }
+                receiveMore(buffered: buffer)
+            }
+        }
+        receiveMore(buffered: Data())
+
+        return await task.value
     }
 
     /// Run `work`, cancelling it if the client hangs up first.
