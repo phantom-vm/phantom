@@ -45,7 +45,11 @@ echo "Installing mise $MISE_VERSION as $USER_NAME..."
 # would: this script runs as root, and mise keeps its tools under the invoking
 # user's home. Installed by root they would live in /var/root (mode 0700) —
 # invisible to the admin user CI jobs actually run as.
-su - "$USER_NAME" -c "MISE_VERSION='$MISE_VERSION' curl -fsSL https://mise.run | sh"
+# The version goes to the *installer*, not to curl: it is the script on the
+# right of the pipe that reads MISE_VERSION, and putting the assignment on the
+# left set it for the download instead — which is how a pinned build quietly
+# installed whatever was newest.
+su - "$USER_NAME" -c "curl -fsSL https://mise.run | MISE_VERSION='$MISE_VERSION' sh"
 
 # Two shell files, because the two ways into this guest read different ones:
 #
