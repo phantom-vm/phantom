@@ -29,18 +29,23 @@ export interface GuestRun {
   /// script body lands them on the last line instead of on the script.
   env?: Record<string, string>;
   timeoutMs: number;
+  /// Who runs it. Left out, the daemon's default (admin) applies — the user a
+  /// CI job runs as, and so the environment a build step should be written
+  /// against. Provisioning passes "root", since it is what gives admin the
+  /// passwordless sudo everything else leans on.
+  user?: string;
   /// Names the step in an error, so a failed build says which one failed.
   label: string;
 }
 
 /// Runs one thing in the guest over vsock, echoing its output as it comes back.
-export async function runInGuest({ vmId, body, env, timeoutMs, label }: GuestRun) {
+export async function runInGuest({ vmId, body, env, timeoutMs, user, label }: GuestRun) {
   const assignments = Object.entries(env ?? {})
     .map(([key, value]) => `${key}=${quote(value)}`)
     .join("\n");
   const command = assignments ? `${assignments}\n${body}` : body;
 
-  const res = await call("vm.exec", { vmId, command, waitForAgent: true }, timeoutMs);
+  const res = await call("vm.exec", { vmId, command, waitForAgent: true, ...(user && { user }) }, timeoutMs);
   const log = (res.stdout as string) ?? "";
   for (const line of log.split("\n").filter((l) => l.trim())) console.log(`    ${line}`);
 

@@ -19,22 +19,26 @@
 # same build. Keep it roughly in step when bumping the host pin.
 set -e
 
+# Runs as admin (what a CI job is) or as root, and does the same thing either
+# way. admin's sudo is passwordless, arranged by provision.sh.
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+
 VERSION="${1:-${RUNNER_VERSION:-v18.11.2}}"
 DEST=/usr/local/bin/gitlab-runner
 URL="https://gitlab-runner-downloads.s3.amazonaws.com/$VERSION/binaries/gitlab-runner-darwin-arm64"
 
 echo "Downloading gitlab-runner $VERSION..."
-mkdir -p /usr/local/bin
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
 # A guest that has only just booted may not have finished DHCP, so the first
 # connect can fail outright; --retry-connrefused waits that out.
 curl -fL --retry 10 --retry-delay 5 --retry-connrefused --retry-all-errors \
-  --connect-timeout 10 -o "$DEST.tmp" "$URL"
+  --connect-timeout 10 -o "$TMP/gitlab-runner" "$URL"
 
-chmod 755 "$DEST.tmp"
-chown root:wheel "$DEST.tmp"
-# Rename last, so an interrupted download never leaves a half-written binary on
-# PATH for a job to trip over.
-mv "$DEST.tmp" "$DEST"
+# Downloaded somewhere unprivileged and installed in one step, so an interrupted
+# download never leaves a half-written binary on PATH for a job to trip over.
+$SUDO mkdir -p /usr/local/bin
+$SUDO install -m 755 -o root -g wheel "$TMP/gitlab-runner" "$DEST"
 
 "$DEST" --version
 echo "GITLAB_RUNNER_INSTALL_DONE"

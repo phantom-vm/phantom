@@ -161,7 +161,7 @@ it to finish booting with no job to serve.
 
 ## Job Execution User
 
-Job scripts run inside the VM as the `admin` user — macOS CI tooling (Homebrew, xcodebuild, simulators) misbehaves as root. Set a `PHANTOM_EXEC_USER` CI variable to override (`root` runs the script unwrapped as the agent's root user).
+Job scripts run inside the VM as the `admin` user — macOS CI tooling (Homebrew, xcodebuild, simulators) misbehaves as root, and root's PATH (launchd's) has neither `/usr/local/bin` nor the mise shims. That is also the daemon's default for any `vm.exec`, so `phantom vm exec <id> -- <cmd>` shows what a job sees. Set a `PHANTOM_EXEC_USER` CI variable to override (`root` runs the script as the agent's root user).
 
 ## How CI Variables Are Passed
 

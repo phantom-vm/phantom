@@ -14,11 +14,10 @@ steps:
   # macOS ships no JavaScript runtime. Baking one in means a step — or a CI job
   # — can be TypeScript instead of shell, without 90MB of download first.
   #
-  # Through mise, which tahoe-base carries, and as admin, because that is who
-  # mise is installed for and who CI jobs run as. Steps otherwise run as root,
-  # whose home is 0700 — tools installed there would be invisible to a job.
+  # Through mise, which tahoe-base carries. Steps run as admin — the user mise
+  # is installed for, and the user a CI job is.
   - name: bun
-    run: su - admin -c 'mise use --global bun@1.3.14'
+    run: mise use --global bun@1.3.14
     timeout: 10m
 
   # Then the runner, because it is a 60MB download that fails in seconds —
@@ -58,15 +57,13 @@ steps:
   # The installer takes whatever XCODE_SRC points at, so it cannot know which
   # Xcode this image claims to be — that check belongs here, where the claim is
   # made. grep exits non-zero on a mismatch, which fails the build.
-  # Every check runs as admin, because that is the environment a CI job gets:
-  # a step otherwise runs as root under `/bin/sh -c`, whose PATH comes from
-  # launchd and does not include /usr/local/bin — so a tool this image is
-  # supposed to provide can be missing for jobs and still answer here.
+  # Checks run where the claim matters: as admin, which every step is, and
+  # which is the environment a CI job gets.
   - name: verify
     run: |
-      su - admin -c 'xcodebuild -version' | grep -q 'Xcode 26.6'
-      su - admin -c 'xcrun simctl list runtimes' | grep -q iOS
-      su - admin -c 'gitlab-runner --version' | grep -q 18.11.2
-      su - admin -c 'bun --version' | grep -q 1.3.14
-      su - admin -c 'mise --version'
+      xcodebuild -version | grep -q 'Xcode 26.6'
+      xcrun simctl list runtimes | grep -q iOS
+      gitlab-runner --version | grep -q 18.11.2
+      bun --version | grep -q 1.3.14
+      mise --version
     timeout: 5m

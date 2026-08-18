@@ -337,12 +337,27 @@ struct APIHandlers {
         ])
     }
 
-    /// The guest agent runs as root. When a `user` is requested, wrap the
-    /// command in `su - <user> -c '…'` so it runs (with that user's login
-    /// environment) as them instead. Done host-side so no agent change is
-    /// needed. Any `args` are folded into the command string.
+    /// The guest agent runs as root, so every command would too — and root is
+    /// not the environment anything in these VMs is actually used in. Its PATH
+    /// comes from launchd (`/usr/bin:/bin:/usr/sbin:/sbin`), without
+    /// `/usr/local/bin`, the admin user's `~/.local/bin`, or the mise shims, so
+    /// tools an image was built to provide are invisible to it while working
+    /// perfectly for the CI jobs that run as `admin`. A `vm.exec` that shows
+    /// something other than what a job sees is worse than useless when
+    /// something looks wrong, which is exactly when it gets reached for.
+    ///
+    /// So **admin is the default**, and the command is wrapped in
+    /// `su - <user> -c '…'` to get that user's login environment. Root is asked
+    /// for by name (`user: "root"`), which is what provisioning does — it is
+    /// what creates admin's passwordless sudo, so it cannot rely on it.
+    ///
+    /// Done host-side so no agent change is needed. Any `args` are folded into
+    /// the command string.
+    static let defaultExecUser = "admin"
+
     private func applyUser(command: String, args: [String]?, user: String?) -> (command: String, args: [String]?) {
-        guard let user, !user.isEmpty else { return (command, args) }
+        let user = (user?.isEmpty == false ? user! : Self.defaultExecUser)
+        guard user != "root" else { return (command, args) }
         func shQuote(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
         var full = command
         if let args, !args.isEmpty {

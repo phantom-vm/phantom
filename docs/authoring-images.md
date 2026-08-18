@@ -125,8 +125,10 @@ phantom image build -f recipes/xcode-26-6.yaml --dry-run
 prints the resolved plan (which script, which env, which file served, how long
 each step may take) and talks to no daemon at all.
 
-Each step is one `vm.exec` over vsock, run as root in the guest, with its output
-echoed as it arrives. A step that exits non-zero stops the build naming itself,
+Each step is one `vm.exec` over vsock, run **as admin** — the user CI jobs run
+as, so a step is written against the environment the image will be used in — with
+its output echoed as it arrives. A script that needs privilege sudoes the lines
+that need it; admin's sudo is passwordless. A step that exits non-zero stops the build naming itself,
 and the intermediate VM is left behind for inspection. That exit code is the
 whole verdict — there is no "must print this" key, because a step that wants to
 assert more is a step that greps for it, and the scripts already run under

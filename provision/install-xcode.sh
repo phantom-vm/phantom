@@ -18,6 +18,12 @@
 # first launch and the runtime downloads get that space back.
 set -e
 
+# Runs as admin (what a CI job is) or as root, and does the same thing either
+# way: the privileged lines say so, rather than the whole script assuming a
+# privilege it mostly does not need. admin's sudo is passwordless, arranged by
+# provision.sh.
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+
 SRC="${1:-$XCODE_SRC}"
 [ -n "$SRC" ] || { echo "usage: XCODE_SRC=<url-or-path> sh install-xcode.sh"; exit 1; }
 
@@ -61,25 +67,27 @@ EXPANDED=$(find "$WORK" -maxdepth 1 -name "Xcode*.app" | head -1)
 case "$SRC" in http://*|https://*) rm -f "$XIP" ;; esac
 
 echo "Installing to $APP..."
-rm -rf "$APP"
+$SUDO rm -rf "$APP"
 # Same volume as /tmp, so this is a rename rather than a 35GB copy.
-mv "$EXPANDED" "$APP"
-chown -R root:wheel "$APP"
+$SUDO mv "$EXPANDED" "$APP"
+$SUDO chown -R root:wheel "$APP"
 rm -rf "$WORK"
 
 echo "Selecting toolchain..."
-xcode-select -s "$APP/Contents/Developer"
+$SUDO xcode-select -s "$APP/Contents/Developer"
 
 echo "Accepting license..."
-xcodebuild -license accept
+$SUDO xcodebuild -license accept
 
 echo "Running first launch (installs bundled packages)..."
-xcodebuild -runFirstLaunch
+$SUDO xcodebuild -runFirstLaunch
 
 # Lets the admin account build and debug without an authorization prompt —
 # there is nobody to click it in a headless CI VM.
-DevToolsSecurity -enable 2>/dev/null || true
+$SUDO DevToolsSecurity -enable 2>/dev/null || true
 
+# Not sudo: the runtimes belong to the user that will run the simulators, and
+# CoreSimulator seeds its device set per user.
 echo "Downloading simulator runtimes for every platform..."
 xcodebuild -downloadAllPlatforms
 

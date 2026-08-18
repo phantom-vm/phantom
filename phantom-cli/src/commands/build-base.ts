@@ -144,6 +144,9 @@ async function run(opts: BaseOptions) {
     vmId,
     body: provisionBody,
     timeoutMs: 1_800_000,
+    // The one step that is root by name: it writes the sudoers file admin's
+    // passwordless sudo comes from, so it cannot be the thing that uses it.
+    user: "root",
     label: "provision script",
   });
   console.log(`    provisioned`);

@@ -131,7 +131,7 @@ description: macOS 26 + Xcode 26.6 (17F113) + all simulator runtimes
 from: tahoe-base
 steps:
   - name: bun
-    run: su - admin -c 'mise use --global bun@1.3.14'
+    run: mise use --global bun@1.3.14
     timeout: 10m
   - name: gitlab-runner
     script: ../provision/install-gitlab-runner.sh
@@ -151,6 +151,8 @@ A step does exactly one thing, four keys wide:
 - **`env`** — prepended to the body as `KEY='value'` lines rather than passed as arguments, because `vm.exec` appends its args to the command string, which for a multi-line script body would land them on the last line instead of on the script. This is how `XCODE_SRC` and `RUNNER_VERSION` have always reached their scripts.
 - **`serve`** — a local file the guest cannot otherwise reach, served over an ephemeral HTTP server bound to the host side of the vmnet NAT bridge for the duration of the step. `${serve}` in `env` or `run` expands to its URL. A 10GB `.xip` never leaves the host disk and needs no shared folder. A `serve` nothing reads, or a `${serve}` with nothing served, is an error — either one means the guest would never be told the URL.
 - **`timeout`** (`90s`/`15m`/`4h`, default 30m) bounds a hung step.
+
+**A step runs as `admin`**, the user a CI job runs as and the one mise's tools belong to — not root. So a step is written against the environment the image will actually be used in, and a script that needs privilege sudoes the lines that need it (admin's sudo is passwordless, arranged by provisioning). The one exception is `image build-base`'s provision step, which asks for root by name: it is what writes that sudoers file.
 
 **A step's verdict is its exit code**, and there is no key for anything else. Every script here runs under `set -e`, so a failure lands as a non-zero status — the same thing provisioning has always been judged by. An assertion beyond "the script ran" is a step that makes it: `run: xcodebuild -version | grep -q 'Xcode 26.6'` fails the build on a mismatch. That distinction is worth keeping, because the two assertions belong in different places — a script asserts its own correctness, while *which Xcode this image claims to be* is the recipe's claim, and `install-xcode.sh` installs whatever `XCODE_SRC` points at without knowing.
 

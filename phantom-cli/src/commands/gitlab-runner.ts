@@ -78,7 +78,9 @@ function stateFilePath(jobId: string): string {
 
 /// Who the job's commands run as. Job scripts run as the admin user by default
 /// — macOS CI tooling (brew, xcodebuild, simulators) misbehaves as root.
-/// Override with a PHANTOM_EXEC_USER CI variable; "root" skips the user wrap
+/// Override with a PHANTOM_EXEC_USER CI variable; "root" is the unwrapped case.
+/// Same default the daemon applies to any vm.exec — jobs and hand-run commands
+/// see one environment, which is the point.
 /// entirely, since a bare exec is already root.
 function execUser(): string {
   return process.env.CUSTOM_ENV_PHANTOM_EXEC_USER ?? "admin";

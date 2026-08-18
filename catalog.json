@@ -3,12 +3,12 @@
   "images": [
     {
       "name": "tahoe-base",
-      "description": "macOS 26.5.2 (25F84) + Command Line Tools — the base for layering your own toolchain",
+      "description": "macOS 26.5.2 (25F84) + Command Line Tools + mise — the base for layering your own toolchain",
       "repository": "ghcr.io/phantom-vm/tahoe-base",
-      "digest": "sha256:89627c1c0a4c4f18b14fb7b41a3320afcd6e3443fbd20ff008a92dae96193b16",
-      "compressedSize": 25261184689,
+      "digest": "sha256:b063d5024302186c00143a726560ddf06e412cfe111e5dc49a577f76ba3f6f6e",
+      "compressedSize": 25591908849,
       "diskSize": 96636764160,
-      "published": "2026-07-31"
+      "published": "2026-08-18"
     },
     {
       "name": "xcode-26-6",

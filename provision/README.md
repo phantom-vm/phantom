@@ -104,10 +104,12 @@ phantom image build -f recipes/xcode-26-6-runner-bump.yaml --replace
 - **setup-tahoe.txt** — boot-script for macOS Tahoe (26.x) Setup Assistant.
   Screens are matched by on-screen text via OCR, so the script is resilient to
   layout shifts but tied to a macOS version's wording.
-- **provision.sh** — post-install system configuration, run inside the guest as
-  root through the agent: passwordless sudo, auto-login, no sleep, the command
+- **provision.sh** — post-install system configuration, the one script run as
+  **root** (it writes the sudoers file everything else's sudo depends on): passwordless sudo, auto-login, no sleep, the command
   line tools, and **mise**. Reads `MISE_VERSION`, defaulting to the pin in the
   script.
+  The two installers below run as **admin**, like every recipe step, and sudo
+  the lines that need privilege — so they work whichever way they are handed in.
 - **install-gitlab-runner.sh** — puts the pinned `gitlab-runner` binary on the
   guest's PATH. Reads `RUNNER_VERSION` (or `$1`), defaulting to the pin in the
   script. See [gitlab-runner in the guest](#gitlab-runner-in-the-guest).
