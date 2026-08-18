@@ -293,16 +293,29 @@ export async function vmExec(...args: string[]) {
     process.exit(1);
   }
 
-  const vmId = args[0]!; // guaranteed present since dashDashIndex >= 1
+  // Flags may come before or after the id: `exec -it <id> -- …` is what a hand
+  // types, having typed `docker exec -it` a thousand times, and the id being
+  // positional is no reason to make that an error. The first thing that is not
+  // a flag (or a flag's value) is the id.
+  let vmId: string | undefined;
   let user: string | undefined;
   let interactive = false;
-  for (let i = 1; i < dashDashIndex; i++) {
-    if (args[i] === "--user" && i + 1 < dashDashIndex) {
-      user = args[i + 1];
-      i++;
-    } else if (["-it", "-ti", "-i", "-t", "--tty"].includes(args[i]!)) {
+  for (let i = 0; i < dashDashIndex; i++) {
+    const arg = args[i]!;
+    if (arg === "--user" && i + 1 < dashDashIndex) {
+      user = args[++i];
+    } else if (["-it", "-ti", "-i", "-t", "--tty"].includes(arg)) {
       interactive = true;
+    } else if (!arg.startsWith("-") && !vmId) {
+      vmId = arg;
     }
+  }
+
+  if (!vmId) {
+    console.error("Error: a VM id is required");
+    console.error("");
+    usage("exec");
+    process.exit(1);
   }
   const command = args.slice(dashDashIndex + 1).join(" ");
 
